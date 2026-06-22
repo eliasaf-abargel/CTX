@@ -20,7 +20,7 @@ struct CTXApp: App {
         MenuBarExtra {
             MenuBarView(store: store)
         } label: {
-            Image(systemName: store.activeAWSProfile.isEmpty ? "cloud" : "cloud.fill")
+            Image(systemName: (store.activeAWSProfile.isEmpty && store.activeGCPProfile.isEmpty) ? "cloud" : "cloud.fill")
         }
         .menuBarExtraStyle(.window)
 

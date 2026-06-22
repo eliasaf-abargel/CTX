@@ -17,12 +17,22 @@ struct ContentView: View {
         }
         .sheet(item: $sheet) { sheet in
             switch sheet {
-            case .addProfile:
+            case .addAWSProfile:
                 AddAWSProfileView(store: store)
+            case .addGCPProfile:
+                AddGCPProfileView(store: store)
             case .editProfile(let profile):
-                AddAWSProfileView(store: store, mode: .edit(profile))
+                if profile.provider == .aws {
+                    AddAWSProfileView(store: store, mode: .edit(profile))
+                } else {
+                    AddGCPProfileView(store: store, mode: .edit(profile))
+                }
             case .duplicateProfile(let profile):
-                AddAWSProfileView(store: store, mode: .duplicate(profile))
+                if profile.provider == .aws {
+                    AddAWSProfileView(store: store, mode: .duplicate(profile))
+                } else {
+                    AddGCPProfileView(store: store, mode: .duplicate(profile))
+                }
             case .addFolder:
                 FolderEditorView(store: store)
             case .editFolder(let folder):
@@ -73,21 +83,46 @@ struct DetailPane: View {
         .toolbar {
             // Principal active profile indicator in the titlebar (uses native alignment)
             ToolbarItem(placement: .principal) {
-                if !store.activeAWSProfile.isEmpty {
-                    let activeProfile = store.profiles.first(where: { $0.name == store.activeAWSProfile })
-                    let isConnected = activeProfile?.status == .connected
-                    let isNeedsLogin = activeProfile?.status == .needsLogin
-                    
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(isConnected ? Color.green : (isNeedsLogin ? Color.orange : Color.gray))
-                            .frame(width: 6, height: 6)
-                        Text(store.activeAWSProfile)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    if !store.activeAWSProfile.isEmpty {
+                        let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile })
+                        let statusColor = activeAWS?.status.color ?? .gray
+                        
+                        HStack(spacing: 6) {
+                            Image(systemName: "cloud.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.accentColor)
+                            Circle()
+                                .fill(statusColor)
+                                .frame(width: 6, height: 6)
+                            Text("AWS: \(store.activeAWSProfile)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
+                    
+                    if !store.activeGCPProfile.isEmpty {
+                        let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile })
+                        let statusColor = activeGCP?.status.color ?? .gray
+                        
+                        HStack(spacing: 6) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.accentColor)
+                            Circle()
+                                .fill(statusColor)
+                                .frame(width: 6, height: 6)
+                            Text("GCP: \(store.activeGCPProfile)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
                 }
             }
 

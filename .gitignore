@@ -5,6 +5,9 @@ DerivedData/
 *.xcuserstate
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
+.codex/
+.idea/
+.swiftpm/
 
 .env
 .env.*

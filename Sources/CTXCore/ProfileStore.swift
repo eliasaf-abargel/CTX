@@ -7,6 +7,7 @@ public final class ProfileStore: ObservableObject {
     @Published public private(set) var profiles: [CloudProfile] = []
     @Published public var selectedProfileID: CloudProfile.ID?
     @Published public private(set) var activeAWSProfile: String
+    @Published public private(set) var activeGCPProfile: String
     @Published public private(set) var lastMessage = ""
     @Published public private(set) var lastLoginAt: Date?
     @Published public private(set) var lastVerifiedAt: Date?
@@ -14,6 +15,7 @@ public final class ProfileStore: ObservableObject {
     @Published public private(set) var customFolders: [CloudFolder] = []
     @Published public private(set) var folderCustomizations: [String: CloudFolder] = [:]
     @Published public private(set) var folderOverrides: [String: String] = [:]
+    @Published public private(set) var hiddenFolderIDs: Set<String> = []
     @Published public var showExpirationWarning = false
     @Published public var expirationWarningMessage = ""
     @Published public var updateAvailable = false
@@ -35,9 +37,11 @@ public final class ProfileStore: ObservableObject {
         self.configURL = configURL
         self.runner = runner
         self.activeAWSProfile = UserDefaults.standard.string(forKey: "activeAWSProfile") ?? ""
+        self.activeGCPProfile = UserDefaults.standard.string(forKey: "activeGCPProfile") ?? ""
         self.customFolders = Self.loadCustomFolders(key: customFoldersKey)
         self.folderCustomizations = Self.loadFolderCustomizations(key: folderCustomizationsKey)
         self.folderOverrides = Self.loadFolderOverrides(key: folderOverridesKey)
+        self.hiddenFolderIDs = Set(UserDefaults.standard.stringArray(forKey: "hiddenFolderIDs") ?? [])
         refresh()
         verifyAllProfiles()
         
@@ -56,46 +60,116 @@ public final class ProfileStore: ObservableObject {
     }
 
     public var groupedProfiles: [ProfileGroup] {
-        allFolders.map { folder in
-                let matches = profiles.filter {
-                    $0.provider == folder.provider && self.folder(for: $0).id == folder.id
-                }
+        allFolders.compactMap { folder in
+            let matches = profiles.filter {
+                $0.provider == folder.provider && self.folder(for: $0).id == folder.id
+            }
+            if folder.isCustom || !matches.isEmpty {
                 return ProfileGroup(folder: folder, profiles: matches)
+            }
+            return nil
         }
     }
 
     public var allFolders: [CloudFolder] {
-        CloudProvider.allCases.flatMap { provider in
+        let builtIn = CloudProvider.allCases.flatMap { provider in
             CloudEnvironment.allCases.map {
                 let folder = CloudFolder.builtIn(provider: provider, environment: $0)
                 return folderCustomizations[folder.id] ?? folder
             }
-        } + customFolders
+        }
+        return (builtIn + customFolders).filter { !hiddenFolderIDs.contains($0.id) }
     }
 
     public func refresh() {
         let text = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
-        profiles = AWSConfigParser.parse(text)
+        var loadedProfiles = AWSConfigParser.parse(text)
+        
+        let gcpDir = GCPConfigPaths.configurationsDirURL
+        if let fileURLs = try? FileManager.default.contentsOfDirectory(at: gcpDir, includingPropertiesForKeys: nil) {
+            var gcpProfiles: [CloudProfile] = []
+            for fileURL in fileURLs {
+                let filename = fileURL.lastPathComponent
+                if filename.hasPrefix("config_") {
+                    let configName = String(filename.dropFirst("config_".count))
+                    if let gcpProfile = GCPConfigParser.parse(contentsOf: fileURL, name: configName) {
+                        gcpProfiles.append(gcpProfile)
+                    }
+                }
+            }
+            gcpProfiles.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            loadedProfiles.append(contentsOf: gcpProfiles)
+        }
+        
+        self.profiles = loadedProfiles
+        
+        let activeGCPName = GCPConfigParser.parseActiveConfig()
+        if !activeGCPName.isEmpty {
+            self.activeGCPProfile = activeGCPName
+            UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
+        }
+        
         if selectedProfileID == nil || profiles.contains(where: { $0.id == selectedProfileID }) == false {
             selectedProfileID = profiles.first?.id
         }
-        lastMessage = profiles.isEmpty ? "No AWS profiles found" : "Loaded \(profiles.count) AWS profiles"
+        
+        let awsCount = profiles.filter { $0.provider == .aws }.count
+        let gcpCount = profiles.filter { $0.provider == .gcp }.count
+        lastMessage = "Loaded \(awsCount) AWS profiles and \(gcpCount) GCP configurations"
         verifyAllProfiles()
     }
 
+    public func isActive(_ profile: CloudProfile) -> Bool {
+        switch profile.provider {
+        case .aws:
+            return activeAWSProfile == profile.name
+        case .gcp:
+            return activeGCPProfile == profile.name
+        }
+    }
+
     public func setActive(_ profile: CloudProfile) {
-        activeAWSProfile = profile.name
         selectedProfileID = profile.id
-        UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
-        lastMessage = "Active AWS_PROFILE=\(profile.name)"
-        checkAllSessionsExpiration()
+        if profile.provider == .aws {
+            activeAWSProfile = profile.name
+            UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
+            lastMessage = "Active AWS_PROFILE=\(profile.name)"
+            checkAllSessionsExpiration()
+        } else {
+            activeGCPProfile = profile.name
+            UserDefaults.standard.set(profile.name, forKey: "activeGCPProfile")
+            lastMessage = "Active GCP configuration=\(profile.name)"
+            
+            Task {
+                let startedAt = Date()
+                let result = await runner.run(["gcloud", "config", "configurations", "activate", profile.name])
+                lastCommandDuration = Date().timeIntervalSince(startedAt)
+                if result.exitCode == 0 {
+                    lastMessage = "Activated GCP configuration \(profile.name)"
+                } else {
+                    lastMessage = "Failed to activate GCP configuration: \(result.output)"
+                }
+                await verify(profile)
+            }
+        }
+    }
+
+    public func clearActive(for provider: CloudProvider) {
+        switch provider {
+        case .aws:
+            activeAWSProfile = ""
+            UserDefaults.standard.removeObject(forKey: "activeAWSProfile")
+            lastMessage = "No active AWS profile"
+        case .gcp:
+            activeGCPProfile = ""
+            UserDefaults.standard.removeObject(forKey: "activeGCPProfile")
+            lastMessage = "No active GCP configuration"
+        }
+        showExpirationWarning = false
     }
 
     public func clearActive() {
-        activeAWSProfile = ""
-        UserDefaults.standard.removeObject(forKey: "activeAWSProfile")
-        lastMessage = "No active AWS profile"
-        showExpirationWarning = false
+        clearActive(for: .aws)
     }
 
     public func report(_ message: String) {
@@ -160,16 +234,26 @@ public final class ProfileStore: ObservableObject {
     }
 
     public func deleteFolder(_ folder: CloudFolder) {
-        guard folder.isCustom else {
-            folderCustomizations.removeValue(forKey: folder.id)
-            saveFolderCustomizations()
-            return
+        if folder.isCustom {
+            customFolders.removeAll { $0.id == folder.id }
+            folderOverrides = folderOverrides.filter { $0.value != folder.id }
+            saveCustomFolders()
+            saveFolderOverrides()
+        } else {
+            hiddenFolderIDs.insert(folder.id)
+            saveHiddenFolderIDs()
         }
-        customFolders.removeAll { $0.id == folder.id }
-        folderOverrides = folderOverrides.filter { $0.value != folder.id }
-        saveCustomFolders()
-        saveFolderOverrides()
         lastMessage = "Deleted folder \(folder.name)"
+    }
+
+    public func restoreAllFolders() {
+        hiddenFolderIDs.removeAll()
+        saveHiddenFolderIDs()
+        lastMessage = "Restored all default folders"
+    }
+
+    private func saveHiddenFolderIDs() {
+        UserDefaults.standard.set(Array(hiddenFolderIDs), forKey: "hiddenFolderIDs")
     }
 
     public func login(_ profile: CloudProfile) {
@@ -186,14 +270,26 @@ public final class ProfileStore: ObservableObject {
         
         Task {
             let startedAt = Date()
-            lastMessage = "Starting AWS SSO login for \(profile.name)"
-            let result = await runner.run(["aws", "sso", "login", "--profile", profile.name])
-            lastCommandDuration = Date().timeIntervalSince(startedAt)
-            if result.exitCode == 0 {
-                lastLoginAt = Date()
-                lastMessage = "AWS SSO login completed"
+            if profile.provider == .aws {
+                lastMessage = "Starting AWS SSO login for \(profile.name)"
+                let result = await runner.run(["aws", "sso", "login", "--profile", profile.name])
+                lastCommandDuration = Date().timeIntervalSince(startedAt)
+                if result.exitCode == 0 {
+                    lastLoginAt = Date()
+                    lastMessage = "AWS SSO login completed"
+                } else {
+                    lastMessage = result.output
+                }
             } else {
-                lastMessage = result.output
+                lastMessage = "Starting gcloud auth login for \(profile.name)"
+                let result = await runner.run(["gcloud", "auth", "login", "--update-adc", "--configuration", profile.name])
+                lastCommandDuration = Date().timeIntervalSince(startedAt)
+                if result.exitCode == 0 {
+                    lastLoginAt = Date()
+                    lastMessage = "GCP auth login completed"
+                } else {
+                    lastMessage = result.output
+                }
             }
             await verify(profile)
         }
@@ -201,11 +297,19 @@ public final class ProfileStore: ObservableObject {
 
     public func verify(_ profile: CloudProfile) async {
         let startedAt = Date()
-        let result = await runner.run([
-            "aws", "sts", "get-caller-identity",
-            "--profile", profile.name,
-            "--output", "json"
-        ])
+        let result: CommandResult
+        if profile.provider == .aws {
+            result = await runner.run([
+                "aws", "sts", "get-caller-identity",
+                "--profile", profile.name,
+                "--output", "json"
+            ])
+        } else {
+            result = await runner.run([
+                "gcloud", "auth", "print-access-token",
+                "--configuration", profile.name
+            ])
+        }
         lastCommandDuration = Date().timeIntervalSince(startedAt)
         
         let isConnected = result.exitCode == 0
@@ -213,24 +317,27 @@ public final class ProfileStore: ObservableObject {
         
         if isConnected {
             lastVerifiedAt = Date()
-            await fetchAndStoreCredentials(for: profile)
+            if profile.provider == .aws {
+                await fetchAndStoreCredentials(for: profile)
+            }
             
             // Auto-activate profile if:
             // 1. It transitioned from disconnected to connected (user logged in independently on CLI)
             // 2. The app just started (oldStatus == .unknown) and no active profile is set yet
+            let activeName = profile.provider == .aws ? activeAWSProfile : activeGCPProfile
             if oldStatus != .connected {
                 if oldStatus != .unknown {
                     // Only auto-activate if the current active profile is empty or matches this profile,
                     // OR if the current active profile is not connected and this profile is the one selected in the UI.
-                    if activeAWSProfile.isEmpty || activeAWSProfile == profile.name {
+                    if activeName.isEmpty || activeName == profile.name {
                         setActive(profile)
-                    } else if let activeProf = profiles.first(where: { $0.name == activeAWSProfile }),
+                    } else if let activeProf = profiles.first(where: { $0.provider == profile.provider && $0.name == activeName }),
                               activeProf.status != .connected {
                         if profile.id == selectedProfileID {
                             setActive(profile)
                         }
                     }
-                } else if activeAWSProfile.isEmpty {
+                } else if activeName.isEmpty {
                     setActive(profile)
                 }
             }
@@ -269,6 +376,38 @@ public final class ProfileStore: ObservableObject {
         saveFolderOverrides()
         if activeAWSProfile == profile.name {
             clearActive()
+        }
+        refresh()
+        lastMessage = "Deleted \(profile.name)"
+    }
+
+    public func addGCPProfile(_ draft: GCPProfileDraft) throws {
+        try GCPConfigWriter.writeConfig(draft, originalName: nil)
+        refresh()
+        if let profile = profiles.first(where: { $0.provider == .gcp && $0.name == draft.name }) {
+            setActive(profile)
+        }
+    }
+
+    public func updateGCPProfile(_ profile: CloudProfile, draft: GCPProfileDraft) throws {
+        try GCPConfigWriter.writeConfig(draft, originalName: profile.name)
+        let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
+        refresh()
+        if let updated = profiles.first(where: { $0.provider == .gcp && $0.name == draft.name }) {
+            if let oldFolderID {
+                folderOverrides[updated.id] = oldFolderID
+                saveFolderOverrides()
+            }
+            setActive(updated)
+        }
+    }
+
+    public func deleteGCPProfile(_ profile: CloudProfile) throws {
+        try GCPConfigWriter.deleteConfig(profile.name)
+        folderOverrides.removeValue(forKey: profile.id)
+        saveFolderOverrides()
+        if activeGCPProfile == profile.name {
+            clearActive(for: .gcp)
         }
         refresh()
         lastMessage = "Deleted \(profile.name)"

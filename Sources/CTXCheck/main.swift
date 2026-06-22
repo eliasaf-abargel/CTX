@@ -73,4 +73,58 @@ do {
 } catch AWSConfigWriterError.invalid("role name") {
 }
 
+// Test GCP Config Parser
+let tempGCPConfigDir = FileManager.default.temporaryDirectory
+    .appendingPathComponent("ctx-check-gcp-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: tempGCPConfigDir, withIntermediateDirectories: true)
+let tempGCPConfigURL = tempGCPConfigDir.appendingPathComponent("config_default")
+let gcpConfigContent = """
+[core]
+account = eliasafa@jfrog.com
+project = support-prod-157422
+
+[compute]
+region = us-central1
+"""
+try gcpConfigContent.write(to: tempGCPConfigURL, atomically: true, encoding: .utf8)
+
+let gcpProfile = GCPConfigParser.parse(contentsOf: tempGCPConfigURL, name: "default")
+assert(gcpProfile != nil)
+assert(gcpProfile?.provider == .gcp)
+assert(gcpProfile?.name == "default")
+assert(gcpProfile?.accountID == "support-prod-157422")
+assert(gcpProfile?.roleName == "eliasafa@jfrog.com")
+assert(gcpProfile?.region == "us-central1")
+assert(CloudFolder.builtIn(provider: .gcp, environment: .production).icon == .server)
+assert(CloudEnvironment.infer(from: gcpProfile!) == .production)
+
+// Test GCP Config Writer
+var gcpDraft = GCPProfileDraft()
+gcpDraft.name = "prod"
+gcpDraft.project = "prod-project"
+gcpDraft.account = "prod-user@example.com"
+gcpDraft.region = "us-east1"
+
+try GCPConfigWriter.writeConfig(gcpDraft, originalName: nil, dir: tempGCPConfigDir)
+let parsedGCP = GCPConfigParser.parse(contentsOf: tempGCPConfigDir.appendingPathComponent("config_prod"), name: "prod")
+assert(parsedGCP != nil)
+assert(parsedGCP?.name == "prod")
+assert(parsedGCP?.accountID == "prod-project")
+assert(parsedGCP?.roleName == "prod-user@example.com")
+assert(parsedGCP?.region == "us-east1")
+
+// Edit
+gcpDraft.region = "us-west2"
+try GCPConfigWriter.writeConfig(gcpDraft, originalName: "prod", dir: tempGCPConfigDir)
+let editedGCP = GCPConfigParser.parse(contentsOf: tempGCPConfigDir.appendingPathComponent("config_prod"), name: "prod")
+assert(editedGCP?.region == "us-west2")
+
+// Delete
+try GCPConfigWriter.deleteConfig("prod", dir: tempGCPConfigDir)
+assert(!FileManager.default.fileExists(atPath: tempGCPConfigDir.appendingPathComponent("config_prod").path))
+
+// Clean up
+try? FileManager.default.removeItem(at: tempGCPConfigDir)
+
 print("CTX checks passed")
+

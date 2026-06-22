@@ -2,7 +2,8 @@ import CTXCore
 import SwiftUI
 
 enum SidebarSheet: Identifiable {
-    case addProfile
+    case addAWSProfile
+    case addGCPProfile
     case editProfile(CloudProfile)
     case duplicateProfile(CloudProfile)
     case addFolder
@@ -10,8 +11,10 @@ enum SidebarSheet: Identifiable {
 
     var id: String {
         switch self {
-        case .addProfile:
-            "addProfile"
+        case .addAWSProfile:
+            "addAWSProfile"
+        case .addGCPProfile:
+            "addGCPProfile"
         case .editProfile(let profile):
             "editProfile:\(profile.id)"
         case .duplicateProfile(let profile):
@@ -55,7 +58,8 @@ struct SidebarView: View {
             }
         }
         .confirmationDialog("Create", isPresented: $showingCreateMenu) {
-            Button("AWS Profile") { sheet = .addProfile }
+            Button("AWS Profile") { sheet = .addAWSProfile }
+            Button("GCP Configuration") { sheet = .addGCPProfile }
             Button("Folder") { sheet = .addFolder }
             Button("Cancel", role: .cancel) {}
         }
@@ -113,9 +117,7 @@ struct ProfileDisclosureGroup: View {
         }
         .contextMenu {
             Button("Edit Folder") { editFolder(group.folder) }
-            if group.folder.isCustom {
-                Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
-            }
+            Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
         }
     }
 }

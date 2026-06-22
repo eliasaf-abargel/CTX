@@ -16,9 +16,9 @@ struct ProfileDetailView: View {
                     // Header Hero
                     VStack(alignment: .leading, spacing: 16) {
                         HStack(alignment: .center, spacing: 16) {
-                            Image(systemName: "cloud.fill")
+                            Image(systemName: profile.provider.systemImage + ".fill")
                                 .font(.system(size: 32))
-                                .foregroundStyle(store.activeAWSProfile == profile.name ? Color.accentColor : (profile.status == .connected ? Color.green : Color.secondary))
+                                .foregroundStyle(store.isActive(profile) ? Color.accentColor : (profile.status == .connected ? Color.green : Color.secondary))
                                 .padding(12)
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .overlay {
@@ -31,7 +31,7 @@ struct ProfileDetailView: View {
                                     Text(profile.name)
                                         .font(.title2.weight(.semibold))
                                     
-                                    if store.activeAWSProfile == profile.name {
+                                    if store.isActive(profile) {
                                         Text("Active Context")
                                             .font(.caption2.weight(.bold))
                                             .foregroundStyle(.white)
@@ -107,8 +107,10 @@ struct ProfileDetailView: View {
 
                                 Menu {
                                     ForEach(store.allFolders) { folder in
-                                        Button(folder.name) {
-                                            store.move(profile, to: folder)
+                                        if folder.provider == profile.provider {
+                                            Button(folder.name) {
+                                                store.move(profile, to: folder)
+                                            }
                                         }
                                     }
                                 } label: {
@@ -144,7 +146,7 @@ struct ProfileDetailView: View {
 
                     Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 12) {
                         GridRow {
-                            Text("AWS Account")
+                            Text(profile.accountLabel)
                                 .foregroundStyle(.secondary)
                             HStack(spacing: 8) {
                                 Text(profile.accountID.isEmpty ? "-" : profile.accountID)
@@ -159,7 +161,7 @@ struct ProfileDetailView: View {
                         Divider()
                         
                         GridRow {
-                            Text("IAM Role")
+                            Text(profile.roleLabel)
                                 .foregroundStyle(.secondary)
                             HStack(spacing: 8) {
                                 Text(profile.roleName.isEmpty ? "-" : profile.roleName)
@@ -171,32 +173,36 @@ struct ProfileDetailView: View {
                             }
                         }
                         
-                        Divider()
-                        
-                        GridRow {
-                            Text("SSO Start URL")
-                                .foregroundStyle(.secondary)
-                            Text(profile.ssoStartURL.isEmpty ? "-" : profile.ssoStartURL)
-                                .lineLimit(1)
-                                .textSelection(.enabled)
+                        if profile.provider == .aws {
+                            Divider()
+                            
+                            GridRow {
+                                Text("SSO Start URL")
+                                    .foregroundStyle(.secondary)
+                                Text(profile.ssoStartURL.isEmpty ? "-" : profile.ssoStartURL)
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
+                            }
+                            
+                            Divider()
+                            
+                            GridRow {
+                                Text("SSO Region")
+                                    .foregroundStyle(.secondary)
+                                Text(profile.ssoRegion.isEmpty ? "-" : profile.ssoRegion)
+                                    .font(.system(.body, design: .monospaced))
+                            }
                         }
                         
-                        Divider()
-                        
-                        GridRow {
-                            Text("SSO Region")
-                                .foregroundStyle(.secondary)
-                            Text(profile.ssoRegion.isEmpty ? "-" : profile.ssoRegion)
-                                .font(.system(.body, design: .monospaced))
-                        }
-                        
-                        Divider()
-                        
-                        GridRow {
-                            Text("Default Region")
-                                .foregroundStyle(.secondary)
-                            Text(profile.region.isEmpty ? "-" : profile.region)
-                                .font(.system(.body, design: .monospaced))
+                        if !profile.region.isEmpty {
+                            Divider()
+                            
+                            GridRow {
+                                Text(profile.regionLabel)
+                                    .foregroundStyle(.secondary)
+                                Text(profile.region)
+                                    .font(.system(.body, design: .monospaced))
+                            }
                         }
                     }
                     .padding(18)
@@ -258,7 +264,11 @@ struct ProfileDetailView: View {
             Button("Delete", role: .destructive) {
                 if let profile = deleteCandidate {
                     do {
-                        try store.deleteAWSProfile(profile)
+                        if profile.provider == .aws {
+                            try store.deleteAWSProfile(profile)
+                        } else {
+                            try store.deleteGCPProfile(profile)
+                        }
                     } catch {
                         store.report(error.localizedDescription)
                     }
@@ -267,7 +277,13 @@ struct ProfileDetailView: View {
             }
             Button("Cancel", role: .cancel) { deleteCandidate = nil }
         } message: {
-            Text("CTX will remove this AWS profile and its matching SSO session from ~/.aws/config after creating a backup.")
+            if let profile = deleteCandidate {
+                if profile.provider == .aws {
+                    Text("CTX will remove this AWS profile and its matching SSO session from ~/.aws/config after creating a backup.")
+                } else {
+                    Text("CTX will permanently delete the gcloud configuration file config_\(profile.name) from ~/.config/gcloud/configurations/.")
+                }
+            }
         }
     }
 }
@@ -324,7 +340,7 @@ struct ProfileDetailView: View {
     }
 }
 
-private extension ProfileStatus {
+extension ProfileStatus {
     var color: Color {
         switch self {
         case .connected: return .green

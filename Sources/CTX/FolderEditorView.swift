@@ -89,7 +89,7 @@ struct FolderEditorView: View {
             }
         }
         .padding(24)
-        .frame(width: 520)
+        .frame(width: 400)
     }
 
     private func save() {

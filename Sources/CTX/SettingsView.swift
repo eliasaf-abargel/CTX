@@ -37,7 +37,42 @@ struct SettingsView: View {
                         }
                     }
                     LabeledContent("Active Profile", value: store.activeAWSProfile.isEmpty ? "None" : store.activeAWSProfile)
-                    LabeledContent("Total Profiles", value: "\(store.profiles.count)")
+                    LabeledContent("Total Profiles", value: "\(store.profiles.filter { $0.provider == .aws }.count)")
+                }
+
+                Section("GCP Environment") {
+                    LabeledContent("Configurations Path") {
+                        HStack(spacing: 8) {
+                            Text(GCPConfigPaths.configurationsDirURL.path)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
+                            
+                            Button {
+                                copyToClipboard(GCPConfigPaths.configurationsDirURL.path)
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy configurations path")
+
+                            Button {
+                                NSWorkspace.shared.selectFile(GCPConfigPaths.configurationsDirURL.path, inFileViewerRootedAtPath: "")
+                            } label: {
+                                Image(systemName: "arrow.right.circle")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reveal configurations in Finder")
+                        }
+                    }
+                    LabeledContent("Active Config", value: store.activeGCPProfile.isEmpty ? "None" : store.activeGCPProfile)
+                    LabeledContent("Total Configurations", value: "\(store.profiles.filter { $0.provider == .gcp }.count)")
+                }
+
+                Section("Folders Info") {
                     LabeledContent("Custom Folders", value: "\(store.allFolders.filter(\.isCustom).count)")
                 }
             }
@@ -46,9 +81,8 @@ struct SettingsView: View {
                 Label("Cloud Config", systemImage: "cloud")
             }
 
-            // Folders Management Tab
             List {
-                Section("Manage Folders") {
+                Section {
                     ForEach(store.allFolders) { folder in
                         HStack {
                             Label {
@@ -71,24 +105,31 @@ struct SettingsView: View {
                                 .buttonStyle(.plain)
                                 .help("Edit folder name/icon")
                                 
-                                if folder.isCustom {
-                                    Button {
-                                        store.deleteFolder(folder)
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .foregroundColor(.red)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Delete folder")
-                                } else {
-                                    // Placeholder spacing
+                                Button {
+                                    store.deleteFolder(folder)
+                                } label: {
                                     Image(systemName: "trash")
-                                        .opacity(0)
+                                        .foregroundColor(.red)
                                 }
+                                .buttonStyle(.plain)
+                                .help("Delete folder")
                             }
                             .padding(.trailing, 4)
                         }
                         .padding(.vertical, 4)
+                    }
+                } header: {
+                    HStack {
+                        Text("Manage Folders")
+                        Spacer()
+                        if !store.hiddenFolderIDs.isEmpty {
+                            Button("Restore Defaults") {
+                                store.restoreAllFolders()
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                            .foregroundColor(.accentColor)
+                        }
                     }
                 }
             }

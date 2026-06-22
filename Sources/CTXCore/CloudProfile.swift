@@ -2,11 +2,14 @@ import Foundation
 
 public enum CloudProvider: String, Codable, CaseIterable, Sendable {
     case aws = "AWS"
+    case gcp = "GCP"
 
     public var systemImage: String {
         switch self {
         case .aws:
             "cloud"
+        case .gcp:
+            "globe"
         }
     }
 }
@@ -49,7 +52,20 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         self.ssoRegion = ssoRegion
         self.status = status
     }
+
+    public var accountLabel: String {
+        provider == .aws ? "AWS Account" : "GCP Project"
+    }
+
+    public var roleLabel: String {
+        provider == .aws ? "IAM Role" : "GCP Account"
+    }
+
+    public var regionLabel: String {
+        provider == .aws ? "Default Region" : "Compute Region"
+    }
 }
+
 
 public enum CloudEnvironment: String, CaseIterable, Identifiable, Sendable {
     case production = "Production"
@@ -80,19 +96,20 @@ public enum CloudEnvironment: String, CaseIterable, Identifiable, Sendable {
 
     public static func infer(from profile: CloudProfile) -> CloudEnvironment {
         let name = profile.name.lowercased()
+        let account = profile.accountID.lowercased()
         if name.contains("redshift") || name.contains("mcp") || name.contains("jdbc") {
             return .data
         }
-        if name.contains("prod") || name.hasPrefix("prd") {
+        if name.contains("prod") || name.hasPrefix("prd") || account.contains("prod") || account.hasPrefix("prd") {
             return .production
         }
-        if name.contains("stg") || name.contains("stage") {
+        if name.contains("stg") || name.contains("stage") || account.contains("stg") || account.contains("stage") {
             return .staging
         }
-        if name.contains("dev") || name.contains("sandbox") {
+        if name.contains("dev") || name.contains("sandbox") || account.contains("dev") || account.contains("sandbox") {
             return .development
         }
-        if name.contains("admin") || name.contains("root") || name.hasPrefix("it-") {
+        if name.contains("admin") || name.contains("root") || name.hasPrefix("it-") || account.contains("admin") {
             return .admin
         }
         return .other
@@ -196,5 +213,21 @@ public struct AWSProfileDraft: Equatable, Sendable {
         self.accountID = profile.accountID
         self.roleName = profile.roleName
         self.defaultRegion = profile.region
+    }
+}
+
+public struct GCPProfileDraft: Equatable, Sendable {
+    public var name = ""
+    public var project = ""
+    public var account = ""
+    public var region = ""
+
+    public init() {}
+
+    public init(profile: CloudProfile, duplicate: Bool = false) {
+        self.name = duplicate ? "\(profile.name)-copy" : profile.name
+        self.project = profile.accountID
+        self.account = profile.roleName
+        self.region = profile.region
     }
 }

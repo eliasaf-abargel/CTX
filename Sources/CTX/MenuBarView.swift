@@ -16,12 +16,30 @@ struct MenuBarView: View {
                     .foregroundStyle(.primary)
 
                 if !store.activeAWSProfile.isEmpty {
+                    let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile })
+                    let statusColor = activeAWS?.status.color ?? .gray
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(Color.green)
+                            .fill(statusColor)
                             .frame(width: 5, height: 5)
-                        Text(store.activeAWSProfile)
-                            .font(.system(size: 10, weight: .semibold))
+                        Text("AWS:\(store.activeAWSProfile)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+
+                if !store.activeGCPProfile.isEmpty {
+                    let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile })
+                    let statusColor = activeGCP?.status.color ?? .gray
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 5, height: 5)
+                        Text("GCP:\(store.activeGCPProfile)")
+                            .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 6)
@@ -103,7 +121,7 @@ struct MenuBarView: View {
                             MenuBarFolderSection(
                                 group: group,
                                 isExpanded: binding(for: group.id),
-                                activeProfileName: store.activeAWSProfile,
+                                activeProfileName: group.folder.provider == .aws ? store.activeAWSProfile : store.activeGCPProfile,
                                 selectBinding: activeBinding(for:)
                             )
                         }
@@ -142,12 +160,12 @@ struct MenuBarView: View {
 
     private func activeBinding(for profile: CloudProfile) -> Binding<Bool> {
         Binding(
-            get: { store.activeAWSProfile == profile.name },
+            get: { store.isActive(profile) },
             set: { isOn in
                 if isOn {
                     store.login(profile)
-                } else if store.activeAWSProfile == profile.name {
-                    store.clearActive()
+                } else if store.isActive(profile) {
+                    store.clearActive(for: profile.provider)
                 }
             }
         )

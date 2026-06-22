@@ -202,7 +202,7 @@ struct AddAWSProfileView: View {
             }
         }
         .padding(24)
-        .frame(width: 520)
+        .frame(width: 440)
         .onAppear {
             // SSO Region Initialization
             if draft.ssoRegion.isEmpty {
