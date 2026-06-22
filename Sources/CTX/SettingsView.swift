@@ -102,6 +102,18 @@ struct SettingsView: View {
                     LabeledContent("Name", value: "CTX")
                     LabeledContent("Version", value: appVersion)
                     LabeledContent("Developer", value: "Eliasaf Abargel")
+                    
+                    if store.updateAvailable {
+                        LabeledContent("New Version") {
+                            Button("Update to \(store.latestVersionString)") {
+                                if let url = URL(string: "https://github.com/eliasaf-abargel/CTX/releases/latest") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
                 }
             }
             .formStyle(.grouped)

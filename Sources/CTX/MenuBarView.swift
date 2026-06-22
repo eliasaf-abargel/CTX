@@ -66,6 +66,33 @@ struct MenuBarView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            // Update available banner inside the popover
+            if store.updateAvailable {
+                Button {
+                    if let url = URL(string: "https://github.com/eliasaf-abargel/CTX/releases/latest") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text("Update Available: \(store.latestVersionString)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.app.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             Divider()
 
             // Profiles list

@@ -16,6 +16,8 @@ public final class ProfileStore: ObservableObject {
     @Published public private(set) var folderOverrides: [String: String] = [:]
     @Published public var showExpirationWarning = false
     @Published public var expirationWarningMessage = ""
+    @Published public var updateAvailable = false
+    @Published public var latestVersionString = ""
 
     private let configURL: URL
     private let runner: CloudCommandRunner
@@ -46,6 +48,7 @@ public final class ProfileStore: ObservableObject {
             }
         
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        checkForUpdates()
     }
 
     public var selectedProfile: CloudProfile? {
@@ -476,6 +479,33 @@ public final class ProfileStore: ObservableObject {
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
             self.showExpirationWarning = false
+        }
+    }
+
+    public func checkForUpdates() {
+        guard let url = URL(string: "https://api.github.com/repos/eliasaf-abargel/CTX/releases/latest") else {
+            return
+        }
+        
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let tagName = json["tag_name"] as? String {
+                    
+                    let latestVersion = tagName.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "v", with: "")
+                    let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+                    
+                    if latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
+                        await MainActor.run {
+                            self.updateAvailable = true
+                            self.latestVersionString = tagName
+                        }
+                    }
+                }
+            } catch {
+                // Ignore background check errors silently
+            }
         }
     }
 

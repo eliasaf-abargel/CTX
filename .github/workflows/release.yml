@@ -21,6 +21,8 @@ jobs:
 
       - name: Build and Package Release
         run: ./script/build_and_run.sh release
+        env:
+          CTX_RELEASE_VERSION: ${{ github.ref_name }}
 
       - name: Upload Artifact to JFrog Fly
         uses: jfrog/fly-action/upload@v1

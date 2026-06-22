@@ -4,8 +4,9 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="CTX"
 BUNDLE_ID="dev.eliasafa.CTX"
-APP_VERSION="0.1.0"
-APP_BUILD="1"
+APP_VERSION="${CTX_RELEASE_VERSION:-0.1.0}"
+APP_VERSION="${APP_VERSION#v}"
+APP_BUILD="${GITHUB_RUN_NUMBER:-1}"
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
