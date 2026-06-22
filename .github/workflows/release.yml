@@ -1,0 +1,31 @@
+name: Release CTX App
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup JFrog Fly
+        uses: jfrog/fly-action@v1
+
+      - name: Build and Package Release
+        run: ./script/build_and_run.sh release
+
+      - name: Upload Artifact to JFrog Fly
+        uses: jfrog/fly-action/upload@v1
+        with:
+          name: CTX
+          version: ${{ github.ref_name }}
+          files: |
+            dist/CTX.app.zip

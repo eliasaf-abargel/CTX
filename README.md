@@ -35,7 +35,26 @@ The project is structured as a Swift Package containing three main targets:
 
 ---
 
-## Installation & Development 💻
+## Installation 🛠️
+
+To install CTX to your `/Applications` folder using a single terminal command without downloading or cloning this repository:
+
+### Standard Installation (GitHub Releases)
+```bash
+curl -fsSL https://raw.githubusercontent.com/eliasaf-abargel/CTX/main/script/install.sh | bash
+```
+
+### Private Installation (e.g. JFrog Fly / Custom Registry)
+If your organization distributes CTX internally via JFrog Fly or Artifactory, define the custom registry URL (and credentials if needed) before running the command:
+```bash
+export CTX_DOWNLOAD_URL="https://your-fly-subdomain/generic-local/ctx/0.1.0/CTX.app.zip"
+# export CTX_REPO_CREDS="username:token" # If authentication is required
+curl -fsSL https://raw.githubusercontent.com/eliasaf-abargel/CTX/main/script/install.sh | bash
+```
+
+---
+
+## Development 💻
 
 ### Prerequisites
 - macOS 14.0+

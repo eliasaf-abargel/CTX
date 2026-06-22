@@ -27,8 +27,13 @@ fi
 
 killall "$APP_NAME" >/dev/null 2>&1 || true
 
-swift build
-BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+BUILD_CONFIG="debug"
+if [[ "$MODE" == "release" ]]; then
+  BUILD_CONFIG="release"
+fi
+
+swift build -c "$BUILD_CONFIG"
+BUILD_BINARY="$(swift build -c "$BUILD_CONFIG" --show-bin-path)/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$RESOURCES_DIR"
@@ -86,6 +91,11 @@ case "$MODE" in
   run)
     open_app
     ;;
+  release)
+    cd "$DIST_DIR"
+    zip -qy -r "$APP_NAME.app.zip" "$APP_NAME.app"
+    echo "Release packaged: $DIST_DIR/$APP_NAME.app.zip"
+    ;;
   --debug|debug)
     lldb -- "$APP_BINARY"
     ;;
@@ -103,7 +113,7 @@ case "$MODE" in
     pgrep -x "$APP_NAME" >/dev/null
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|release|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac
