@@ -4,7 +4,7 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var store: ProfileStore
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openSettings) private var openSettings: OpenSettingsAction
     @State private var expandedGroups: Set<String> = []
 
     var body: some View {

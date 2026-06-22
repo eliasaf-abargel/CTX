@@ -35,7 +35,7 @@ struct ContentView: View {
 struct DetailPane: View {
     @ObservedObject var store: ProfileStore
     @Binding var sheet: SidebarSheet?
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openSettings) private var openSettings: OpenSettingsAction
 
     var body: some View {
         ZStack(alignment: .top) {
