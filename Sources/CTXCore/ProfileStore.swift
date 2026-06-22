@@ -1,0 +1,482 @@
+import Combine
+import Foundation
+import UserNotifications
+
+@MainActor
+public final class ProfileStore: ObservableObject {
+    @Published public private(set) var profiles: [CloudProfile] = []
+    @Published public var selectedProfileID: CloudProfile.ID?
+    @Published public private(set) var activeAWSProfile: String
+    @Published public private(set) var lastMessage = ""
+    @Published public private(set) var lastLoginAt: Date?
+    @Published public private(set) var lastVerifiedAt: Date?
+    @Published public private(set) var lastCommandDuration: TimeInterval?
+    @Published public private(set) var customFolders: [CloudFolder] = []
+    @Published public private(set) var folderCustomizations: [String: CloudFolder] = [:]
+    @Published public private(set) var folderOverrides: [String: String] = [:]
+    @Published public var showExpirationWarning = false
+    @Published public var expirationWarningMessage = ""
+
+    private let configURL: URL
+    private let runner: CloudCommandRunner
+    private let folderOverridesKey = "profileFolderOverrides"
+    private let customFoldersKey = "customFolders"
+    private let folderCustomizationsKey = "folderCustomizations"
+    private var lastExpirationWarningTime: Date?
+    private var expirationTimer: AnyCancellable?
+    private var lastCacheCheckTime = Date.distantPast
+
+    public init(
+        configURL: URL = AWSConfigPaths.configURL,
+        runner: CloudCommandRunner = CloudCommandRunner()
+    ) {
+        self.configURL = configURL
+        self.runner = runner
+        self.activeAWSProfile = UserDefaults.standard.string(forKey: "activeAWSProfile") ?? ""
+        self.customFolders = Self.loadCustomFolders(key: customFoldersKey)
+        self.folderCustomizations = Self.loadFolderCustomizations(key: folderCustomizationsKey)
+        self.folderOverrides = Self.loadFolderOverrides(key: folderOverridesKey)
+        refresh()
+        verifyAllProfiles()
+        
+        self.expirationTimer = Timer.publish(every: 10, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.checkAllSessionsExpiration()
+            }
+        
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    public var selectedProfile: CloudProfile? {
+        profiles.first { $0.id == selectedProfileID } ?? profiles.first
+    }
+
+    public var groupedProfiles: [ProfileGroup] {
+        allFolders.map { folder in
+                let matches = profiles.filter {
+                    $0.provider == folder.provider && self.folder(for: $0).id == folder.id
+                }
+                return ProfileGroup(folder: folder, profiles: matches)
+        }
+    }
+
+    public var allFolders: [CloudFolder] {
+        CloudProvider.allCases.flatMap { provider in
+            CloudEnvironment.allCases.map {
+                let folder = CloudFolder.builtIn(provider: provider, environment: $0)
+                return folderCustomizations[folder.id] ?? folder
+            }
+        } + customFolders
+    }
+
+    public func refresh() {
+        let text = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        profiles = AWSConfigParser.parse(text)
+        if selectedProfileID == nil || profiles.contains(where: { $0.id == selectedProfileID }) == false {
+            selectedProfileID = profiles.first?.id
+        }
+        lastMessage = profiles.isEmpty ? "No AWS profiles found" : "Loaded \(profiles.count) AWS profiles"
+        verifyAllProfiles()
+    }
+
+    public func setActive(_ profile: CloudProfile) {
+        activeAWSProfile = profile.name
+        selectedProfileID = profile.id
+        UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
+        lastMessage = "Active AWS_PROFILE=\(profile.name)"
+        checkAllSessionsExpiration()
+    }
+
+    public func clearActive() {
+        activeAWSProfile = ""
+        UserDefaults.standard.removeObject(forKey: "activeAWSProfile")
+        lastMessage = "No active AWS profile"
+        showExpirationWarning = false
+    }
+
+    public func report(_ message: String) {
+        lastMessage = message
+    }
+
+    public func folder(for profile: CloudProfile) -> CloudFolder {
+        if let folderID = folderOverrides[profile.id],
+           let folder = allFolders.first(where: { $0.id == folderID }) {
+            return folder
+        }
+        return CloudFolder.builtIn(provider: profile.provider, environment: CloudEnvironment.infer(from: profile))
+    }
+
+    public func move(_ profile: CloudProfile, to folder: CloudFolder) {
+        folderOverrides[profile.id] = folder.id
+        saveFolderOverrides()
+        lastMessage = "Moved \(profile.name) to \(folder.name)"
+    }
+
+    public func addFolder(name: String, provider: CloudProvider, icon: CloudFolderIcon) throws {
+        let name = try normalizedFolderName(name)
+        guard allFolders.contains(where: { $0.provider == provider && $0.name.caseInsensitiveCompare(name) == .orderedSame }) == false else {
+            throw AWSConfigWriterError.invalid("folder name")
+        }
+
+        customFolders.append(
+            CloudFolder(
+                id: "\(provider.rawValue):custom:\(UUID().uuidString)",
+                provider: provider,
+                name: name,
+                icon: icon
+            )
+        )
+        saveCustomFolders()
+        lastMessage = "Created folder \(name)"
+    }
+
+    public func updateFolder(_ folder: CloudFolder, name: String, icon: CloudFolderIcon) throws {
+        guard folder.isCustom else {
+            let name = try normalizedFolderName(name)
+            folderCustomizations[folder.id] = CloudFolder(
+                id: folder.id,
+                provider: folder.provider,
+                name: name,
+                icon: icon,
+                isCustom: false
+            )
+            saveFolderCustomizations()
+            lastMessage = "Updated folder \(name)"
+            return
+        }
+        guard let index = customFolders.firstIndex(where: { $0.id == folder.id }) else {
+            return
+        }
+
+        let name = try normalizedFolderName(name)
+        customFolders[index].name = name
+        customFolders[index].icon = icon
+        saveCustomFolders()
+        lastMessage = "Updated folder \(name)"
+    }
+
+    public func deleteFolder(_ folder: CloudFolder) {
+        guard folder.isCustom else {
+            folderCustomizations.removeValue(forKey: folder.id)
+            saveFolderCustomizations()
+            return
+        }
+        customFolders.removeAll { $0.id == folder.id }
+        folderOverrides = folderOverrides.filter { $0.value != folder.id }
+        saveCustomFolders()
+        saveFolderOverrides()
+        lastMessage = "Deleted folder \(folder.name)"
+    }
+
+    public func login(_ profile: CloudProfile) {
+        setActive(profile)
+        
+        // Lookup the fresh status from the store's source of truth to avoid stale struct copies
+        if let freshProfile = profiles.first(where: { $0.id == profile.id }),
+           freshProfile.status == .connected {
+            Task {
+                await verify(freshProfile)
+            }
+            return
+        }
+        
+        Task {
+            let startedAt = Date()
+            lastMessage = "Starting AWS SSO login for \(profile.name)"
+            let result = await runner.run(["aws", "sso", "login", "--profile", profile.name])
+            lastCommandDuration = Date().timeIntervalSince(startedAt)
+            if result.exitCode == 0 {
+                lastLoginAt = Date()
+                lastMessage = "AWS SSO login completed"
+            } else {
+                lastMessage = result.output
+            }
+            await verify(profile)
+        }
+    }
+
+    public func verify(_ profile: CloudProfile) async {
+        let startedAt = Date()
+        let result = await runner.run([
+            "aws", "sts", "get-caller-identity",
+            "--profile", profile.name,
+            "--output", "json"
+        ])
+        lastCommandDuration = Date().timeIntervalSince(startedAt)
+        
+        let isConnected = result.exitCode == 0
+        let oldStatus = profiles.first(where: { $0.id == profile.id })?.status ?? .unknown
+        
+        if isConnected {
+            lastVerifiedAt = Date()
+            await fetchAndStoreCredentials(for: profile)
+            
+            // Auto-activate profile if:
+            // 1. It transitioned from disconnected to connected (user logged in independently on CLI)
+            // 2. The app just started (oldStatus == .unknown) and no active profile is set yet
+            if oldStatus != .connected {
+                if oldStatus != .unknown {
+                    // Only auto-activate if the current active profile is empty or matches this profile,
+                    // OR if the current active profile is not connected and this profile is the one selected in the UI.
+                    if activeAWSProfile.isEmpty || activeAWSProfile == profile.name {
+                        setActive(profile)
+                    } else if let activeProf = profiles.first(where: { $0.name == activeAWSProfile }),
+                              activeProf.status != .connected {
+                        if profile.id == selectedProfileID {
+                            setActive(profile)
+                        }
+                    }
+                } else if activeAWSProfile.isEmpty {
+                    setActive(profile)
+                }
+            }
+        }
+        
+        updateStatus(
+            profile,
+            status: isConnected ? .connected : status(for: result)
+        )
+    }
+
+    public func addAWSProfile(_ draft: AWSProfileDraft) throws {
+        try AWSConfigWriter.appendProfile(draft, to: configURL)
+        refresh()
+        if let profile = profiles.first(where: { $0.name == draft.name }) {
+            setActive(profile)
+        }
+    }
+
+    public func updateAWSProfile(_ profile: CloudProfile, draft: AWSProfileDraft) throws {
+        try AWSConfigWriter.updateProfile(originalName: profile.name, draft: draft, to: configURL)
+        let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
+        refresh()
+        if let updated = profiles.first(where: { $0.name == draft.name }) {
+            if let oldFolderID {
+                folderOverrides[updated.id] = oldFolderID
+                saveFolderOverrides()
+            }
+            setActive(updated)
+        }
+    }
+
+    public func deleteAWSProfile(_ profile: CloudProfile) throws {
+        try AWSConfigWriter.deleteProfile(profile.name, from: configURL)
+        folderOverrides.removeValue(forKey: profile.id)
+        saveFolderOverrides()
+        if activeAWSProfile == profile.name {
+            clearActive()
+        }
+        refresh()
+        lastMessage = "Deleted \(profile.name)"
+    }
+
+    private func fetchAndStoreCredentials(for profile: CloudProfile) async {
+        lastMessage = "Fetching STS credentials for \(profile.name)..."
+        let result = await runner.run([
+            "aws", "configure", "export-credentials",
+            "--profile", profile.name,
+            "--output", "json"
+        ])
+        if result.exitCode == 0 {
+            do {
+                if let data = result.output.data(using: .utf8),
+                   let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let accessKeyId = json["AccessKeyId"] as? String,
+                   let secretAccessKey = json["SecretAccessKey"] as? String,
+                   let sessionToken = json["SessionToken"] as? String {
+                    
+                    try AWSConfigWriter.updateCredentials(
+                        profileName: profile.name,
+                        accessKeyId: accessKeyId,
+                        secretAccessKey: secretAccessKey,
+                        sessionToken: sessionToken
+                    )
+                    lastMessage = "STS credentials retrieved & stored in ~/.aws/credentials"
+                } else {
+                    lastMessage = "Failed to parse STS credentials JSON"
+                }
+            } catch {
+                lastMessage = "Failed to write STS credentials: \(error.localizedDescription)"
+            }
+        } else {
+            lastMessage = "Failed to fetch STS credentials: \(result.output)"
+        }
+    }
+
+    private func updateStatus(_ profile: CloudProfile, status: ProfileStatus) {
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else {
+            return
+        }
+        profiles[index].status = status
+        lastMessage = "\(profile.name): \(status.rawValue)"
+        checkAllSessionsExpiration()
+    }
+
+    private func status(for result: CommandResult) -> ProfileStatus {
+        result.exitCode == 127 || result.output.localizedCaseInsensitiveContains("No such file")
+            ? .missingCli
+            : .needsLogin
+    }
+
+    private static func loadFolderOverrides(key: String) -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+    }
+
+    private static func loadCustomFolders(key: String) -> [CloudFolder] {
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return []
+        }
+        return (try? JSONDecoder().decode([CloudFolder].self, from: data)) ?? []
+    }
+
+    private static func loadFolderCustomizations(key: String) -> [String: CloudFolder] {
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return [:]
+        }
+        return (try? JSONDecoder().decode([String: CloudFolder].self, from: data)) ?? [:]
+    }
+
+    private func saveFolderOverrides() {
+        UserDefaults.standard.set(folderOverrides, forKey: folderOverridesKey)
+    }
+
+    private func saveCustomFolders() {
+        if let data = try? JSONEncoder().encode(customFolders) {
+            UserDefaults.standard.set(data, forKey: customFoldersKey)
+        }
+    }
+
+    private func saveFolderCustomizations() {
+        if let data = try? JSONEncoder().encode(folderCustomizations) {
+            UserDefaults.standard.set(data, forKey: folderCustomizationsKey)
+        }
+    }
+
+    private func normalizedFolderName(_ name: String) throws -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.rangeOfCharacter(from: .newlines) == nil else {
+            throw AWSConfigWriterError.invalid("folder name")
+        }
+        return name
+    }
+
+    public func verifyAllProfiles() {
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                for profile in profiles {
+                    group.addTask {
+                        await self.verify(profile)
+                    }
+                }
+            }
+        }
+    }
+
+    private func checkAllSessionsExpiration() {
+        let fileManager = FileManager.default
+        let ssoCacheURL = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".aws/sso/cache")
+        guard let files = try? fileManager.contentsOfDirectory(at: ssoCacheURL, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            return
+        }
+        
+        let now = Date()
+        var cachedSessions: [String: Date] = [:]
+        var newestModificationDate = Date.distantPast
+        
+        for fileURL in files where fileURL.pathExtension == "json" {
+            if let resourceValues = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
+               let modDate = resourceValues.contentModificationDate {
+                if modDate > newestModificationDate {
+                    newestModificationDate = modDate
+                }
+            }
+            
+            guard let data = try? Data(contentsOf: fileURL),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let startUrl = json["startUrl"] as? String,
+                  let expiresAtStr = json["expiresAt"] as? String else {
+                continue
+            }
+            
+            let formatter = ISO8601DateFormatter()
+            var expiresAt = formatter.date(from: expiresAtStr)
+            if expiresAt == nil {
+                let fractionalFormatter = ISO8601DateFormatter()
+                fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                expiresAt = fractionalFormatter.date(from: expiresAtStr)
+            }
+            
+            if let expiresAt {
+                let normalizedStartUrl = startUrl.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased()
+                if let existing = cachedSessions[normalizedStartUrl] {
+                    if expiresAt > existing {
+                        cachedSessions[normalizedStartUrl] = expiresAt
+                    }
+                } else {
+                    cachedSessions[normalizedStartUrl] = expiresAt
+                }
+            }
+        }
+        
+        // Trigger verification if the cache folder was modified (user logged in via CLI)
+        if newestModificationDate > lastCacheCheckTime {
+            lastCacheCheckTime = newestModificationDate
+            verifyAllProfiles()
+        }
+        
+        for profile in profiles {
+            guard !profile.ssoStartURL.isEmpty else { continue }
+            let normalizedStartUrl = profile.ssoStartURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            
+            if let expiresAt = cachedSessions[normalizedStartUrl] {
+                let timeLeft = expiresAt.timeIntervalSince(now)
+                
+                if timeLeft <= 0 {
+                    if profile.status == .connected {
+                        updateStatus(profile, status: .needsLogin)
+                    }
+                }
+                
+                if profile.name == activeAWSProfile {
+                    if timeLeft > -10 && timeLeft <= 120 {
+                        if lastExpirationWarningTime != expiresAt {
+                            let isExpired = timeLeft <= 0
+                            triggerExpirationWarning(profileName: profile.name, expired: isExpired)
+                            lastExpirationWarningTime = expiresAt
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func triggerExpirationWarning(profileName: String, expired: Bool) {
+        if expired {
+            expirationWarningMessage = "\(profileName): Session Expired"
+        } else {
+            expirationWarningMessage = "\(profileName): Session Expiring"
+        }
+        showExpirationWarning = true
+        
+        let content = UNMutableNotificationContent()
+        content.title = expired ? "Session Expired" : "Session Expiring"
+        content.body = expired 
+            ? "AWS profile \(profileName) session has expired."
+            : "AWS profile \(profileName) session expires in 2m."
+        content.sound = UNNotificationSound.default
+        
+        let request = UNNotificationRequest(
+            identifier: "aws.session.expiration.\(profileName)",
+            content: content,
+            trigger: nil
+        )
+        
+        UNUserNotificationCenter.current().add(request) { _ in }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            self.showExpirationWarning = false
+        }
+    }
+
+}
