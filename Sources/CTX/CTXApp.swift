@@ -8,7 +8,7 @@ struct CTXApp: App {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        WindowGroup("CTX", id: "main") {
+        Window("CTX", id: "main") {
             ContentView(store: store)
                 .frame(minWidth: 680, minHeight: 480)
                 .onAppear {
@@ -62,7 +62,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             openWindow?(id: "main")
-            return false
+        } else {
+            for window in NSApp.windows {
+                if window.title == "CTX" || window.identifier?.rawValue == "main" || window.className.contains("Settings") {
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+            NSApp.activate(ignoringOtherApps: true)
         }
         return true
     }

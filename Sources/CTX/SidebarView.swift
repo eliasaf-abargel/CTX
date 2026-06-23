@@ -50,19 +50,25 @@ struct SidebarView: View {
         .navigationTitle("Profiles")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showingCreateMenu = true
+                Menu {
+                    if let folder = store.selectedFolder {
+                        Button("Add Profile to \(folder.name)...") {
+                            if folder.provider == .aws {
+                                sheet = .addAWSProfile
+                            } else {
+                                sheet = .addGCPProfile
+                            }
+                        }
+                        Divider()
+                    }
+                    Button("AWS Profile...") { sheet = .addAWSProfile }
+                    Button("GCP Configuration...") { sheet = .addGCPProfile }
+                    Button("New Folder...") { sheet = .addFolder }
                 } label: {
                     Label("Create", systemImage: "plus")
                 }
                 .help("Create Profile or Folder")
             }
-        }
-        .confirmationDialog("Create", isPresented: $showingCreateMenu) {
-            Button("AWS Profile") { sheet = .addAWSProfile }
-            Button("GCP Configuration") { sheet = .addGCPProfile }
-            Button("Folder") { sheet = .addFolder }
-            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -118,7 +124,7 @@ struct ProfileDisclosureGroup: View {
             }
         }
         .contextMenu {
-            Button("Edit Folder") { editFolder(group.folder) }
+            Button("Rename Folder") { editFolder(group.folder) }
             Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
         }
     }

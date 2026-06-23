@@ -202,13 +202,38 @@ struct FolderDetailView: View {
                             }
                         
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(folder.provider.rawValue) · \(folder.name)")
-                                .font(.title2.weight(.semibold))
+                            HStack(spacing: 8) {
+                                Text("\(folder.provider.rawValue) · \(folder.name)")
+                                    .font(.title2.weight(.semibold))
+                                
+                                Button {
+                                    sheet = .editFolder(folder)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Rename Folder")
+                            }
                             Text("Environment folder containing profiles")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                        
                         Spacer()
+                        
+                        Button {
+                            if folder.provider == .aws {
+                                sheet = .addAWSProfile
+                            } else {
+                                sheet = .addGCPProfile
+                            }
+                        } label: {
+                            Label("Add Profile", systemImage: "plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                     }
                     
                     Divider()
