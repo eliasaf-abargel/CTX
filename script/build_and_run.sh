@@ -4,7 +4,8 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="CTX"
 BUNDLE_ID="dev.eliasafa.CTX"
-APP_VERSION="${CTX_RELEASE_VERSION:-0.1.0}"
+LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.2.0")
+APP_VERSION="${CTX_RELEASE_VERSION:-$LATEST_TAG}"
 APP_VERSION="${APP_VERSION#v}"
 APP_BUILD="${GITHUB_RUN_NUMBER:-1}"
 MIN_SYSTEM_VERSION="14.0"
