@@ -165,7 +165,7 @@ struct MenuBarView: View {
                 if isOn {
                     store.login(profile)
                 } else if store.isActive(profile) {
-                    store.clearActive(for: profile.provider)
+                    store.logout(profile)
                 }
             }
         )

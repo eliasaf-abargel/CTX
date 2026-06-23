@@ -83,7 +83,7 @@ struct SettingsView: View {
 
             List {
                 Section {
-                    ForEach(store.allFolders) { folder in
+                    ForEach(store.groupedProfiles.map(\.folder)) { folder in
                         HStack {
                             Label {
                                 Text("\(folder.provider.rawValue) · \(folder.name)")
