@@ -103,16 +103,14 @@ struct DetailPane: View {
                                 .frame(height: 10)
                                 .background(Color.secondary.opacity(0.3))
                             
-                            Button {
-                                store.logout(activeAWS)
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.secondary)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Disconnect active AWS profile")
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeAWS)
+                                }
+                                .help("Disconnect active AWS profile")
                         }
                         .padding(.leading, 8)
                         .padding(.trailing, 6)
@@ -122,7 +120,6 @@ struct DetailPane: View {
                             Capsule()
                                 .stroke(.separator.opacity(0.15), lineWidth: 0.5)
                         }
-                        .shadow(color: .black.opacity(0.04), radius: 1, y: 0.5)
                     }
                     
                     if !store.activeGCPProfile.isEmpty,
@@ -142,16 +139,14 @@ struct DetailPane: View {
                                 .frame(height: 10)
                                 .background(Color.secondary.opacity(0.3))
                             
-                            Button {
-                                store.logout(activeGCP)
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.secondary)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Disconnect active GCP configuration")
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeGCP)
+                                }
+                                .help("Disconnect active GCP configuration")
                         }
                         .padding(.leading, 8)
                         .padding(.trailing, 6)
@@ -161,7 +156,6 @@ struct DetailPane: View {
                             Capsule()
                                 .stroke(.separator.opacity(0.15), lineWidth: 0.5)
                         }
-                        .shadow(color: .black.opacity(0.04), radius: 1, y: 0.5)
                     }
                 }
                 .buttonStyle(.plain)
