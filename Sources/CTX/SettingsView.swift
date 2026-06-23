@@ -163,6 +163,28 @@ struct SettingsView: View {
                                 .controlSize(.small)
                             }
                         }
+                    } else {
+                        LabeledContent("Updates") {
+                            HStack(spacing: 8) {
+                                if store.isCheckingForUpdates {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Checking...")
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    if !store.updateCheckMessage.isEmpty {
+                                        Text(store.updateCheckMessage)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    Button("Check for Updates") {
+                                        store.checkForUpdates()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -172,6 +194,7 @@ struct SettingsView: View {
             }
             .tag(2)
         }
+        .id(store.selectedSettingsTab)
         .scenePadding()
         .frame(width: 520, height: 340)
         .sheet(item: $editingFolder) { folder in

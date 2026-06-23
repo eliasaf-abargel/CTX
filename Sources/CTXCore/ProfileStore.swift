@@ -25,6 +25,8 @@ public final class ProfileStore: ObservableObject {
     @Published public var latestVersionString = ""
     @Published public var isUpdating = false
     @Published public var selectedSettingsTab = 0
+    @Published public var isCheckingForUpdates = false
+    @Published public var updateCheckMessage = ""
 
     private let configURL: URL
     private let runner: CloudCommandRunner
@@ -701,6 +703,9 @@ public final class ProfileStore: ObservableObject {
             return
         }
         
+        isCheckingForUpdates = true
+        updateCheckMessage = "Checking for updates..."
+        
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 10.0
@@ -714,19 +719,32 @@ public final class ProfileStore: ObservableObject {
                     let latestVersion = tagName.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "v", with: "")
                     let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
                     
-                    if latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
-                        await MainActor.run {
+                    await MainActor.run {
+                        self.isCheckingForUpdates = false
+                        if latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
                             let wasAvailable = self.updateAvailable
                             self.updateAvailable = true
                             self.latestVersionString = tagName
+                            self.updateCheckMessage = "Update available: \(tagName)"
                             if !wasAvailable {
                                 self.triggerUpdateNotification(version: tagName)
                             }
+                        } else {
+                            self.updateAvailable = false
+                            self.updateCheckMessage = "CTX is up to date."
                         }
+                    }
+                } else {
+                    await MainActor.run {
+                        self.isCheckingForUpdates = false
+                        self.updateCheckMessage = "Failed to parse release info."
                     }
                 }
             } catch {
-                // Ignore background check errors silently
+                await MainActor.run {
+                    self.isCheckingForUpdates = false
+                    self.updateCheckMessage = "Error checking for updates."
+                }
             }
         }
     }
