@@ -68,14 +68,14 @@ struct AddGCPProfileView: View {
 
             Form {
                 Section("Configuration Identity") {
-                    TextField("Config Name:", text: $draft.name, prompt: Text("e.g. dev-jfrog"))
+                    TextField("Config Name:", text: $draft.name, prompt: Text("e.g. dev-gcp"))
                         .textFieldStyle(.roundedBorder)
                         .disabled(isEditing)
                     
                     TextField("Project ID:", text: $draft.project, prompt: Text("e.g. support-prod-157422"))
                         .textFieldStyle(.roundedBorder)
                     
-                    TextField("Account Email:", text: $draft.account, prompt: Text("e.g. user@jfrog.com"))
+                    TextField("Account Email:", text: $draft.account, prompt: Text("e.g. user@example.com"))
                         .textFieldStyle(.roundedBorder)
                 }
                 

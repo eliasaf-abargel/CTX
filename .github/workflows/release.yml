@@ -16,21 +16,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      - name: Setup JFrog Fly
-        uses: jfrog/fly-action@v1
-
       - name: Build and Package Release
         run: ./script/build_and_run.sh release
         env:
           CTX_RELEASE_VERSION: ${{ github.ref_name }}
 
-      - name: Upload Artifact to JFrog Fly
-        uses: jfrog/fly-action/upload@v1
+      - name: Upload Workflow Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: CTX
-          version: ${{ github.ref_name }}
-          files: |
-            dist/CTX.app.zip
+          name: CTX-${{ github.ref_name }}
+          path: dist/CTX.app.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

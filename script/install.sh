@@ -20,7 +20,7 @@ if [[ "$(uname)" != "Darwin" ]]; then
 fi
 
 # Resolve the download URL
-# If CTX_DOWNLOAD_URL is supplied (e.g. from JFrog Fly or Artifactory), use it.
+# If CTX_DOWNLOAD_URL is supplied (e.g. from a custom registry), use it.
 # Otherwise, fall back to GitHub Releases.
 if [[ -n "${CTX_DOWNLOAD_URL:-}" ]]; then
   DOWNLOAD_URL="$CTX_DOWNLOAD_URL"

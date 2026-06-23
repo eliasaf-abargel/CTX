@@ -7,7 +7,7 @@ sso_account_id = 123456789012
 sso_role_name = AdministratorAccess
 region = eu-west-1
 
-[sso-session jfrog]
+[sso-session example]
 sso_start_url = https://example.awsapps.com/start
 """)
 
@@ -80,7 +80,7 @@ try FileManager.default.createDirectory(at: tempGCPConfigDir, withIntermediateDi
 let tempGCPConfigURL = tempGCPConfigDir.appendingPathComponent("config_default")
 let gcpConfigContent = """
 [core]
-account = eliasafa@jfrog.com
+account = eliasafa@example.com
 project = support-prod-157422
 
 [compute]
@@ -93,7 +93,7 @@ assert(gcpProfile != nil)
 assert(gcpProfile?.provider == .gcp)
 assert(gcpProfile?.name == "default")
 assert(gcpProfile?.accountID == "support-prod-157422")
-assert(gcpProfile?.roleName == "eliasafa@jfrog.com")
+assert(gcpProfile?.roleName == "eliasafa@example.com")
 assert(gcpProfile?.region == "us-central1")
 assert(CloudFolder.builtIn(provider: .gcp, environment: .production).icon == .server)
 assert(CloudEnvironment.infer(from: gcpProfile!) == .production)
