@@ -97,7 +97,7 @@ struct DetailPane: View {
                             
                             Text("AWS: \(store.activeAWSProfile)")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.primary.opacity(0.8))
+                                .foregroundStyle(.primary.opacity(0.85))
                             
                             Divider()
                                 .frame(height: 10)
@@ -117,6 +117,12 @@ struct DetailPane: View {
                         .padding(.leading, 8)
                         .padding(.trailing, 6)
                         .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .shadow(color: .black.opacity(0.04), radius: 1, y: 0.5)
                     }
                     
                     if !store.activeGCPProfile.isEmpty,
@@ -130,7 +136,7 @@ struct DetailPane: View {
                             
                             Text("GCP: \(store.activeGCPProfile)")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.primary.opacity(0.8))
+                                .foregroundStyle(.primary.opacity(0.85))
                             
                             Divider()
                                 .frame(height: 10)
@@ -150,8 +156,15 @@ struct DetailPane: View {
                         .padding(.leading, 8)
                         .padding(.trailing, 6)
                         .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .shadow(color: .black.opacity(0.04), radius: 1, y: 0.5)
                     }
                 }
+                .buttonStyle(.plain)
             }
 
             ToolbarItem(placement: .primaryAction) {
