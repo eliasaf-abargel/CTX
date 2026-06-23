@@ -97,7 +97,7 @@ public final class ProfileStore: ObservableObject {
 
     public func refresh() {
         let text = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
-        var loadedProfiles = AWSConfigParser.parse(text)
+        var loadedProfiles = AWSConfigParser.parse(text).filter { $0.name != "default" }
         
         let gcpDir = GCPConfigPaths.configurationsDirURL
         if let fileURLs = try? FileManager.default.contentsOfDirectory(at: gcpDir, includingPropertiesForKeys: nil) {
@@ -148,6 +148,14 @@ public final class ProfileStore: ObservableObject {
             activeAWSProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
             lastMessage = "Active AWS_PROFILE=\(profile.name)"
+            
+            do {
+                try AWSConfigWriter.copyConfig(from: profile.name, to: "default")
+                try AWSConfigWriter.copyCredentials(from: profile.name, to: "default")
+            } catch {
+                lastMessage = "Failed to sync default credentials: \(error.localizedDescription)"
+            }
+            
             checkAllSessionsExpiration()
         } else {
             activeGCPProfile = profile.name
@@ -174,6 +182,12 @@ public final class ProfileStore: ObservableObject {
             activeAWSProfile = ""
             UserDefaults.standard.removeObject(forKey: "activeAWSProfile")
             lastMessage = "No active AWS profile"
+            do {
+                try AWSConfigWriter.deleteSection("default", from: AWSConfigPaths.configURL)
+                try AWSConfigWriter.deleteSection("default", from: AWSConfigPaths.credentialsURL)
+            } catch {
+                // Ignore clearing errors
+            }
         case .gcp:
             activeGCPProfile = ""
             UserDefaults.standard.removeObject(forKey: "activeGCPProfile")
@@ -479,6 +493,15 @@ public final class ProfileStore: ObservableObject {
                         secretAccessKey: secretAccessKey,
                         sessionToken: sessionToken
                     )
+                    if profile.name == activeAWSProfile {
+                        try AWSConfigWriter.copyConfig(from: profile.name, to: "default")
+                        try AWSConfigWriter.updateCredentials(
+                            profileName: "default",
+                            accessKeyId: accessKeyId,
+                            secretAccessKey: secretAccessKey,
+                            sessionToken: sessionToken
+                        )
+                    }
                     lastMessage = "STS credentials retrieved & stored in ~/.aws/credentials"
                 } else {
                     lastMessage = "Failed to parse STS credentials JSON"

@@ -206,4 +206,154 @@ public enum AWSConfigWriter {
         
         return output.joined(separator: "\n")
     }
+
+    public static func deleteSection(_ sectionName: String, from url: URL) throws {
+        let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let sectionHeader = "[\(sectionName)]"
+        
+        var output: [String] = []
+        var skipping = false
+        var found = false
+        
+        for line in existing.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+                skipping = (trimmed == sectionHeader)
+                if skipping {
+                    found = true
+                }
+            }
+            if !skipping {
+                output.append(String(line))
+            }
+        }
+        
+        if found {
+            try backup(url)
+            let text = output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            try (text + "\n").write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    public static func copyCredentials(
+        from sourceProfile: String,
+        to targetProfile: String,
+        fileURL: URL = AWSConfigPaths.credentialsURL
+    ) throws {
+        let content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        var accessKey = ""
+        var secretKey = ""
+        var token = ""
+        
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+        var insideSource = false
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+                let sectionName = String(trimmed.dropFirst().dropLast())
+                insideSource = (sectionName == sourceProfile)
+                continue
+            }
+            if insideSource {
+                let parts = trimmed.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                if parts.count == 2 {
+                    if parts[0] == "aws_access_key_id" {
+                        accessKey = parts[1]
+                    } else if parts[0] == "aws_secret_access_key" {
+                        secretKey = parts[1]
+                    } else if parts[0] == "aws_session_token" {
+                        token = parts[1]
+                    }
+                }
+            }
+        }
+        
+        if !accessKey.isEmpty && !secretKey.isEmpty && !token.isEmpty {
+            try updateCredentials(
+                profileName: targetProfile,
+                accessKeyId: accessKey,
+                secretAccessKey: secretKey,
+                sessionToken: token,
+                to: fileURL
+            )
+        }
+    }
+
+    public static func copyConfig(
+        from sourceProfile: String,
+        to targetProfile: String,
+        fileURL: URL = AWSConfigPaths.configURL
+    ) throws {
+        let content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        
+        var ssoSession = ""
+        var ssoAccountId = ""
+        var ssoRoleName = ""
+        var region = ""
+        var output = ""
+        
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+        var insideSource = false
+        let sourceSection = sourceProfile == "default" ? "default" : "profile \(sourceProfile)"
+        
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+                let sectionName = String(trimmed.dropFirst().dropLast())
+                insideSource = (sectionName == sourceSection)
+                continue
+            }
+            if insideSource {
+                let parts = trimmed.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                if parts.count == 2 {
+                    if parts[0] == "sso_session" {
+                        ssoSession = parts[1]
+                    } else if parts[0] == "sso_account_id" {
+                        ssoAccountId = parts[1]
+                    } else if parts[0] == "sso_role_name" {
+                        ssoRoleName = parts[1]
+                    } else if parts[0] == "region" {
+                        region = parts[1]
+                    } else if parts[0] == "output" {
+                        output = parts[1]
+                    }
+                }
+            }
+        }
+        
+        let cleanedText = removingConfigSection(from: content, profileName: targetProfile)
+        
+        let targetSection = targetProfile == "default" ? "default" : "profile \(targetProfile)"
+        
+        var stanza = "\n[\(targetSection)]\n"
+        if !ssoSession.isEmpty { stanza += "sso_session = \(ssoSession)\n" }
+        if !ssoAccountId.isEmpty { stanza += "sso_account_id = \(ssoAccountId)\n" }
+        if !ssoRoleName.isEmpty { stanza += "sso_role_name = \(ssoRoleName)\n" }
+        if !region.isEmpty { stanza += "region = \(region)\n" }
+        if !output.isEmpty { stanza += "output = \(output)\n" }
+        
+        try (cleanedText.trimmingCharacters(in: .whitespacesAndNewlines) + "\n" + stanza).write(
+            to: fileURL,
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    private static func removingConfigSection(from text: String, profileName: String) -> String {
+        let sectionName = profileName == "default" ? "[default]" : "[profile \(profileName)]"
+        var output: [String] = []
+        var skipping = false
+        
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+                skipping = (trimmed == sectionName)
+            }
+            if !skipping {
+                output.append(String(line))
+            }
+        }
+        
+        return output.joined(separator: "\n")
+    }
 }
