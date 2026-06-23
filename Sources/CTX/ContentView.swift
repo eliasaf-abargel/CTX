@@ -117,11 +117,6 @@ struct DetailPane: View {
                         .padding(.leading, 8)
                         .padding(.trailing, 6)
                         .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.08), in: Capsule())
-                        .overlay {
-                            Capsule()
-                                .stroke(.separator.opacity(0.2), lineWidth: 1)
-                        }
                     }
                     
                     if !store.activeGCPProfile.isEmpty,
@@ -155,11 +150,6 @@ struct DetailPane: View {
                         .padding(.leading, 8)
                         .padding(.trailing, 6)
                         .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.08), in: Capsule())
-                        .overlay {
-                            Capsule()
-                                .stroke(.separator.opacity(0.2), lineWidth: 1)
-                        }
                     }
                 }
             }
