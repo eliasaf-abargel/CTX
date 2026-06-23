@@ -705,8 +705,12 @@ public final class ProfileStore: ObservableObject {
                     
                     if latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
                         await MainActor.run {
+                            let wasAvailable = self.updateAvailable
                             self.updateAvailable = true
                             self.latestVersionString = tagName
+                            if !wasAvailable {
+                                self.triggerUpdateNotification(version: tagName)
+                            }
                         }
                     }
                 }
@@ -714,6 +718,22 @@ public final class ProfileStore: ObservableObject {
                 // Ignore background check errors silently
             }
         }
+    }
+
+    private func triggerUpdateNotification(version: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Update Available"
+        content.body = "A new version \(version) of CTX is available. Click to open Settings and update."
+        content.sound = UNNotificationSound.default
+        content.userInfo = ["type": "update"]
+        
+        let request = UNNotificationRequest(
+            identifier: "ctx.update.available",
+            content: content,
+            trigger: nil
+        )
+        
+        UNUserNotificationCenter.current().add(request) { _ in }
     }
 
     public func installUpdate() {

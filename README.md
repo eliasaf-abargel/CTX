@@ -33,6 +33,7 @@ Designed for developers and DevOps engineers who manage complex multi-account en
 - **Complete Folder Control:** Delete built-in or custom folders easily from the UI to keep your workspace decluttered.
 - **Secure Credentials Handling:** Exports and writes temporary AWS STS credentials and switches active gcloud configurations safely without storing static secrets.
 - **Session Expiration Alerts:** Monitors local AWS token caches and pops up system alerts or banners when your active session is about to expire.
+- **Seamless Auto-Updates:** Automatically monitors for new releases from GitHub in the background, posts system notifications when an update is available, and installs updates in a single click—downloading, extracting, replacing the app bundle, and restarting the app natively without manual steps.
 
 ---
 
