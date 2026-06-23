@@ -93,16 +93,24 @@ struct DetailPane: View {
                         
                         HStack(spacing: 6) {
                             Image(systemName: "cloud.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Color.accentColor)
-                            Circle()
-                                .fill(statusColor)
-                                .frame(width: 6, height: 6)
+                                .font(.system(size: 10))
+                                .foregroundStyle(statusColor)
                             Text("AWS: \(store.activeAWSProfile)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.secondary)
+                            
+                            Button {
+                                store.logout(activeAWS)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary.opacity(0.8))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Disconnect active AWS profile")
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.leading, 8)
+                        .padding(.trailing, 4)
                         .padding(.vertical, 3)
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
@@ -113,16 +121,24 @@ struct DetailPane: View {
                         
                         HStack(spacing: 6) {
                             Image(systemName: "globe")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Color.accentColor)
-                            Circle()
-                                .fill(statusColor)
-                                .frame(width: 6, height: 6)
+                                .font(.system(size: 10))
+                                .foregroundStyle(statusColor)
                             Text("GCP: \(store.activeGCPProfile)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.secondary)
+                            
+                            Button {
+                                store.logout(activeGCP)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary.opacity(0.8))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Disconnect active GCP configuration")
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.leading, 8)
+                        .padding(.trailing, 4)
                         .padding(.vertical, 3)
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }

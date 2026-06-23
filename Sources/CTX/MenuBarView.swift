@@ -18,15 +18,25 @@ struct MenuBarView: View {
                 if !store.activeAWSProfile.isEmpty,
                    let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile }) {
                     let statusColor = activeAWS.status.color
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(statusColor)
-                            .frame(width: 5, height: 5)
+                    HStack(spacing: 5) {
+                        Image(systemName: "cloud.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(statusColor)
                         Text("AWS:\(store.activeAWSProfile)")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.secondary)
+                        
+                        Button {
+                            store.logout(activeAWS)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 6)
+                    .padding(.leading, 6)
+                    .padding(.trailing, 4)
                     .padding(.vertical, 2)
                     .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
@@ -34,15 +44,25 @@ struct MenuBarView: View {
                 if !store.activeGCPProfile.isEmpty,
                    let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile }) {
                     let statusColor = activeGCP.status.color
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(statusColor)
-                            .frame(width: 5, height: 5)
+                    HStack(spacing: 5) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 8))
+                            .foregroundStyle(statusColor)
                         Text("GCP:\(store.activeGCPProfile)")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.secondary)
+                        
+                        Button {
+                            store.logout(activeGCP)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 6)
+                    .padding(.leading, 6)
+                    .padding(.trailing, 4)
                     .padding(.vertical, 2)
                     .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
