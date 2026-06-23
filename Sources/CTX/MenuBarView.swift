@@ -15,9 +15,9 @@ struct MenuBarView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
 
-                if !store.activeAWSProfile.isEmpty {
-                    let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile })
-                    let statusColor = activeAWS?.status.color ?? .gray
+                if !store.activeAWSProfile.isEmpty,
+                   let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile }) {
+                    let statusColor = activeAWS.status.color
                     HStack(spacing: 4) {
                         Circle()
                             .fill(statusColor)
@@ -31,9 +31,9 @@ struct MenuBarView: View {
                     .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
 
-                if !store.activeGCPProfile.isEmpty {
-                    let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile })
-                    let statusColor = activeGCP?.status.color ?? .gray
+                if !store.activeGCPProfile.isEmpty,
+                   let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile }) {
+                    let statusColor = activeGCP.status.color
                     HStack(spacing: 4) {
                         Circle()
                             .fill(statusColor)

@@ -231,3 +231,8 @@ public struct GCPProfileDraft: Equatable, Sendable {
         self.region = profile.region
     }
 }
+
+public enum SidebarSelection: Hashable, Codable, Sendable {
+    case profile(String)
+    case folder(String)
+}

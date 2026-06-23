@@ -57,13 +57,23 @@ struct ProfileDetailView: View {
                         // Actions Bar Row (Scrollable horizontally when space is limited)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
-                                Button {
-                                    store.login(profile)
-                                } label: {
-                                    Label("Connect", systemImage: "bolt.fill")
+                                if profile.status == .connected {
+                                    Button(role: .destructive) {
+                                        store.logout(profile)
+                                    } label: {
+                                        Label("Disconnect", systemImage: "bolt.slash.fill")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.regular)
+                                } else {
+                                    Button {
+                                        store.login(profile)
+                                    } label: {
+                                        Label("Connect", systemImage: "bolt.fill")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.regular)
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.regular)
                                 
                                 Button {
                                     store.setActive(profile)

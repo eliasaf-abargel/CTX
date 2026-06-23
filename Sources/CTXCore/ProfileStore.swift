@@ -5,7 +5,7 @@ import UserNotifications
 @MainActor
 public final class ProfileStore: ObservableObject {
     @Published public private(set) var profiles: [CloudProfile] = []
-    @Published public var selectedProfileID: CloudProfile.ID?
+    @Published public var selectedSelection: SidebarSelection?
     @Published public private(set) var activeAWSProfile: String
     @Published public private(set) var activeGCPProfile: String
     @Published public private(set) var lastMessage = ""
@@ -56,7 +56,17 @@ public final class ProfileStore: ObservableObject {
     }
 
     public var selectedProfile: CloudProfile? {
-        profiles.first { $0.id == selectedProfileID } ?? profiles.first
+        if case .profile(let profileID) = selectedSelection {
+            return profiles.first { $0.id == profileID }
+        }
+        return nil
+    }
+
+    public var selectedFolder: CloudFolder? {
+        if case .folder(let folderID) = selectedSelection {
+            return allFolders.first { $0.id == folderID }
+        }
+        return nil
     }
 
     public var groupedProfiles: [ProfileGroup] {
@@ -109,8 +119,16 @@ public final class ProfileStore: ObservableObject {
             UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
         }
         
-        if selectedProfileID == nil || profiles.contains(where: { $0.id == selectedProfileID }) == false {
-            selectedProfileID = profiles.first?.id
+        if selectedSelection == nil {
+            if let firstProfile = profiles.first {
+                selectedSelection = .profile(firstProfile.id)
+            }
+        } else if case .profile(let pId) = selectedSelection, !profiles.contains(where: { $0.id == pId }) {
+            if let firstProfile = profiles.first {
+                selectedSelection = .profile(firstProfile.id)
+            } else {
+                selectedSelection = nil
+            }
         }
         
         let awsCount = profiles.filter { $0.provider == .aws }.count
@@ -129,7 +147,7 @@ public final class ProfileStore: ObservableObject {
     }
 
     public func setActive(_ profile: CloudProfile) {
-        selectedProfileID = profile.id
+        selectedSelection = .profile(profile.id)
         if profile.provider == .aws {
             activeAWSProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
@@ -243,6 +261,13 @@ public final class ProfileStore: ObservableObject {
             hiddenFolderIDs.insert(folder.id)
             saveHiddenFolderIDs()
         }
+        if case .folder(let fId) = selectedSelection, fId == folder.id {
+            if let firstProfile = profiles.first {
+                selectedSelection = .profile(firstProfile.id)
+            } else {
+                selectedSelection = nil
+            }
+        }
         lastMessage = "Deleted folder \(folder.name)"
     }
 
@@ -295,6 +320,30 @@ public final class ProfileStore: ObservableObject {
         }
     }
 
+    public func logout(_ profile: CloudProfile) {
+        if profile.provider == .aws {
+            if activeAWSProfile == profile.name {
+                clearActive(for: .aws)
+            }
+            Task {
+                lastMessage = "Logging out AWS profile \(profile.name)..."
+                _ = await runner.run(["aws", "sso", "logout", "--profile", profile.name])
+                refresh()
+            }
+        } else {
+            if activeGCPProfile == profile.name {
+                clearActive(for: .gcp)
+            }
+            Task {
+                lastMessage = "Revoking GCP configuration \(profile.name)..."
+                if !profile.roleName.isEmpty {
+                    _ = await runner.run(["gcloud", "auth", "revoke", profile.roleName])
+                }
+                refresh()
+            }
+        }
+    }
+
     public func verify(_ profile: CloudProfile) async {
         let startedAt = Date()
         let result: CommandResult
@@ -333,7 +382,7 @@ public final class ProfileStore: ObservableObject {
                         setActive(profile)
                     } else if let activeProf = profiles.first(where: { $0.provider == profile.provider && $0.name == activeName }),
                               activeProf.status != .connected {
-                        if profile.id == selectedProfileID {
+                        if case .profile(let pId) = selectedSelection, profile.id == pId {
                             setActive(profile)
                         }
                     }

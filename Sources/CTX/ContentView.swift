@@ -53,6 +53,9 @@ struct DetailPane: View {
                 if let profile = store.selectedProfile {
                     ProfileDetailView(profile: profile, store: store, sheet: $sheet)
                         .navigationTitle(profile.name)
+                } else if let folder = store.selectedFolder {
+                    FolderDetailView(folder: folder, store: store, sheet: $sheet)
+                        .navigationTitle(folder.name)
                 } else {
                     ContentUnavailableView("No Profiles Selected", systemImage: "cloud.slash")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -84,9 +87,9 @@ struct DetailPane: View {
             // Principal active profile indicator in the titlebar (uses native alignment)
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 12) {
-                    if !store.activeAWSProfile.isEmpty {
-                        let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile })
-                        let statusColor = activeAWS?.status.color ?? .gray
+                    if !store.activeAWSProfile.isEmpty,
+                       let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile }) {
+                        let statusColor = activeAWS.status.color
                         
                         HStack(spacing: 6) {
                             Image(systemName: "cloud.fill")
@@ -104,9 +107,9 @@ struct DetailPane: View {
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     
-                    if !store.activeGCPProfile.isEmpty {
-                        let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile })
-                        let statusColor = activeGCP?.status.color ?? .gray
+                    if !store.activeGCPProfile.isEmpty,
+                       let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile }) {
+                        let statusColor = activeGCP.status.color
                         
                         HStack(spacing: 6) {
                             Image(systemName: "globe")
@@ -137,6 +140,152 @@ struct DetailPane: View {
                 .buttonStyle(.bordered)
                 .help("eliasafabargel@gmail.com")
             }
+        }
+    }
+}
+
+struct FolderDetailView: View {
+    let folder: CloudFolder
+    @ObservedObject var store: ProfileStore
+    @Binding var sheet: SidebarSheet?
+
+    var body: some View {
+        ScrollView {
+            HStack {
+                Spacer()
+                VStack(alignment: .leading, spacing: 28) {
+                    // Header Hero
+                    HStack(alignment: .center, spacing: 16) {
+                        Image(systemName: folder.icon.systemImage)
+                            .font(.system(size: 32))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(12)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(.separator.opacity(0.3), lineWidth: 1)
+                            }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(folder.provider.rawValue) · \(folder.name)")
+                                .font(.title2.weight(.semibold))
+                            Text("Environment folder containing profiles")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    
+                    Divider()
+                    
+                    let profiles = store.profiles.filter {
+                        $0.provider == folder.provider && store.folder(for: $0).id == folder.id
+                    }
+                    
+                    if profiles.isEmpty {
+                        ContentUnavailableView("No Profiles in Folder", systemImage: "cloud.slash", description: Text("Click the + button in the sidebar to add a profile to this folder."))
+                            .padding(.vertical, 40)
+                    } else {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Profiles (\(profiles.count))")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                            
+                            VStack(spacing: 12) {
+                                ForEach(profiles) { profile in
+                                    FolderProfileRow(profile: profile, store: store, sheet: $sheet)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(32)
+                .frame(maxWidth: 640)
+                Spacer()
+            }
+        }
+    }
+}
+
+struct FolderProfileRow: View {
+    let profile: CloudProfile
+    @ObservedObject var store: ProfileStore
+    @Binding var sheet: SidebarSheet?
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Circle()
+                .fill(profile.status.color)
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(profile.name)
+                        .font(.body.weight(.semibold))
+                    
+                    if store.isActive(profile) {
+                        Text("Active")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(Color.accentColor, in: Capsule())
+                    }
+                }
+
+                if profile.provider == .aws {
+                    Text("Role: \(profile.roleName)  ·  Account: \(profile.accountID)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Account: \(profile.roleName)  ·  Project: \(profile.accountID)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                if profile.status == .connected {
+                    Button("Disconnect") {
+                        store.logout(profile)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else {
+                    Button("Connect") {
+                        store.login(profile)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+
+                if !store.isActive(profile) {
+                    Button("Activate") {
+                        store.setActive(profile)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                Button {
+                    sheet = .editProfile(profile)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Edit Profile")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.separator.opacity(0.2), lineWidth: 1)
         }
     }
 }

@@ -34,15 +34,16 @@ struct SidebarView: View {
     @State private var showingCreateMenu = false
 
     var body: some View {
-        List(selection: $store.selectedProfileID) {
+        List(selection: $store.selectedSelection) {
             ForEach(store.groupedProfiles) { group in
                 ProfileDisclosureGroup(
                     group: group,
-                    selectedProfileID: store.selectedProfileID,
+                    selectedSelection: $store.selectedSelection,
                     isExpanded: binding(for: group.id),
                     editFolder: { sheet = .editFolder($0) },
                     deleteFolder: { store.deleteFolder($0) }
                 )
+                .tag(SidebarSelection.folder(group.folder.id))
             }
         }
         .listStyle(.sidebar)
@@ -81,7 +82,7 @@ struct SidebarView: View {
 
 struct ProfileDisclosureGroup: View {
     let group: ProfileGroup
-    let selectedProfileID: CloudProfile.ID?
+    @Binding var selectedSelection: SidebarSelection?
     @Binding var isExpanded: Bool
     let editFolder: (CloudFolder) -> Void
     let deleteFolder: (CloudFolder) -> Void
@@ -91,9 +92,9 @@ struct ProfileDisclosureGroup: View {
             ForEach(group.profiles) { profile in
                 SidebarProfileRow(
                     profile: profile,
-                    isSelected: selectedProfileID == profile.id
+                    isSelected: selectedSelection == .profile(profile.id)
                 )
-                .tag(profile.id)
+                .tag(SidebarSelection.profile(profile.id))
             }
         } label: {
             HStack(spacing: 6) {
@@ -110,6 +111,7 @@ struct ProfileDisclosureGroup: View {
             .foregroundStyle(.secondary)
             .contentShape(Rectangle())
             .onTapGesture {
+                selectedSelection = .folder(group.folder.id)
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
