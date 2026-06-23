@@ -86,7 +86,15 @@ PLIST
 codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 
 open_app() {
-  /usr/bin/open "$APP_BUNDLE"
+  killall "$APP_NAME" >/dev/null 2>&1 || true
+  if [ -w /Applications ]; then
+    rm -rf "/Applications/$APP_NAME.app"
+    cp -R "$APP_BUNDLE" "/Applications/"
+    xattr -rd com.apple.quarantine "/Applications/$APP_NAME.app" >/dev/null 2>&1 || true
+    /usr/bin/open "/Applications/$APP_NAME.app"
+  else
+    /usr/bin/open "$APP_BUNDLE"
+  fi
 }
 
 case "$MODE" in

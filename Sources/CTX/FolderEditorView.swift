@@ -10,11 +10,20 @@ struct FolderEditorView: View {
     @State private var icon: CloudFolderIcon
     @State private var errorMessage = ""
 
+    private var availableProviders: [CloudProvider] {
+        let activeProviders = Set(store.profiles.map(\.provider))
+        if activeProviders.isEmpty {
+            return [.aws]
+        }
+        return Array(activeProviders).sorted(by: { $0.rawValue < $1.rawValue })
+    }
+
     init(store: ProfileStore, folder: CloudFolder? = nil) {
         self.store = store
         self.folder = folder
         self._name = State(initialValue: folder?.name ?? "")
-        self._provider = State(initialValue: folder?.provider ?? .aws)
+        let initialProvider = folder?.provider ?? Set(store.profiles.map(\.provider)).first ?? .aws
+        self._provider = State(initialValue: initialProvider)
         self._icon = State(initialValue: folder?.icon ?? .folder)
     }
 
@@ -39,7 +48,7 @@ struct FolderEditorView: View {
                 
                 Section("Settings") {
                     Picker("Provider:", selection: $provider) {
-                        ForEach(CloudProvider.allCases, id: \.self) { provider in
+                        ForEach(availableProviders, id: \.self) { provider in
                             Label(provider.rawValue, systemImage: provider.systemImage)
                                 .tag(provider)
                         }

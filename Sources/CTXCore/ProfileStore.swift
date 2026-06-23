@@ -119,16 +119,8 @@ public final class ProfileStore: ObservableObject {
             UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
         }
         
-        if selectedSelection == nil {
-            if let firstProfile = profiles.first {
-                selectedSelection = .profile(firstProfile.id)
-            }
-        } else if case .profile(let pId) = selectedSelection, !profiles.contains(where: { $0.id == pId }) {
-            if let firstProfile = profiles.first {
-                selectedSelection = .profile(firstProfile.id)
-            } else {
-                selectedSelection = nil
-            }
+        if let selection = selectedSelection, case .profile(let pId) = selection, !profiles.contains(where: { $0.id == pId }) {
+            selectedSelection = nil
         }
         
         let awsCount = profiles.filter { $0.provider == .aws }.count

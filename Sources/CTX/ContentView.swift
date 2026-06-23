@@ -57,8 +57,7 @@ struct DetailPane: View {
                     FolderDetailView(folder: folder, store: store, sheet: $sheet)
                         .navigationTitle(folder.name)
                 } else {
-                    ContentUnavailableView("No Profiles Selected", systemImage: "cloud.slash")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    WelcomeView()
                         .navigationTitle("CTX")
                 }
             }
@@ -93,26 +92,36 @@ struct DetailPane: View {
                         
                         HStack(spacing: 6) {
                             Image(systemName: "cloud.fill")
-                                .font(.system(size: 10))
+                                .font(.system(size: 9))
                                 .foregroundStyle(statusColor)
+                            
                             Text("AWS: \(store.activeAWSProfile)")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.primary.opacity(0.8))
+                            
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
                             
                             Button {
                                 store.logout(activeAWS)
                             } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary.opacity(0.8))
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .help("Disconnect active AWS profile")
                         }
                         .padding(.leading, 8)
-                        .padding(.trailing, 4)
+                        .padding(.trailing, 6)
                         .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .background(Color.secondary.opacity(0.08), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.2), lineWidth: 1)
+                        }
                     }
                     
                     if !store.activeGCPProfile.isEmpty,
@@ -121,26 +130,36 @@ struct DetailPane: View {
                         
                         HStack(spacing: 6) {
                             Image(systemName: "globe")
-                                .font(.system(size: 10))
+                                .font(.system(size: 9))
                                 .foregroundStyle(statusColor)
+                            
                             Text("GCP: \(store.activeGCPProfile)")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.primary.opacity(0.8))
+                            
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
                             
                             Button {
                                 store.logout(activeGCP)
                             } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary.opacity(0.8))
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .help("Disconnect active GCP configuration")
                         }
                         .padding(.leading, 8)
-                        .padding(.trailing, 4)
+                        .padding(.trailing, 6)
                         .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .background(Color.secondary.opacity(0.08), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.2), lineWidth: 1)
+                        }
                     }
                 }
             }
@@ -303,6 +322,35 @@ struct FolderProfileRow: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(.separator.opacity(0.2), lineWidth: 1)
         }
+    }
+}
+
+struct WelcomeView: View {
+    var body: some View {
+        VStack(spacing: 24) {
+            if let icon = NSApp.applicationIconImage {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 80, height: 80)
+                    .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
+            } else {
+                Image(systemName: "cloud.fill")
+                    .font(.system(size: 64))
+                    .foregroundStyle(Color.accentColor)
+            }
+            
+            VStack(spacing: 8) {
+                Text("Welcome to CTX")
+                    .font(.title3.weight(.bold))
+                Text("Select a profile or environment folder in the sidebar to get started.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: 280)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
