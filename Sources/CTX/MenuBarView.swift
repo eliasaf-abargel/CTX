@@ -184,6 +184,7 @@ struct MenuBarView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.showExpirationWarning)
         .onAppear {
             store.verifyAllProfiles()
+            store.checkForUpdates()
         }
     }
 

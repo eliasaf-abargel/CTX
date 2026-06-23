@@ -62,26 +62,51 @@ struct DetailPane: View {
                 }
             }
             
-            // Floating session expiration warning banner
-            if store.showExpirationWarning {
-                HStack(spacing: 8) {
-                    Image(systemName: "timer")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text(store.expirationWarningMessage)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+            // Floating notification stack
+            VStack(spacing: 8) {
+                if store.showExpirationWarning {
+                    HStack(spacing: 8) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text(store.expirationWarningMessage)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 3)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 3)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .padding(.top, 12)
-                .zIndex(100)
+                
+                if store.updateAvailable {
+                    Button {
+                        store.selectedSettingsTab = 2
+                        openSettings()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("Update Available: \(store.latestVersionString). Click to open settings.")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .padding(.top, 12)
+            .zIndex(100)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.showExpirationWarning)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.updateAvailable)
         .toolbar {
             // Principal active profile indicator in the titlebar (uses native alignment)
             ToolbarItem(placement: .principal) {

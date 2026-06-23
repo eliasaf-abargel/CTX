@@ -24,6 +24,7 @@ public final class ProfileStore: ObservableObject {
     @Published public var updateAvailable = false
     @Published public var latestVersionString = ""
     @Published public var isUpdating = false
+    @Published public var selectedSettingsTab = 0
 
     private let configURL: URL
     private let runner: CloudCommandRunner
@@ -57,6 +58,12 @@ public final class ProfileStore: ObservableObject {
         
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         checkForUpdates()
+        
+        Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkForUpdates()
+            }
+        }
     }
 
     public var selectedProfile: CloudProfile? {

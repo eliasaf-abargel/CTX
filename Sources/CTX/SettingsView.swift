@@ -6,7 +6,7 @@ struct SettingsView: View {
     @State private var editingFolder: CloudFolder?
 
     var body: some View {
-        TabView {
+        TabView(selection: $store.selectedSettingsTab) {
             Form {
                 Section("AWS Environment") {
                     LabeledContent("Config Path") {
@@ -80,6 +80,7 @@ struct SettingsView: View {
             .tabItem {
                 Label("Cloud Config", systemImage: "cloud")
             }
+            .tag(0)
 
             List {
                 Section {
@@ -137,6 +138,7 @@ struct SettingsView: View {
             .tabItem {
                 Label("Folders", systemImage: "folder")
             }
+            .tag(1)
 
             Form {
                 Section("Application Info") {
@@ -168,11 +170,15 @@ struct SettingsView: View {
             .tabItem {
                 Label("About", systemImage: "info.circle")
             }
+            .tag(2)
         }
         .scenePadding()
         .frame(width: 520, height: 340)
         .sheet(item: $editingFolder) { folder in
             FolderEditorView(store: store, folder: folder)
+        }
+        .onAppear {
+            store.checkForUpdates()
         }
     }
 
