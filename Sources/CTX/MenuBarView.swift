@@ -107,27 +107,36 @@ struct MenuBarView: View {
             // Update available banner inside the popover
             if store.updateAvailable {
                 Button {
-                    if let url = URL(string: "https://github.com/eliasaf-abargel/CTX/releases/latest") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    store.installUpdate()
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("Update Available: \(store.latestVersionString)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white)
-                        Spacer()
-                        Image(systemName: "arrow.up.forward.app.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.8))
+                        if store.isUpdating {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.6)
+                                .frame(width: 11, height: 11)
+                            Text("Installing Update...")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                        } else {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("Update Available: \(store.latestVersionString)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                            Spacer()
+                            Image(systemName: "arrow.down.to.line.compact")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Color.blue, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .disabled(store.isUpdating)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 

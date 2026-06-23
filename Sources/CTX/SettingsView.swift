@@ -146,13 +146,20 @@ struct SettingsView: View {
                     
                     if store.updateAvailable {
                         LabeledContent("New Version") {
-                            Button("Update to \(store.latestVersionString)") {
-                                if let url = URL(string: "https://github.com/eliasaf-abargel/CTX/releases/latest") {
-                                    NSWorkspace.shared.open(url)
+                            if store.isUpdating {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Installing...")
+                                        .foregroundColor(.secondary)
                                 }
+                            } else {
+                                Button("Update to \(store.latestVersionString)") {
+                                    store.installUpdate()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
                         }
                     }
                 }

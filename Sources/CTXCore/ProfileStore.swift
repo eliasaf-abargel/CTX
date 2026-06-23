@@ -1,6 +1,9 @@
 import Combine
 import Foundation
 import UserNotifications
+#if canImport(AppKit)
+import AppKit
+#endif
 
 @MainActor
 public final class ProfileStore: ObservableObject {
@@ -20,6 +23,7 @@ public final class ProfileStore: ObservableObject {
     @Published public var expirationWarningMessage = ""
     @Published public var updateAvailable = false
     @Published public var latestVersionString = ""
+    @Published public var isUpdating = false
 
     private let configURL: URL
     private let runner: CloudCommandRunner
@@ -685,6 +689,76 @@ public final class ProfileStore: ObservableObject {
                 }
             } catch {
                 // Ignore background check errors silently
+            }
+        }
+    }
+
+    public func installUpdate() {
+        guard !latestVersionString.isEmpty else { return }
+        
+        isUpdating = true
+        let tagName = latestVersionString
+        let downloadURLString = "https://github.com/eliasaf-abargel/CTX/releases/download/\(tagName)/CTX.app.zip"
+        
+        guard let url = URL(string: downloadURLString) else {
+            isUpdating = false
+            return
+        }
+        
+        lastMessage = "Downloading CTX update \(tagName)..."
+        
+        Task {
+            do {
+                let (tempZipURL, response) = try await URLSession.shared.download(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw NSError(domain: "CTX", code: 400, userInfo: [NSLocalizedDescriptionKey: "Failed to download update file"])
+                }
+                
+                let tempDirURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("ctx-update-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: tempDirURL, withIntermediateDirectories: true)
+                
+                await MainActor.run {
+                    self.lastMessage = "Installing update..."
+                }
+                
+                let unzipResult = await runner.run([
+                    "unzip", "-q", "-o", tempZipURL.path,
+                    "-d", tempDirURL.path
+                ])
+                
+                guard unzipResult.exitCode == 0 else {
+                    throw NSError(domain: "CTX", code: 500, userInfo: [NSLocalizedDescriptionKey: "Failed to extract update package"])
+                }
+                
+                let targetPath = Bundle.main.bundlePath
+                let sourcePath = tempDirURL.appendingPathComponent("CTX.app").path
+                
+                let script = """
+                sleep 0.5
+                rm -rf "\(targetPath)"
+                mv "\(sourcePath)" "\(targetPath)"
+                xattr -rd com.apple.quarantine "\(targetPath)" >/dev/null 2>&1 || true
+                open "\(targetPath)"
+                """
+                
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = ["-c", script]
+                try process.run()
+                
+                #if canImport(AppKit)
+                await MainActor.run {
+                    NSApplication.shared.terminate(nil)
+                }
+                #else
+                exit(0)
+                #endif
+            } catch {
+                await MainActor.run {
+                    self.isUpdating = false
+                    self.lastMessage = "Update failed: \(error.localizedDescription)"
+                }
             }
         }
     }
