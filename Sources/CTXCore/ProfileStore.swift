@@ -698,13 +698,15 @@ public final class ProfileStore: ObservableObject {
         }
     }
 
-    public func checkForUpdates() {
+    public func checkForUpdates(manual: Bool = false) {
         guard let url = URL(string: "https://api.github.com/repos/eliasaf-abargel/CTX/releases/latest") else {
             return
         }
         
         isCheckingForUpdates = true
-        updateCheckMessage = "Checking for updates..."
+        if manual {
+            updateCheckMessage = "Checking for updates..."
+        }
         
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -729,24 +731,73 @@ public final class ProfileStore: ObservableObject {
                             if !wasAvailable {
                                 self.triggerUpdateNotification(version: tagName)
                             }
+                            if manual {
+                                self.showUpdateAlert(version: tagName)
+                            }
                         } else {
                             self.updateAvailable = false
                             self.updateCheckMessage = "CTX is up to date."
+                            if manual {
+                                self.showUpToDateAlert(currentVersion: currentVersion)
+                            }
                         }
                     }
                 } else {
                     await MainActor.run {
                         self.isCheckingForUpdates = false
                         self.updateCheckMessage = "Failed to parse release info."
+                        if manual {
+                            self.showErrorAlert(message: "Failed to parse release information from GitHub.")
+                        }
                     }
                 }
             } catch {
                 await MainActor.run {
                     self.isCheckingForUpdates = false
                     self.updateCheckMessage = "Error checking for updates."
+                    if manual {
+                        self.showErrorAlert(message: "Could not connect to GitHub. Please check your internet connection and try again.")
+                    }
                 }
             }
         }
+    }
+
+    private func showUpToDateAlert(currentVersion: String) {
+        #if canImport(AppKit)
+        let alert = NSAlert()
+        alert.messageText = "You're up to date!"
+        alert.informativeText = "CTX \(currentVersion) is currently the newest version available."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        #endif
+    }
+
+    private func showUpdateAlert(version: String) {
+        #if canImport(AppKit)
+        let alert = NSAlert()
+        alert.messageText = "Update Available!"
+        alert.informativeText = "A new version (\(version)) of CTX is available. Would you like to install it now?"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Install Update")
+        alert.addButton(withTitle: "Later")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            self.installUpdate()
+        }
+        #endif
+    }
+
+    private func showErrorAlert(message: String) {
+        #if canImport(AppKit)
+        let alert = NSAlert()
+        alert.messageText = "Update Error"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        #endif
     }
 
     private func triggerUpdateNotification(version: String) {

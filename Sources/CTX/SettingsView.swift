@@ -178,7 +178,7 @@ struct SettingsView: View {
                                     }
                                     
                                     Button("Check for Updates") {
-                                        store.checkForUpdates()
+                                        store.checkForUpdates(manual: true)
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
