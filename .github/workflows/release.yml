@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -31,3 +31,9 @@ jobs:
           version: ${{ github.ref_name }}
           files: |
             dist/CTX.app.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CTX.app.zip
+
