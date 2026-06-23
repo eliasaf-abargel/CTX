@@ -37,3 +37,50 @@ jobs:
         with:
           files: dist/CTX.app.zip
 
+      - name: Update Homebrew Cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN secret is not set, skipping Homebrew Cask update."
+            exit 0
+          fi
+          
+          # Calculate SHA-256 hash
+          HASH=$(shasum -a 256 dist/CTX.app.zip | awk '{print $1}')
+          VERSION=${{ github.ref_name }}
+          # Strip the 'v' prefix if present for the version string
+          VERSION_NUM=${VERSION#v}
+          
+          # Clone the homebrew-tap repository
+          git clone https://x-access-token:$HOMEBREW_TAP_TOKEN@github.com/eliasaf-abargel/homebrew-tap.git temp-tap
+          cd temp-tap
+          
+          # Create Casks directory if it doesn't exist
+          mkdir -p Casks
+          
+          # Write the updated Cask definition
+          cat <<EOF > Casks/ctx.rb
+          cask "ctx" do
+            version "$VERSION_NUM"
+            sha256 "$HASH"
+
+            url "https://github.com/eliasaf-abargel/CTX/releases/download/v#{version}/CTX.app.zip"
+            name "CTX"
+            desc "Cloud Context Switcher for AWS and GCP"
+            homepage "https://github.com/eliasaf-abargel/CTX"
+
+            app "CTX.app"
+          end
+          EOF
+          
+          # Configure Git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Commit and Push
+          git add Casks/ctx.rb
+          git commit -m "Update CTX Cask to $VERSION"
+          git push origin main
+
+

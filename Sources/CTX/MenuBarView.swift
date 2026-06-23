@@ -63,7 +63,7 @@ struct MenuBarView: View {
                         }
                 }
                 .buttonStyle(.plain)
-                .help("eliasaf.abargel@gmail.com")
+                .help("eliasafabargel@gmail.com")
             }
 
             // Expiration warning banner inside the popover

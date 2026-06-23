@@ -135,7 +135,7 @@ struct DetailPane: View {
                         .foregroundColor(Color.accentColor)
                 }
                 .buttonStyle(.bordered)
-                .help("eliasaf.abargel@gmail.com")
+                .help("eliasafabargel@gmail.com")
             }
         }
     }
