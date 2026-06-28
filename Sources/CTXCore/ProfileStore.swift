@@ -250,7 +250,7 @@ public final class ProfileStore: ObservableObject {
                 } else {
                     lastMessage = "Failed to switch context: \(result.output)"
                 }
-                await verify(profile)
+                verifyAllProfiles()
             }
         }
     }
@@ -547,10 +547,14 @@ public final class ProfileStore: ObservableObject {
                 "--output", "json"
             ])
         case .kubernetes:
-            result = await runner.run([
-                "kubectl", "config", "get-contexts", profile.name,
-                "--output", "name"
-            ])
+            if profile.name == activeKubeContext {
+                result = await runner.run([
+                    "kubectl", "config", "get-contexts", profile.name,
+                    "--output", "name"
+                ])
+            } else {
+                result = CommandResult(exitCode: 99, output: "Not active context")
+            }
         }
         lastCommandDuration = Date().timeIntervalSince(startedAt)
         
@@ -598,10 +602,16 @@ public final class ProfileStore: ObservableObject {
             }
         }
         
-        updateStatus(
-            profile,
-            status: isConnected ? .connected : status(for: result)
-        )
+        let newStatus: ProfileStatus
+        if isConnected {
+            newStatus = .connected
+        } else if profile.provider == .kubernetes {
+            newStatus = .unknown
+        } else {
+            newStatus = status(for: result)
+        }
+        
+        updateStatus(profile, status: newStatus)
     }
 
     public func addAWSProfile(_ draft: AWSProfileDraft) throws {

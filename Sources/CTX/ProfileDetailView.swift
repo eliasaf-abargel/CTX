@@ -304,7 +304,7 @@ struct ProfileDetailView: View {
     private var statusText: String {
         switch profile.status {
         case .unknown:
-            return "Not Checked"
+            return profile.provider == .kubernetes ? "Inactive" : "Not Checked"
         default:
             return profile.status.rawValue
         }
