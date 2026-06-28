@@ -23,7 +23,8 @@ struct ProviderIcon: View {
     }
 
     var body: some View {
-        if let nsImage = Bundle.module.image(forResource: assetName) {
+        if let module = Bundle.safeModule,
+           let nsImage = module.image(forResource: assetName) {
             Image(nsImage: nsImage)
                 .resizable()
                 .interpolation(.high)
@@ -34,5 +35,35 @@ struct ProviderIcon: View {
                 .font(.system(size: size))
                 .foregroundStyle(fallbackTint ?? .secondary)
         }
+    }
+}
+
+extension Bundle {
+    static var safeModule: Bundle? {
+        // 1. Look for the resource bundle inside the main bundle's Resources directory (macOS app standard)
+        if let bundleURL = Bundle.main.resourceURL?.appendingPathComponent("CTX_CTX.bundle"),
+           let bundle = Bundle(url: bundleURL) {
+            return bundle
+        }
+        // 2. Look for it directly inside the main bundle (flat)
+        if let bundleURL = Bundle.main.bundleURL.appendingPathComponent("CTX_CTX.bundle") as URL?,
+           let bundle = Bundle(url: bundleURL) {
+            return bundle
+        }
+        // 3. Look for it relative to the executable (command line tool style)
+        if let execURL = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("CTX_CTX.bundle"),
+           let bundle = Bundle(url: execURL) {
+            return bundle
+        }
+        // 4. Fallback: try standard build paths
+        let buildPath = "/Users/eliasafa/IdeaProjects/CTX/.build/arm64-apple-macosx/debug/CTX_CTX.bundle"
+        if let bundle = Bundle(path: buildPath) {
+            return bundle
+        }
+        let buildPathRelease = "/Users/eliasafa/IdeaProjects/CTX/.build/arm64-apple-macosx/release/CTX_CTX.bundle"
+        if let bundle = Bundle(path: buildPathRelease) {
+            return bundle
+        }
+        return nil
     }
 }

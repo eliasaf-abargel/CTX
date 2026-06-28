@@ -34,10 +34,14 @@ public enum KubeConfigParser {
                 if trimmed.hasPrefix("current-context:") {
                     current = value(after: "current-context:", in: trimmed)
                     inContexts = false
-                } else {
-                    inContexts = trimmed.hasPrefix("contexts:")
+                    continue
+                } else if trimmed.hasPrefix("contexts:") {
+                    inContexts = true
+                    continue
+                } else if !trimmed.hasPrefix("-") {
+                    inContexts = false
+                    continue
                 }
-                continue
             }
 
             guard inContexts else { continue }
@@ -49,7 +53,7 @@ public enum KubeConfigParser {
             }
         }
 
-        let contexts = names
+        let contexts = Array(Set(names))
             .filter { !$0.isEmpty }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             .map { CloudProfile(provider: .kubernetes, name: $0) }

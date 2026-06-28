@@ -141,10 +141,12 @@ struct SidebarProfileRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: isSelected ? "cloud.fill" : "cloud")
-                .font(.system(size: 13))
-                .foregroundStyle(isSelected ? .white : (profile.status == .connected ? Color.green : Color.accentColor))
-                .frame(width: 18)
+            ProviderIcon(
+                provider: profile.provider,
+                size: 14,
+                fallbackTint: isSelected ? .white : (profile.status == .connected ? Color.green : Color.accentColor)
+            )
+            .frame(width: 18)
 
             Text(profile.name)
                 .font(.body)

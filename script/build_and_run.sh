@@ -35,12 +35,17 @@ if [[ "$MODE" == "release" ]]; then
 fi
 
 swift build -c "$BUILD_CONFIG"
-BUILD_BINARY="$(swift build -c "$BUILD_CONFIG" --show-bin-path)/$APP_NAME"
+BUILD_DIR="$(swift build -c "$BUILD_CONFIG" --show-bin-path)"
+BUILD_BINARY="$BUILD_DIR/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$RESOURCES_DIR"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+
+if [[ -d "$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle" ]]; then
+  cp -R "$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle" "$RESOURCES_DIR/"
+fi
 
 if [[ -f "$ICON_SVG" ]]; then
   rm -rf "$ICONSET_DIR"

@@ -66,7 +66,9 @@ public final class ProfileStore: ObservableObject {
                 self?.checkAllSessionsExpiration()
             }
         
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        if Bundle.main.bundleIdentifier != nil && Bundle.main.infoDictionary?["CFBundlePackageType"] as? String == "APPL" {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
         checkForUpdates()
         
         Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
