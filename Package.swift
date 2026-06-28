@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CTX",
-            dependencies: ["CTXCore"]
+            dependencies: ["CTXCore"],
+            resources: [.process("Resources")]
         ),
         .target(name: "CTXCore"),
         .executableTarget(

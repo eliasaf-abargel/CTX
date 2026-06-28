@@ -21,17 +21,21 @@ struct ContentView: View {
                 AddAWSProfileView(store: store)
             case .addGCPProfile:
                 AddGCPProfileView(store: store)
+            case .addAzureProfile:
+                AddAzureProfileView(store: store)
             case .editProfile(let profile):
-                if profile.provider == .aws {
-                    AddAWSProfileView(store: store, mode: .edit(profile))
-                } else {
-                    AddGCPProfileView(store: store, mode: .edit(profile))
+                switch profile.provider {
+                case .aws: AddAWSProfileView(store: store, mode: .edit(profile))
+                case .gcp: AddGCPProfileView(store: store, mode: .edit(profile))
+                case .azure: AddAzureProfileView(store: store, mode: .edit(profile))
+                case .kubernetes: KubernetesContextSheet(store: store, profile: profile)
                 }
             case .duplicateProfile(let profile):
-                if profile.provider == .aws {
-                    AddAWSProfileView(store: store, mode: .duplicate(profile))
-                } else {
-                    AddGCPProfileView(store: store, mode: .duplicate(profile))
+                switch profile.provider {
+                case .aws: AddAWSProfileView(store: store, mode: .duplicate(profile))
+                case .gcp: AddGCPProfileView(store: store, mode: .duplicate(profile))
+                case .azure: AddAzureProfileView(store: store, mode: .duplicate(profile))
+                case .kubernetes: KubernetesContextSheet(store: store, profile: profile)
                 }
             case .addFolder:
                 FolderEditorView(store: store)
@@ -48,62 +52,69 @@ struct DetailPane: View {
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
 
     var body: some View {
-        ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                if let profile = store.selectedProfile {
-                    ProfileDetailView(profile: profile, store: store, sheet: $sheet)
-                        .navigationTitle(profile.name)
-                } else if let folder = store.selectedFolder {
-                    FolderDetailView(folder: folder, store: store, sheet: $sheet)
-                        .navigationTitle(folder.name)
-                } else {
-                    WelcomeView()
-                        .navigationTitle("CTX")
-                }
-            }
-            
-            // Floating notification stack
-            VStack(spacing: 8) {
-                if store.showExpirationWarning {
-                    HStack(spacing: 8) {
-                        Image(systemName: "timer")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text(store.expirationWarningMessage)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 3)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                
-                if store.updateAvailable {
-                    Button {
-                        store.selectedSettingsTab = 2
-                        openSettings()
-                    } label: {
+        VStack(spacing: 0) {
+            // Inline notification bars — part of the layout so they NEVER cover content
+            if store.showExpirationWarning || store.updateAvailable {
+                VStack(spacing: 8) {
+                    if store.showExpirationWarning {
                         HStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle.fill")
+                            Image(systemName: "timer")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(.white)
-                            Text("Update Available: \(store.latestVersionString). Click to open settings.")
+                            Text(store.expirationWarningMessage)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
+                            Spacer()
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 3)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.orange, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .buttonStyle(.plain)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+
+                    if store.updateAvailable {
+                        Button {
+                            store.selectedSettingsTab = 2
+                            openSettings()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                Text("Update Available: \(store.latestVersionString). Click to open settings.")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.blue, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
             }
-            .padding(.top, 12)
-            .zIndex(100)
+
+            // Main content flows BELOW the banners — never covered
+            if let profile = store.selectedProfile {
+                ProfileDetailView(profile: profile, store: store, sheet: $sheet)
+                    .navigationTitle(profile.name)
+            } else if let folder = store.selectedFolder {
+                FolderDetailView(folder: folder, store: store, sheet: $sheet)
+                    .navigationTitle(folder.name)
+            } else {
+                WelcomeView()
+                    .navigationTitle("CTX")
+            }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.showExpirationWarning)
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.updateAvailable)
@@ -123,7 +134,17 @@ struct DetailPane: View {
                             Text("AWS: \(store.activeAWSProfile)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.primary.opacity(0.85))
-                            
+
+                            if !activeAWS.region.isEmpty {
+                                Text("· \(activeAWS.region)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            if activeAWS.status == .connected, let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
+                                SessionCountdownView(expiresAt: expiresAt)
+                            }
+
                             Divider()
                                 .frame(height: 10)
                                 .background(Color.secondary.opacity(0.3))
@@ -145,6 +166,7 @@ struct DetailPane: View {
                             Capsule()
                                 .stroke(.separator.opacity(0.15), lineWidth: 0.5)
                         }
+                        .help("AWS \(store.activeAWSProfile) · Account \(activeAWS.accountID.isEmpty ? "—" : activeAWS.accountID) · \(activeAWS.status.rawValue)")
                     }
                     
                     if !store.activeGCPProfile.isEmpty,
@@ -159,7 +181,13 @@ struct DetailPane: View {
                             Text("GCP: \(store.activeGCPProfile)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.primary.opacity(0.85))
-                            
+
+                            if !activeGCP.accountID.isEmpty {
+                                Text("· \(activeGCP.accountID)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+
                             Divider()
                                 .frame(height: 10)
                                 .background(Color.secondary.opacity(0.3))
@@ -181,6 +209,87 @@ struct DetailPane: View {
                             Capsule()
                                 .stroke(.separator.opacity(0.15), lineWidth: 0.5)
                         }
+                        .help("GCP \(store.activeGCPProfile) · Project \(activeGCP.accountID.isEmpty ? "—" : activeGCP.accountID) · \(activeGCP.status.rawValue)")
+                    }
+
+                    if !store.activeAzureProfile.isEmpty,
+                       let activeAzure = store.profiles.first(where: { $0.provider == .azure && $0.name == store.activeAzureProfile }) {
+                        let statusColor = activeAzure.status.color
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "triangle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(statusColor)
+
+                            Text("Azure: \(store.activeAzureProfile)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.primary.opacity(0.85))
+
+                            if !activeAzure.region.isEmpty {
+                                Text("· \(activeAzure.region)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
+
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeAzure)
+                                }
+                                .help("Disconnect active Azure subscription")
+                        }
+                        .padding(.leading, 8)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .help("Azure \(store.activeAzureProfile) · Subscription \(activeAzure.accountID.isEmpty ? "—" : activeAzure.accountID) · \(activeAzure.status.rawValue)")
+                    }
+
+                    if !store.activeKubeContext.isEmpty,
+                       let activeKube = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == store.activeKubeContext }) {
+                        let statusColor = activeKube.status.color
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "shippingbox.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(statusColor)
+
+                            Text("K8s: \(store.activeKubeContext)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.primary.opacity(0.85))
+
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
+
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeKube)
+                                }
+                                .help("Clear current Kubernetes context")
+                        }
+                        .padding(.leading, 8)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .help("Kubernetes context \(store.activeKubeContext) · \(activeKube.status.rawValue)")
                     }
                 }
                 .buttonStyle(.plain)
@@ -190,12 +299,14 @@ struct DetailPane: View {
                 Button {
                     openSettings()
                 } label: {
-                    Text("EA")
-                        .font(.caption.weight(.bold))
+                    Text(store.activeIdentityInitials)
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundColor(Color.accentColor)
+                        .frame(width: 24, height: 24)
+                        .background(Color.accentColor.opacity(0.15), in: Circle())
                 }
-                .buttonStyle(.bordered)
-                .help("eliasafabargel@gmail.com")
+                .buttonStyle(.plain)
+                .help("Signed in as \(store.activeIdentityLabel)")
             }
         }
     }
@@ -246,10 +357,11 @@ struct FolderDetailView: View {
                         Spacer()
                         
                         Button {
-                            if folder.provider == .aws {
-                                sheet = .addAWSProfile
-                            } else {
-                                sheet = .addGCPProfile
+                            switch folder.provider {
+                            case .aws: sheet = .addAWSProfile
+                            case .gcp: sheet = .addGCPProfile
+                            case .azure: sheet = .addAzureProfile
+                            case .kubernetes: break
                             }
                         } label: {
                             Label("Add Profile", systemImage: "plus")
@@ -319,6 +431,14 @@ struct FolderProfileRow: View {
                     Text("Role: \(profile.roleName)  ·  Account: \(profile.accountID)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if profile.provider == .azure {
+                    Text("Subscription: \(profile.accountID)  ·  Tenant: \(profile.roleName.isEmpty ? "—" : profile.roleName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if profile.provider == .kubernetes {
+                    Text("Kubernetes context")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else {
                     Text("Account: \(profile.roleName)  ·  Project: \(profile.accountID)")
                         .font(.caption)
@@ -368,6 +488,27 @@ struct FolderProfileRow: View {
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(.separator.opacity(0.2), lineWidth: 1)
+        }
+    }
+}
+
+/// A live mm:ss countdown to an AWS SSO session's expiry, shown in the toolbar.
+struct SessionCountdownView: View {
+    let expiresAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+            let minutes = Int(remaining) / 60
+            let seconds = Int(remaining) % 60
+            HStack(spacing: 3) {
+                Image(systemName: "timer")
+                    .font(.system(size: 8, weight: .bold))
+                Text(String(format: "%02d:%02d", minutes, seconds))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            }
+            .foregroundStyle(remaining <= 120 ? Color.orange : Color.secondary)
+            .help("Active AWS session expires in \(minutes)m \(seconds)s")
         }
     }
 }

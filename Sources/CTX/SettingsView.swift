@@ -72,6 +72,70 @@ struct SettingsView: View {
                     LabeledContent("Total Configurations", value: "\(store.profiles.filter { $0.provider == .gcp }.count)")
                 }
 
+                Section("Azure Environment") {
+                    LabeledContent("Profiles Path") {
+                        HStack(spacing: 8) {
+                            Text(AzureConfigPaths.profilesDirURL.path)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
+
+                            Button {
+                                copyToClipboard(AzureConfigPaths.profilesDirURL.path)
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy Azure profiles path")
+
+                            Button {
+                                NSWorkspace.shared.selectFile(AzureConfigPaths.profilesDirURL.path, inFileViewerRootedAtPath: "")
+                            } label: {
+                                Image(systemName: "arrow.right.circle")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reveal Azure profiles in Finder")
+                        }
+                    }
+                    LabeledContent("Active Subscription", value: store.activeAzureProfile.isEmpty ? "None" : store.activeAzureProfile)
+                    LabeledContent("Total Subscriptions", value: "\(store.profiles.filter { $0.provider == .azure }.count)")
+                }
+
+                Section("Kubernetes Environment") {
+                    LabeledContent("Kubeconfig Path") {
+                        HStack(spacing: 8) {
+                            Text(KubeConfigPaths.configURL.path)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
+
+                            Button {
+                                copyToClipboard(KubeConfigPaths.configURL.path)
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy kubeconfig path")
+
+                            Button {
+                                NSWorkspace.shared.selectFile(KubeConfigPaths.configURL.path, inFileViewerRootedAtPath: "")
+                            } label: {
+                                Image(systemName: "arrow.right.circle")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reveal kubeconfig in Finder")
+                        }
+                    }
+                    LabeledContent("Current Context", value: store.activeKubeContext.isEmpty ? "None" : store.activeKubeContext)
+                    LabeledContent("Total Contexts", value: "\(store.profiles.filter { $0.provider == .kubernetes }.count)")
+                }
+
                 Section("Folders Info") {
                     LabeledContent("Custom Folders", value: "\(store.allFolders.filter(\.isCustom).count)")
                 }
@@ -144,7 +208,8 @@ struct SettingsView: View {
                 Section("Application Info") {
                     LabeledContent("Name", value: "CTX")
                     LabeledContent("Version", value: appVersion)
-                    LabeledContent("Developer", value: "Eliasaf Abargel")
+                    LabeledContent("Created by", value: "Eliasaf Abargel")
+                    LabeledContent("Signed in as", value: store.activeIdentityLabel)
                     
                     if store.updateAvailable {
                         LabeledContent("New Version") {

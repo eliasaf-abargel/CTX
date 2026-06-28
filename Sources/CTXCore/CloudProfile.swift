@@ -3,6 +3,8 @@ import Foundation
 public enum CloudProvider: String, Codable, CaseIterable, Sendable {
     case aws = "AWS"
     case gcp = "GCP"
+    case azure = "Azure"
+    case kubernetes = "Kubernetes"
 
     public var systemImage: String {
         switch self {
@@ -10,6 +12,10 @@ public enum CloudProvider: String, Codable, CaseIterable, Sendable {
             "cloud"
         case .gcp:
             "globe"
+        case .azure:
+            "triangle"
+        case .kubernetes:
+            "shippingbox"
         }
     }
 }
@@ -54,15 +60,30 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
     }
 
     public var accountLabel: String {
-        provider == .aws ? "AWS Account" : "GCP Project"
+        switch provider {
+        case .aws: "AWS Account"
+        case .gcp: "GCP Project"
+        case .azure: "Azure Subscription"
+        case .kubernetes: "Cluster"
+        }
     }
 
     public var roleLabel: String {
-        provider == .aws ? "IAM Role" : "GCP Account"
+        switch provider {
+        case .aws: "IAM Role"
+        case .gcp: "GCP Account"
+        case .azure: "Azure Tenant"
+        case .kubernetes: "User"
+        }
     }
 
     public var regionLabel: String {
-        provider == .aws ? "Default Region" : "Compute Region"
+        switch provider {
+        case .aws: "Default Region"
+        case .gcp: "Compute Region"
+        case .azure: "Default Location"
+        case .kubernetes: "Namespace"
+        }
     }
 }
 
@@ -229,6 +250,22 @@ public struct GCPProfileDraft: Equatable, Sendable {
         self.project = profile.accountID
         self.account = profile.roleName
         self.region = profile.region
+    }
+}
+
+public struct AzureProfileDraft: Equatable, Sendable {
+    public var name = ""
+    public var subscriptionID = ""
+    public var tenantID = ""
+    public var location = ""
+
+    public init() {}
+
+    public init(profile: CloudProfile, duplicate: Bool = false) {
+        self.name = duplicate ? "\(profile.name)-copy" : profile.name
+        self.subscriptionID = profile.accountID
+        self.tenantID = profile.roleName
+        self.location = profile.region
     }
 }
 

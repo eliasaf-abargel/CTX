@@ -1,21 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="cloud" x1="220" y1="250" x2="780" y2="760" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#3AF071"/>
-      <stop offset="0.46" stop-color="#22D5A7"/>
-      <stop offset="1" stop-color="#2087FF"/>
+      <stop offset="0" stop-color="#3AF071"></stop>
+      <stop offset="0.46" stop-color="#22D5A7"></stop>
+      <stop offset="1" stop-color="#2087FF"></stop>
     </linearGradient>
     <linearGradient id="inner" x1="330" y1="375" x2="685" y2="676" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0A0D0F"/>
-      <stop offset="1" stop-color="#11171A"/>
+      <stop offset="0" stop-color="#0A0D0F"></stop>
+      <stop offset="1" stop-color="#11171A"></stop>
     </linearGradient>
     <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="30" stdDeviation="34" flood-color="#000000" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="30" stdDeviation="34" flood-color="#000000" flood-opacity="0.35"></feDropShadow>
     </filter>
   </defs>
 
-  <rect width="1024" height="1024" rx="224" fill="#050708"/>
-  <path d="M286 682h422c92 0 166-71 166-160 0-82-63-150-144-159-33-101-127-173-239-173-126 0-231 92-249 212-67 18-116 74-116 141 0 77 68 139 160 139Z" fill="url(#cloud)" filter="url(#softShadow)"/>
-  <path d="M324 617h375c56 0 101-42 101-94 0-50-41-91-94-94l-33-2-10-31c-24-73-92-123-174-123-93 0-170 67-183 157l-5 33-32 9c-41 11-70 43-70 81 0 35 29 64 65 64h60Z" fill="url(#inner)" opacity="0.96"/>
-  <path d="M476 360v96H365l174 208V540h121L476 360Z" fill="url(#cloud)"/>
+  <rect width="1024" height="1024" rx="224" fill="#050708"></rect>
+  <path d="M286 682h422c92 0 166-71 166-160 0-82-63-150-144-159-33-101-127-173-239-173-126 0-231 92-249 212-67 18-116 74-116 141 0 77 68 139 160 139Z" fill="url(#cloud)" filter="url(#softShadow)"></path>
+  <path d="M324 617h375c56 0 101-42 101-94 0-50-41-91-94-94l-33-2-10-31c-24-73-92-123-174-123-93 0-170 67-183 157l-5 33-32 9c-41 11-70 43-70 81 0 35 29 64 65 64h60Z" fill="url(#inner)" opacity="0.96"></path>
+  <path d="M476 360v96H365l174 208V540h121L476 360Z" fill="url(#cloud)"></path>
 </svg>

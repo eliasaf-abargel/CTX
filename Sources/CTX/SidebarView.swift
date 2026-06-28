@@ -4,6 +4,7 @@ import SwiftUI
 enum SidebarSheet: Identifiable {
     case addAWSProfile
     case addGCPProfile
+    case addAzureProfile
     case editProfile(CloudProfile)
     case duplicateProfile(CloudProfile)
     case addFolder
@@ -15,6 +16,8 @@ enum SidebarSheet: Identifiable {
             "addAWSProfile"
         case .addGCPProfile:
             "addGCPProfile"
+        case .addAzureProfile:
+            "addAzureProfile"
         case .editProfile(let profile):
             "editProfile:\(profile.id)"
         case .duplicateProfile(let profile):
@@ -53,16 +56,18 @@ struct SidebarView: View {
                 Menu {
                     if let folder = store.selectedFolder {
                         Button("Add Profile to \(folder.name)...") {
-                            if folder.provider == .aws {
-                                sheet = .addAWSProfile
-                            } else {
-                                sheet = .addGCPProfile
+                            switch folder.provider {
+                            case .aws: sheet = .addAWSProfile
+                            case .gcp: sheet = .addGCPProfile
+                            case .azure: sheet = .addAzureProfile
+                            case .kubernetes: break
                             }
                         }
                         Divider()
                     }
                     Button("AWS Profile...") { sheet = .addAWSProfile }
                     Button("GCP Configuration...") { sheet = .addGCPProfile }
+                    Button("Azure Subscription...") { sheet = .addAzureProfile }
                     Button("New Folder...") { sheet = .addFolder }
                 } label: {
                     Label("Create", systemImage: "plus")

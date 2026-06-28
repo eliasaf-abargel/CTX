@@ -11,6 +11,8 @@ public final class ProfileStore: ObservableObject {
     @Published public var selectedSelection: SidebarSelection?
     @Published public private(set) var activeAWSProfile: String
     @Published public private(set) var activeGCPProfile: String
+    @Published public private(set) var activeAzureProfile: String
+    @Published public private(set) var activeKubeContext: String
     @Published public private(set) var lastMessage = ""
     @Published public private(set) var lastLoginAt: Date?
     @Published public private(set) var lastVerifiedAt: Date?
@@ -27,6 +29,10 @@ public final class ProfileStore: ObservableObject {
     @Published public var selectedSettingsTab = 0
     @Published public var isCheckingForUpdates = false
     @Published public var updateCheckMessage = ""
+    /// Identity (e.g. SSO email / IAM user) resolved from the active AWS caller-identity.
+    @Published public private(set) var awsIdentity = ""
+    /// Expiry of the active AWS SSO session, used for the live countdown in the toolbar.
+    @Published public private(set) var activeAWSExpiresAt: Date?
 
     private let configURL: URL
     private let runner: CloudCommandRunner
@@ -45,6 +51,8 @@ public final class ProfileStore: ObservableObject {
         self.runner = runner
         self.activeAWSProfile = UserDefaults.standard.string(forKey: "activeAWSProfile") ?? ""
         self.activeGCPProfile = UserDefaults.standard.string(forKey: "activeGCPProfile") ?? ""
+        self.activeAzureProfile = UserDefaults.standard.string(forKey: "activeAzureProfile") ?? ""
+        self.activeKubeContext = UserDefaults.standard.string(forKey: "activeKubeContext") ?? ""
         self.customFolders = Self.loadCustomFolders(key: customFoldersKey)
         self.folderCustomizations = Self.loadFolderCustomizations(key: folderCustomizationsKey)
         self.folderOverrides = Self.loadFolderOverrides(key: folderOverridesKey)
@@ -123,6 +131,28 @@ public final class ProfileStore: ObservableObject {
             gcpProfiles.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             loadedProfiles.append(contentsOf: gcpProfiles)
         }
+
+        let azureDir = AzureConfigPaths.profilesDirURL
+        if let azureURLs = try? FileManager.default.contentsOfDirectory(at: azureDir, includingPropertiesForKeys: nil) {
+            var azureProfiles: [CloudProfile] = []
+            for fileURL in azureURLs where fileURL.pathExtension == "json" {
+                if let azureProfile = AzureConfigParser.parse(contentsOf: fileURL) {
+                    azureProfiles.append(azureProfile)
+                }
+            }
+            azureProfiles.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            loadedProfiles.append(contentsOf: azureProfiles)
+        }
+
+        let kubeText = (try? String(contentsOf: KubeConfigPaths.configURL, encoding: .utf8)) ?? ""
+        if !kubeText.isEmpty {
+            let kube = KubeConfigParser.parse(kubeText)
+            loadedProfiles.append(contentsOf: kube.contexts)
+            if !kube.currentContext.isEmpty {
+                self.activeKubeContext = kube.currentContext
+                UserDefaults.standard.set(kube.currentContext, forKey: "activeKubeContext")
+            }
+        }
         
         self.profiles = loadedProfiles
         
@@ -148,12 +178,17 @@ public final class ProfileStore: ObservableObject {
             return activeAWSProfile == profile.name
         case .gcp:
             return activeGCPProfile == profile.name
+        case .azure:
+            return activeAzureProfile == profile.name
+        case .kubernetes:
+            return activeKubeContext == profile.name
         }
     }
 
     public func setActive(_ profile: CloudProfile) {
         selectedSelection = .profile(profile.id)
-        if profile.provider == .aws {
+        switch profile.provider {
+        case .aws:
             activeAWSProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
             lastMessage = "Active AWS_PROFILE=\(profile.name)"
@@ -166,7 +201,7 @@ public final class ProfileStore: ObservableObject {
             }
             
             checkAllSessionsExpiration()
-        } else {
+        case .gcp:
             activeGCPProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeGCPProfile")
             lastMessage = "Active GCP configuration=\(profile.name)"
@@ -182,6 +217,39 @@ public final class ProfileStore: ObservableObject {
                 }
                 await verify(profile)
             }
+        case .azure:
+            activeAzureProfile = profile.name
+            UserDefaults.standard.set(profile.name, forKey: "activeAzureProfile")
+            lastMessage = "Active Azure subscription=\(profile.name)"
+
+            let target = profile.accountID.isEmpty ? profile.name : profile.accountID
+            Task {
+                let startedAt = Date()
+                let result = await runner.run(["az", "account", "set", "--subscription", target])
+                lastCommandDuration = Date().timeIntervalSince(startedAt)
+                if result.exitCode == 0 {
+                    lastMessage = "Activated Azure subscription \(profile.name)"
+                } else {
+                    lastMessage = "Failed to activate Azure subscription: \(result.output)"
+                }
+                await verify(profile)
+            }
+        case .kubernetes:
+            activeKubeContext = profile.name
+            UserDefaults.standard.set(profile.name, forKey: "activeKubeContext")
+            lastMessage = "Active kube context=\(profile.name)"
+
+            Task {
+                let startedAt = Date()
+                let result = await runner.run(["kubectl", "config", "use-context", profile.name])
+                lastCommandDuration = Date().timeIntervalSince(startedAt)
+                if result.exitCode == 0 {
+                    lastMessage = "Switched kube context to \(profile.name)"
+                } else {
+                    lastMessage = "Failed to switch context: \(result.output)"
+                }
+                await verify(profile)
+            }
         }
     }
 
@@ -190,6 +258,8 @@ public final class ProfileStore: ObservableObject {
         case .aws:
             activeAWSProfile = ""
             UserDefaults.standard.removeObject(forKey: "activeAWSProfile")
+            awsIdentity = ""
+            activeAWSExpiresAt = nil
             lastMessage = "No active AWS profile"
             do {
                 try AWSConfigWriter.deleteSection("default", from: AWSConfigPaths.configURL)
@@ -201,6 +271,14 @@ public final class ProfileStore: ObservableObject {
             activeGCPProfile = ""
             UserDefaults.standard.removeObject(forKey: "activeGCPProfile")
             lastMessage = "No active GCP configuration"
+        case .azure:
+            activeAzureProfile = ""
+            UserDefaults.standard.removeObject(forKey: "activeAzureProfile")
+            lastMessage = "No active Azure subscription"
+        case .kubernetes:
+            activeKubeContext = ""
+            UserDefaults.standard.removeObject(forKey: "activeKubeContext")
+            lastMessage = "No active kube context"
         }
         showExpirationWarning = false
     }
@@ -211,6 +289,48 @@ public final class ProfileStore: ObservableObject {
 
     public func report(_ message: String) {
         lastMessage = message
+    }
+
+    // MARK: - Active identity
+
+    /// A human label for whoever is currently signed in — the active cloud account,
+    /// not the developer. Falls back to the local macOS user when nothing is active.
+    public var activeIdentityLabel: String {
+        if !activeGCPProfile.isEmpty,
+           let gcp = profiles.first(where: { $0.provider == .gcp && $0.name == activeGCPProfile }),
+           !gcp.roleName.isEmpty {
+            return gcp.roleName // GCP account email
+        }
+        if !awsIdentity.isEmpty {
+            return awsIdentity
+        }
+        if !activeAWSProfile.isEmpty,
+           let aws = profiles.first(where: { $0.provider == .aws && $0.name == activeAWSProfile }) {
+            return aws.accountID.isEmpty ? aws.name : "\(aws.name) · \(aws.accountID)"
+        }
+        let fullName = NSFullUserName()
+        return fullName.isEmpty ? NSUserName() : fullName
+    }
+
+    /// 1–2 letter monogram derived from `activeIdentityLabel` for the avatar.
+    public var activeIdentityInitials: String {
+        let label = activeIdentityLabel
+        let base = label.contains("@") ? String(label.split(separator: "@").first ?? "") : label
+        let parts = base
+            .split(whereSeparator: { $0 == "." || $0 == " " || $0 == "-" || $0 == "_" })
+            .filter { !$0.isEmpty }
+        if parts.count >= 2 {
+            return (parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
+        }
+        return String(base.prefix(2)).uppercased()
+    }
+
+    /// Extracts the trailing identity component of an STS/IAM ARN.
+    /// `arn:aws:sts::123:assumed-role/Role/maya@acme.io` → `maya@acme.io`.
+    private static func identity(fromArn arn: String) -> String? {
+        guard let last = arn.split(separator: "/").last else { return nil }
+        let value = String(last).trimmingCharacters(in: .whitespaces)
+        return value.isEmpty ? nil : value
     }
 
     public func folder(for profile: CloudProfile) -> CloudFolder {
@@ -314,7 +434,8 @@ public final class ProfileStore: ObservableObject {
         
         Task {
             let startedAt = Date()
-            if profile.provider == .aws {
+            switch profile.provider {
+            case .aws:
                 lastMessage = "Starting AWS SSO login for \(profile.name)"
                 let result = await runner.run(["aws", "sso", "login", "--profile", profile.name])
                 lastCommandDuration = Date().timeIntervalSince(startedAt)
@@ -324,7 +445,7 @@ public final class ProfileStore: ObservableObject {
                 } else {
                     lastMessage = result.output
                 }
-            } else {
+            case .gcp:
                 lastMessage = "Starting gcloud auth login for \(profile.name)"
                 let result = await runner.run(["gcloud", "auth", "login", "--update-adc", "--configuration", profile.name])
                 lastCommandDuration = Date().timeIntervalSince(startedAt)
@@ -334,13 +455,33 @@ public final class ProfileStore: ObservableObject {
                 } else {
                     lastMessage = result.output
                 }
+            case .azure:
+                lastMessage = "Starting az login for \(profile.name)"
+                var args = ["az", "login"]
+                if !profile.roleName.isEmpty {
+                    args.append(contentsOf: ["--tenant", profile.roleName])
+                }
+                let result = await runner.run(args)
+                lastCommandDuration = Date().timeIntervalSince(startedAt)
+                if result.exitCode == 0 {
+                    lastLoginAt = Date()
+                    lastMessage = "Azure login completed"
+                    if !profile.accountID.isEmpty {
+                        _ = await runner.run(["az", "account", "set", "--subscription", profile.accountID])
+                    }
+                } else {
+                    lastMessage = result.output
+                }
+            case .kubernetes:
+                lastMessage = "Kubernetes context \(profile.name) selected"
             }
             await verify(profile)
         }
     }
 
     public func logout(_ profile: CloudProfile) {
-        if profile.provider == .aws {
+        switch profile.provider {
+        case .aws:
             if activeAWSProfile == profile.name {
                 clearActive(for: .aws)
             }
@@ -349,7 +490,7 @@ public final class ProfileStore: ObservableObject {
                 _ = await runner.run(["aws", "sso", "logout", "--profile", profile.name])
                 refresh()
             }
-        } else {
+        case .gcp:
             if activeGCPProfile == profile.name {
                 clearActive(for: .gcp)
             }
@@ -360,22 +501,53 @@ public final class ProfileStore: ObservableObject {
                 }
                 refresh()
             }
+        case .azure:
+            if activeAzureProfile == profile.name {
+                clearActive(for: .azure)
+            }
+            Task {
+                lastMessage = "Signing out Azure \(profile.name)..."
+                _ = await runner.run(["az", "logout"])
+                refresh()
+            }
+        case .kubernetes:
+            if activeKubeContext == profile.name {
+                clearActive(for: .kubernetes)
+            }
+            Task {
+                lastMessage = "Cleared current kube context"
+                _ = await runner.run(["kubectl", "config", "unset", "current-context"])
+                refresh()
+            }
         }
     }
 
     public func verify(_ profile: CloudProfile) async {
         let startedAt = Date()
         let result: CommandResult
-        if profile.provider == .aws {
+        switch profile.provider {
+        case .aws:
             result = await runner.run([
                 "aws", "sts", "get-caller-identity",
                 "--profile", profile.name,
                 "--output", "json"
             ])
-        } else {
+        case .gcp:
             result = await runner.run([
                 "gcloud", "auth", "print-access-token",
                 "--configuration", profile.name
+            ])
+        case .azure:
+            let target = profile.accountID.isEmpty ? profile.name : profile.accountID
+            result = await runner.run([
+                "az", "account", "show",
+                "--subscription", target,
+                "--output", "json"
+            ])
+        case .kubernetes:
+            result = await runner.run([
+                "kubectl", "config", "get-contexts", profile.name,
+                "--output", "name"
             ])
         }
         lastCommandDuration = Date().timeIntervalSince(startedAt)
@@ -386,13 +558,26 @@ public final class ProfileStore: ObservableObject {
         if isConnected {
             lastVerifiedAt = Date()
             if profile.provider == .aws {
+                if profile.name == activeAWSProfile,
+                   let data = result.output.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let arn = json["Arn"] as? String ?? ""
+                    let derived = Self.identity(fromArn: arn)
+                    awsIdentity = (derived?.isEmpty == false) ? derived! : (json["Account"] as? String ?? "")
+                }
                 await fetchAndStoreCredentials(for: profile)
             }
             
             // Auto-activate profile if:
             // 1. It transitioned from disconnected to connected (user logged in independently on CLI)
             // 2. The app just started (oldStatus == .unknown) and no active profile is set yet
-            let activeName = profile.provider == .aws ? activeAWSProfile : activeGCPProfile
+            let activeName: String
+            switch profile.provider {
+            case .aws: activeName = activeAWSProfile
+            case .gcp: activeName = activeGCPProfile
+            case .azure: activeName = activeAzureProfile
+            case .kubernetes: activeName = activeKubeContext
+            }
             if oldStatus != .connected {
                 if oldStatus != .unknown {
                     // Only auto-activate if the current active profile is empty or matches this profile,
@@ -476,6 +661,38 @@ public final class ProfileStore: ObservableObject {
         saveFolderOverrides()
         if activeGCPProfile == profile.name {
             clearActive(for: .gcp)
+        }
+        refresh()
+        lastMessage = "Deleted \(profile.name)"
+    }
+
+    public func addAzureProfile(_ draft: AzureProfileDraft) throws {
+        try AzureConfigWriter.writeConfig(draft, originalName: nil)
+        refresh()
+        if let profile = profiles.first(where: { $0.provider == .azure && $0.name == draft.name }) {
+            setActive(profile)
+        }
+    }
+
+    public func updateAzureProfile(_ profile: CloudProfile, draft: AzureProfileDraft) throws {
+        try AzureConfigWriter.writeConfig(draft, originalName: profile.name)
+        let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
+        refresh()
+        if let updated = profiles.first(where: { $0.provider == .azure && $0.name == draft.name }) {
+            if let oldFolderID {
+                folderOverrides[updated.id] = oldFolderID
+                saveFolderOverrides()
+            }
+            setActive(updated)
+        }
+    }
+
+    public func deleteAzureProfile(_ profile: CloudProfile) throws {
+        try AzureConfigWriter.deleteConfig(profile.name)
+        folderOverrides.removeValue(forKey: profile.id)
+        saveFolderOverrides()
+        if activeAzureProfile == profile.name {
+            clearActive(for: .azure)
         }
         refresh()
         lastMessage = "Deleted \(profile.name)"
@@ -658,6 +875,7 @@ public final class ProfileStore: ObservableObject {
                 }
                 
                 if profile.name == activeAWSProfile {
+                    activeAWSExpiresAt = expiresAt
                     if timeLeft > -10 && timeLeft <= 120 {
                         if lastExpirationWarningTime != expiresAt {
                             let isExpired = timeLeft <= 0

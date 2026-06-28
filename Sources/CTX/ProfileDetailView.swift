@@ -16,9 +16,7 @@ struct ProfileDetailView: View {
                     // Header Hero
                     VStack(alignment: .leading, spacing: 16) {
                         HStack(alignment: .center, spacing: 16) {
-                            Image(systemName: profile.provider.systemImage + ".fill")
-                                .font(.system(size: 32))
-                                .foregroundStyle(store.isActive(profile) ? Color.accentColor : (profile.status == .connected ? Color.green : Color.secondary))
+                            ProviderIcon(provider: profile.provider, size: 32, fallbackTint: store.isActive(profile) ? Color.accentColor : (profile.status == .connected ? Color.green : Color.secondary))
                                 .padding(12)
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .overlay {
@@ -274,10 +272,15 @@ struct ProfileDetailView: View {
             Button("Delete", role: .destructive) {
                 if let profile = deleteCandidate {
                     do {
-                        if profile.provider == .aws {
+                        switch profile.provider {
+                        case .aws:
                             try store.deleteAWSProfile(profile)
-                        } else {
+                        case .gcp:
                             try store.deleteGCPProfile(profile)
+                        case .azure:
+                            try store.deleteAzureProfile(profile)
+                        case .kubernetes:
+                            break
                         }
                     } catch {
                         store.report(error.localizedDescription)

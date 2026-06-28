@@ -67,23 +67,71 @@ struct MenuBarView: View {
                     .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
 
+                if !store.activeAzureProfile.isEmpty,
+                   let activeAzure = store.profiles.first(where: { $0.provider == .azure && $0.name == store.activeAzureProfile }) {
+                    let statusColor = activeAzure.status.color
+                    HStack(spacing: 5) {
+                        Image(systemName: "triangle.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(statusColor)
+                        Text("AZ:\(store.activeAzureProfile)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        Button {
+                            store.logout(activeAzure)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.leading, 6)
+                    .padding(.trailing, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+
+                if !store.activeKubeContext.isEmpty,
+                   let activeKube = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == store.activeKubeContext }) {
+                    let statusColor = activeKube.status.color
+                    HStack(spacing: 5) {
+                        Image(systemName: "shippingbox.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(statusColor)
+                        Text("K8s:\(store.activeKubeContext)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        Button {
+                            store.logout(activeKube)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.leading, 6)
+                    .padding(.trailing, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+
                 Spacer()
 
                 Button {
                     openSettings()
                 } label: {
-                    Text("EA")
-                        .font(.system(size: 10, weight: .bold))
-                        .frame(width: 22, height: 22)
-                        .background(Color.accentColor.opacity(0.12), in: Circle())
+                    Text(store.activeIdentityInitials)
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundColor(Color.accentColor)
-                        .overlay {
-                            Circle()
-                                .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
-                        }
+                        .frame(width: 24, height: 24)
+                        .background(Color.accentColor.opacity(0.15), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .help("eliasafabargel@gmail.com")
+                .help("Signed in as \(store.activeIdentityLabel)")
             }
 
             // Expiration warning banner inside the popover
