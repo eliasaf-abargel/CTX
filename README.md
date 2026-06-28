@@ -14,9 +14,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
 </p>
 
----
-
-CTX resides directly in your macOS Menu Bar, providing a native, lightweight, and fast experience to authenticate, verify, and switch between multiple cloud profiles. Fully supports **AWS SSO** and **Google Cloud Platform (GCP)**.
+CTX resides directly in your macOS Menu Bar, providing a native, lightweight, and fast experience to authenticate, verify, and switch between multiple cloud profiles. Fully supports **AWS SSO**, **Google Cloud Platform (GCP)**, and **Kubernetes (K8s)**.
 
 Designed for developers and DevOps engineers who manage complex multi-account environments and need a seamless, keyboard-friendly way to swap contexts.
 
@@ -25,7 +23,7 @@ Designed for developers and DevOps engineers who manage complex multi-account en
 ## Key Features 🚀
 
 - **Native macOS Experience:** Built using Swift and SwiftUI, styled with clean layouts and smooth transitions that align with macOS system design.
-- **Multi-Cloud Support:** Authenticate and switch both AWS and GCP profiles concurrently.
+- **Multi-Cloud & Kubernetes Support:** Switch between AWS profiles, GCP configurations, and Kubernetes (K8s) contexts concurrently.
 - **Menu Bar & Sidebar Interface:** Access all profiles via a compact dropdown in the system status bar, or open the detailed sidebar interface.
 - **Robust Path & CLI Resolution:** Directly locates Homebrew-installed binaries (`aws`, `gcloud`) and operates correctly even when launched through macOS LaunchServices.
 - **Single-Instance Reopening:** Correctly reactivates the active window when double-clicking the Dock/desktop icon instead of creating duplicate processes.
