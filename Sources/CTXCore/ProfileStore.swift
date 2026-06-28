@@ -47,6 +47,7 @@ public final class ProfileStore: ObservableObject {
     private var awsConfigSource: DispatchSourceFileSystemObject?
     private var gcpActiveConfigSource: DispatchSourceFileSystemObject?
     private var gcpConfigsDirSource: DispatchSourceFileSystemObject?
+    private var azureProfilesDirSource: DispatchSourceFileSystemObject?
 
     public init(
         configURL: URL = AWSConfigPaths.configURL,
@@ -111,6 +112,7 @@ public final class ProfileStore: ObservableObject {
         startKubeConfigWatcher()
         startAWSConfigWatcher()
         startGCPConfigWatcher()
+        startAzureConfigWatcher()
     }
 
     /// Watches ~/.kube/config – detects kubectl context switches made in any terminal.
@@ -157,6 +159,19 @@ public final class ProfileStore: ObservableObject {
         }
 
         gcpConfigsDirSource = makeWatcher(path: GCPConfigPaths.configurationsDirURL.path) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.refresh()
+            }
+        }
+    }
+
+    /// Watches ~/.config/ctx/azure/ – detects Azure profile add/remove/edit from any source.
+    private func startAzureConfigWatcher() {
+        // Ensure the directory exists before trying to watch it
+        let dirURL = AzureConfigPaths.profilesDirURL
+        try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        azureProfilesDirSource = makeWatcher(path: dirURL.path) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.refresh()
