@@ -42,6 +42,8 @@ public final class ProfileStore: ObservableObject {
     private var lastExpirationWarningTime: Date?
     private var expirationTimer: AnyCancellable?
     private var lastCacheCheckTime = Date.distantPast
+    private var kubeConfigSource: DispatchSourceFileSystemObject?
+    private var kubeConfigFileDescriptor: Int32 = -1
 
     public init(
         configURL: URL = AWSConfigPaths.configURL,
@@ -70,12 +72,50 @@ public final class ProfileStore: ObservableObject {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
         checkForUpdates()
+        startKubeConfigWatcher()
         
         Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.checkForUpdates()
             }
         }
+    }
+
+    /// Watches ~/.kube/config with a kernel-level DispatchSource so any external change
+    /// (e.g. `kubectl config use-context` in the terminal) is picked up immediately.
+    private func startKubeConfigWatcher() {
+        let path = KubeConfigPaths.configURL.path
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        kubeConfigFileDescriptor = fd
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename, .delete, .link],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+        source.setEventHandler { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Re-read kubeconfig and sync active context
+                let text = (try? String(contentsOf: KubeConfigPaths.configURL, encoding: .utf8)) ?? ""
+                if !text.isEmpty {
+                    let kube = KubeConfigParser.parse(text)
+                    if !kube.currentContext.isEmpty && kube.currentContext != self.activeKubeContext {
+                        self.activeKubeContext = kube.currentContext
+                        UserDefaults.standard.set(kube.currentContext, forKey: "activeKubeContext")
+                    }
+                }
+                self.verifyAllProfiles()
+            }
+        }
+        source.setCancelHandler { [weak self] in
+            guard let self, self.kubeConfigFileDescriptor >= 0 else { return }
+            close(self.kubeConfigFileDescriptor)
+            self.kubeConfigFileDescriptor = -1
+        }
+        source.resume()
+        kubeConfigSource = source
     }
 
     public var selectedProfile: CloudProfile? {
