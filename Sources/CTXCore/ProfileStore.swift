@@ -42,8 +42,11 @@ public final class ProfileStore: ObservableObject {
     private var lastExpirationWarningTime: Date?
     private var expirationTimer: AnyCancellable?
     private var lastCacheCheckTime = Date.distantPast
+    // Kernel-level file watchers so external CLI changes are reflected immediately
     private var kubeConfigSource: DispatchSourceFileSystemObject?
-    private var kubeConfigFileDescriptor: Int32 = -1
+    private var awsConfigSource: DispatchSourceFileSystemObject?
+    private var gcpActiveConfigSource: DispatchSourceFileSystemObject?
+    private var gcpConfigsDirSource: DispatchSourceFileSystemObject?
 
     public init(
         configURL: URL = AWSConfigPaths.configURL,
@@ -72,7 +75,7 @@ public final class ProfileStore: ObservableObject {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
         checkForUpdates()
-        startKubeConfigWatcher()
+        startAllFileWatchers()
         
         Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -81,23 +84,40 @@ public final class ProfileStore: ObservableObject {
         }
     }
 
-    /// Watches ~/.kube/config with a kernel-level DispatchSource so any external change
-    /// (e.g. `kubectl config use-context` in the terminal) is picked up immediately.
-    private func startKubeConfigWatcher() {
-        let path = KubeConfigPaths.configURL.path
-        let fd = open(path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        kubeConfigFileDescriptor = fd
+    // MARK: - Real-time file watchers
 
+    /// Creates a DispatchSource that watches a single file path for changes.
+    /// Calls `handler` on the utility queue whenever the file is written/renamed/deleted.
+    /// Returns the source (which must be retained by the caller) or nil if the file cannot be opened.
+    @discardableResult
+    private func makeWatcher(
+        path: String,
+        handler: @escaping () -> Void
+    ) -> DispatchSourceFileSystemObject? {
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return nil }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
             eventMask: [.write, .rename, .delete, .link],
             queue: DispatchQueue.global(qos: .utility)
         )
-        source.setEventHandler { [weak self] in
+        source.setEventHandler(handler: handler)
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        return source
+    }
+
+    private func startAllFileWatchers() {
+        startKubeConfigWatcher()
+        startAWSConfigWatcher()
+        startGCPConfigWatcher()
+    }
+
+    /// Watches ~/.kube/config – detects kubectl context switches made in any terminal.
+    private func startKubeConfigWatcher() {
+        kubeConfigSource = makeWatcher(path: KubeConfigPaths.configURL.path) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // Re-read kubeconfig and sync active context
                 let text = (try? String(contentsOf: KubeConfigPaths.configURL, encoding: .utf8)) ?? ""
                 if !text.isEmpty {
                     let kube = KubeConfigParser.parse(text)
@@ -109,13 +129,39 @@ public final class ProfileStore: ObservableObject {
                 self.verifyAllProfiles()
             }
         }
-        source.setCancelHandler { [weak self] in
-            guard let self, self.kubeConfigFileDescriptor >= 0 else { return }
-            close(self.kubeConfigFileDescriptor)
-            self.kubeConfigFileDescriptor = -1
+    }
+
+    /// Watches ~/.aws/config – detects aws sso login / profile changes from any terminal.
+    private func startAWSConfigWatcher() {
+        awsConfigSource = makeWatcher(path: AWSConfigPaths.configURL.path) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.refresh()
+            }
         }
-        source.resume()
-        kubeConfigSource = source
+    }
+
+    /// Watches ~/.config/gcloud/active_config and the configurations directory
+    /// – detects `gcloud config set` / `gcloud config configurations activate` from any terminal.
+    private func startGCPConfigWatcher() {
+        gcpActiveConfigSource = makeWatcher(path: GCPConfigPaths.activeConfigURL.path) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let activeGCPName = GCPConfigParser.parseActiveConfig()
+                if !activeGCPName.isEmpty && activeGCPName != self.activeGCPProfile {
+                    self.activeGCPProfile = activeGCPName
+                    UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
+                }
+                self.verifyAllProfiles()
+            }
+        }
+
+        gcpConfigsDirSource = makeWatcher(path: GCPConfigPaths.configurationsDirURL.path) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.refresh()
+            }
+        }
     }
 
     public var selectedProfile: CloudProfile? {
