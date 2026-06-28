@@ -20,8 +20,24 @@ public enum KubeConfigParser {
     /// so capturing them is reliable without a full YAML parser.
     public static func parse(_ text: String) -> Result {
         var current = ""
-        var names: [String] = []
+        var contextsDict: [String: CloudProfile] = [:]
         var inContexts = false
+
+        var currentName = ""
+        var currentCluster = ""
+        var currentUser = ""
+        var currentNamespace = ""
+
+        let commitCurrentContext = {
+            guard !currentName.isEmpty else { return }
+            contextsDict[currentName] = CloudProfile(
+                provider: .kubernetes,
+                name: currentName,
+                accountID: currentCluster,
+                roleName: currentUser,
+                region: currentNamespace
+            )
+        }
 
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
             let indent = raw.prefix(while: { $0 == " " }).count
@@ -33,12 +49,22 @@ public enum KubeConfigParser {
             if indent == 0 {
                 if trimmed.hasPrefix("current-context:") {
                     current = value(after: "current-context:", in: trimmed)
+                    commitCurrentContext()
+                    currentName = ""
+                    currentCluster = ""
+                    currentUser = ""
+                    currentNamespace = ""
                     inContexts = false
                     continue
                 } else if trimmed.hasPrefix("contexts:") {
                     inContexts = true
                     continue
                 } else if !trimmed.hasPrefix("-") {
+                    commitCurrentContext()
+                    currentName = ""
+                    currentCluster = ""
+                    currentUser = ""
+                    currentNamespace = ""
                     inContexts = false
                     continue
                 }
@@ -47,16 +73,34 @@ public enum KubeConfigParser {
             guard inContexts else { continue }
 
             if trimmed.hasPrefix("- name:") {
-                names.append(value(after: "- name:", in: trimmed))
+                commitCurrentContext()
+                currentCluster = ""
+                currentUser = ""
+                currentNamespace = ""
+                currentName = value(after: "- name:", in: trimmed)
+            } else if trimmed.hasPrefix("- context:") {
+                commitCurrentContext()
+                currentName = ""
+                currentCluster = ""
+                currentUser = ""
+                currentNamespace = ""
             } else if trimmed.hasPrefix("name:") {
-                names.append(value(after: "name:", in: trimmed))
+                if currentName.isEmpty {
+                    currentName = value(after: "name:", in: trimmed)
+                }
+            } else if trimmed.hasPrefix("cluster:") {
+                currentCluster = value(after: "cluster:", in: trimmed)
+            } else if trimmed.hasPrefix("user:") {
+                currentUser = value(after: "user:", in: trimmed)
+            } else if trimmed.hasPrefix("namespace:") {
+                currentNamespace = value(after: "namespace:", in: trimmed)
             }
         }
 
-        let contexts = Array(Set(names))
-            .filter { !$0.isEmpty }
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-            .map { CloudProfile(provider: .kubernetes, name: $0) }
+        commitCurrentContext()
+
+        let contexts = contextsDict.values
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 
         return Result(currentContext: current, contexts: contexts)
     }
