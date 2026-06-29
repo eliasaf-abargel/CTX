@@ -215,7 +215,15 @@ struct ProfileDisclosureGroup: View {
                 Spacer()
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(selectedSelection == .folder(group.folder.id) ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                selectedSelection == .folder(group.folder.id)
+                    ? Color.accentColor.opacity(0.12)
+                    : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
             .contentShape(Rectangle())
             .onTapGesture {
                 selectedSelection = .folder(group.folder.id)

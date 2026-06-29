@@ -358,15 +358,17 @@ struct FolderDetailView: View {
                                 Text("\(folder.provider.rawValue) · \(folder.name)")
                                     .font(.title2.weight(.semibold))
                                 
-                                Button {
-                                    sheet = .editFolder(folder)
-                                } label: {
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(.secondary)
+                                if folder.isCustom {
+                                    Button {
+                                        sheet = .editFolder(folder)
+                                    } label: {
+                                        Image(systemName: "pencil")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Rename Folder")
                                 }
-                                .buttonStyle(.plain)
-                                .help("Rename Folder")
                             }
                             Text("Environment folder containing profiles")
                                 .font(.subheadline)
@@ -380,10 +382,10 @@ struct FolderDetailView: View {
                             case .aws: sheet = .addAWSProfile
                             case .gcp: sheet = .addGCPProfile
                             case .azure: sheet = .addAzureProfile
-                            case .kubernetes: break
+                            case .kubernetes: sheet = .addKubeContext
                             }
                         } label: {
-                            Label("Add Profile", systemImage: "plus")
+                            Label(folder.provider == .kubernetes ? "Add Context" : "Add Profile", systemImage: "plus")
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.regular)
