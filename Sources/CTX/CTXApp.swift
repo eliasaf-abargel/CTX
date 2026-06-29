@@ -18,7 +18,6 @@ struct CTXApp: App {
                 }
         }
         .defaultSize(width: 980, height: 620)
-        .windowResizability(.contentSize)
 
         MenuBarExtra {
             MenuBarView(store: store)
@@ -62,6 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         UNUserNotificationCenter.current().delegate = self
+
+        // Enforce premium native macOS appearance on all windows
+        for window in NSApp.windows {
+            window.titlebarAppearsTransparent = false
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        }
     }
 
     func userNotificationCenter(
