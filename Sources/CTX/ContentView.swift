@@ -315,17 +315,45 @@ struct DetailPane: View {
             }
 
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    openSettings()
-                } label: {
-                    Text(store.activeIdentityInitials)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Color.accentColor)
-                        .frame(width: 24, height: 24)
-                        .background(Color.accentColor.opacity(0.15), in: Circle())
+                HStack(spacing: 8) {
+                    if !store.activeAWSProfile.isEmpty,
+                       let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
+                        HStack(spacing: 4) {
+                            Image(systemName: "timer")
+                                .font(.system(size: 8, weight: .bold))
+                            SessionCountdownView(expiresAt: expiresAt)
+                        }
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.12), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(Color.orange.opacity(0.25), lineWidth: 0.5)
+                        }
+                        .help("AWS active session expiry countdown")
+                    } else if !store.activeAWSProfile.isEmpty || !store.activeGCPProfile.isEmpty || !store.activeAzureProfile.isEmpty || !store.activeKubeContext.isEmpty {
+                        Image(systemName: "cloud.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.green)
+                            .padding(4)
+                            .background(Color.green.opacity(0.12), in: Circle())
+                            .help("Connected to cloud environment")
+                    }
+
+                    Button {
+                        openSettings()
+                    } label: {
+                        Text(store.activeIdentityInitials)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color.accentColor)
+                            .frame(width: 24, height: 24)
+                            .background(Color.accentColor.opacity(0.15), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Signed in as \(store.activeIdentityLabel)")
                 }
-                .buttonStyle(.plain)
-                .help("Signed in as \(store.activeIdentityLabel)")
             }
         }
     }
