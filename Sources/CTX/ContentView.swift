@@ -57,6 +57,18 @@ struct ContentView: View {
         } message: { error in
             Text(error)
         }
+        .onChange(of: store.triggerSheet) { newValue in
+            if let newValue {
+                switch newValue {
+                case .addAWSProfile: sheet = .addAWSProfile
+                case .addGCPProfile: sheet = .addGCPProfile
+                case .addAzureProfile: sheet = .addAzureProfile
+                case .addKubeContext: sheet = .addKubeContext
+                }
+                store.triggerSheet = nil
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
     }
 }
 
@@ -473,6 +485,36 @@ struct FolderProfileRow: View {
                             .padding(.vertical, 1.5)
                             .background(Color.accentColor, in: Capsule())
                     }
+                    
+                    if profile.status == .connected {
+                        if let expiresAt = store.sessionExpiry(for: profile) {
+                            SessionCountdownView(expiresAt: expiresAt, tintColor: .green)
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1.5)
+                                .background(Color.green.opacity(0.15), in: Capsule())
+                                .foregroundColor(.green)
+                                .overlay {
+                                    Capsule()
+                                        .stroke(Color.green.opacity(0.3), lineWidth: 0.5)
+                                }
+                        } else {
+                            HStack(spacing: 3) {
+                                Image(systemName: "timer")
+                                    .font(.system(size: 8, weight: .bold))
+                                Text("Connected")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(Color.green.opacity(0.3), lineWidth: 0.5)
+                            }
+                        }
+                    }
                 }
 
                 if profile.provider == .aws {
@@ -543,6 +585,7 @@ struct FolderProfileRow: View {
 /// A live mm:ss countdown to an AWS SSO session's expiry, shown in the toolbar.
 struct SessionCountdownView: View {
     let expiresAt: Date
+    var tintColor: Color? = nil
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -561,7 +604,7 @@ struct SessionCountdownView: View {
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 }
             }
-            .foregroundStyle(remaining <= 120 ? Color.orange : Color.secondary)
+            .foregroundStyle(tintColor ?? (remaining <= 120 ? Color.orange : Color.secondary))
             .help(hours > 0 ? "Active AWS session expires in \(hours)h \(minutes)m" : "Active AWS session expires in \(minutes)m \(seconds)s")
         }
     }

@@ -22,9 +22,7 @@ struct SettingsView: View {
                         provider: .aws,
                         defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".aws").appendingPathComponent("config").path,
                         customKey: "customAWSConfigPath",
-                        countString: "\(store.profiles.filter { $0.provider == .aws }.count) profiles",
-                        iconName: "cloud",
-                        iconBg: Color.orange
+                        countString: "\(store.profiles.filter { $0.provider == .aws }.count) profiles"
                     )
                     
                     Divider()
@@ -35,9 +33,7 @@ struct SettingsView: View {
                         provider: .gcp,
                         defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config").appendingPathComponent("gcloud").appendingPathComponent("configurations").path,
                         customKey: "customGCPConfigDirPath",
-                        countString: "\(store.profiles.filter { $0.provider == .gcp }.count) config",
-                        iconName: "globe",
-                        iconBg: Color.blue
+                        countString: "\(store.profiles.filter { $0.provider == .gcp }.count) config"
                     )
                     
                     Divider()
@@ -48,9 +44,7 @@ struct SettingsView: View {
                         provider: .azure,
                         defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config").appendingPathComponent("ctx").appendingPathComponent("azure").path,
                         customKey: "customAzureProfilesDirPath",
-                        countString: "\(store.profiles.filter { $0.provider == .azure }.count) sub",
-                        iconName: "triangle.fill",
-                        iconBg: Color.blue
+                        countString: "\(store.profiles.filter { $0.provider == .azure }.count) sub"
                     )
                     
                     Divider()
@@ -61,25 +55,23 @@ struct SettingsView: View {
                         provider: .kubernetes,
                         defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".kube").appendingPathComponent("config").path,
                         customKey: "customKubeconfigPath",
-                        countString: "\(store.profiles.filter { $0.provider == .kubernetes }.count) contexts",
-                        iconName: "square.stack.3d.up",
-                        iconBg: Color.indigo
+                        countString: "\(store.profiles.filter { $0.provider == .kubernetes }.count) contexts"
                     )
                 }
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(.separator.opacity(0.3), lineWidth: 0.5)
+                        .stroke(.separator.opacity(0.15), lineWidth: 0.5)
                 }
                 .padding(.horizontal, 16)
                 
                 HStack {
                     Spacer()
                     Menu {
-                        Button("AWS Profile...") { localSheet = .addAWSProfile }
-                        Button("Google Cloud Config...") { localSheet = .addGCPProfile }
-                        Button("Azure Subscription...") { localSheet = .addAzureProfile }
-                        Button("Kubernetes Context...") { localSheet = .addKubeContext }
+                        Button("AWS Profile...") { store.triggerSheet = .addAWSProfile }
+                        Button("Google Cloud Config...") { store.triggerSheet = .addGCPProfile }
+                        Button("Azure Subscription...") { store.triggerSheet = .addAzureProfile }
+                        Button("Kubernetes Context...") { store.triggerSheet = .addKubeContext }
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "plus")
@@ -260,19 +252,14 @@ struct SettingsView: View {
         provider: CloudProvider,
         defaultPath: String,
         customKey: String,
-        countString: String,
-        iconName: String,
-        iconBg: Color
+        countString: String
     ) -> some View {
         let currentPath = UserDefaults.standard.string(forKey: customKey) ?? defaultPath
         let displayPath = currentPath.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
         
         return HStack(spacing: 12) {
-            Image(systemName: iconName)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.white)
+            ProviderIcon(provider: provider, size: 16)
                 .frame(width: 28, height: 28)
-                .background(iconBg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)

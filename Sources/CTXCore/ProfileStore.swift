@@ -5,8 +5,16 @@ import UserNotifications
 import AppKit
 #endif
 
+public enum ActiveSheetType: String, Sendable {
+    case addAWSProfile
+    case addGCPProfile
+    case addAzureProfile
+    case addKubeContext
+}
+
 @MainActor
 public final class ProfileStore: ObservableObject {
+    @Published public var triggerSheet: ActiveSheetType? = nil
     @Published public private(set) var profiles: [CloudProfile] = []
     @Published public var selectedSelection: SidebarSelection?
     @Published public private(set) var activeAWSProfile: String
@@ -1207,6 +1215,58 @@ public final class ProfileStore: ObservableObject {
             }
         }
         return nil
+    }
+
+    public func sessionExpiry(for profile: CloudProfile) -> Date? {
+        guard profile.provider == .aws else { return nil }
+        
+        // 1. Check credentials file first
+        if let expiry = Self.credentialsExpiry(for: profile.name) {
+            return expiry
+        }
+        
+        // 2. Scan sso cache directory
+        let ssoDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".aws")
+            .appendingPathComponent("sso")
+            .appendingPathComponent("cache")
+        
+        guard let files = try? FileManager.default.contentsOfDirectory(at: ssoDir, includingPropertiesForKeys: nil) else {
+            return nil
+        }
+        
+        var latestExpiry: Date? = nil
+        let normalizedStartUrl = profile.ssoStartURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        for fileURL in files where fileURL.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let startUrl = json["startUrl"] as? String,
+                  let expiresAtStr = json["expiresAt"] as? String else {
+                continue
+            }
+            
+            if startUrl.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedStartUrl {
+                let formatter = ISO8601DateFormatter()
+                var expiresAt = formatter.date(from: expiresAtStr)
+                if expiresAt == nil {
+                    let fractionalFormatter = ISO8601DateFormatter()
+                    fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    expiresAt = fractionalFormatter.date(from: expiresAtStr)
+                }
+                if let expiresAt {
+                    if let current = latestExpiry {
+                        if expiresAt > current {
+                            latestExpiry = expiresAt
+                        }
+                    } else {
+                        latestExpiry = expiresAt
+                    }
+                }
+            }
+        }
+        
+        return latestExpiry
     }
 
     private func triggerExpirationWarning(profileName: String, expired: Bool) {
