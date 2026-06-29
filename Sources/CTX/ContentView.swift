@@ -484,30 +484,29 @@ struct FolderProfileRow: View {
                     
                     if profile.status == .connected {
                         if let expiresAt = store.sessionExpiry(for: profile) {
-                            SessionCountdownView(expiresAt: expiresAt, tintColor: .green)
-                                .font(.system(size: 9, weight: .bold))
+                            SessionCountdownView(expiresAt: expiresAt, tintColor: .green, fontSize: 9)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1.5)
-                                .background(Color.green.opacity(0.15), in: Capsule())
+                                .background(Color.green.opacity(0.12), in: Capsule())
                                 .foregroundColor(.green)
                                 .overlay {
                                     Capsule()
-                                        .stroke(Color.green.opacity(0.3), lineWidth: 0.5)
+                                        .stroke(Color.green.opacity(0.2), lineWidth: 0.5)
                                 }
                         } else {
                             HStack(spacing: 3) {
                                 Image(systemName: "timer")
-                                    .font(.system(size: 8, weight: .bold))
+                                    .font(.system(size: 7, weight: .bold))
                                 Text("Connected")
                                     .font(.system(size: 9, weight: .bold))
                             }
                             .foregroundStyle(.green)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1.5)
-                            .background(Color.green.opacity(0.15), in: Capsule())
+                            .background(Color.green.opacity(0.12), in: Capsule())
                             .overlay {
                                 Capsule()
-                                    .stroke(Color.green.opacity(0.3), lineWidth: 0.5)
+                                    .stroke(Color.green.opacity(0.2), lineWidth: 0.5)
                             }
                         }
                     }
@@ -582,6 +581,7 @@ struct FolderProfileRow: View {
 struct SessionCountdownView: View {
     let expiresAt: Date
     var tintColor: Color? = nil
+    var fontSize: CGFloat = 10
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -591,13 +591,13 @@ struct SessionCountdownView: View {
             let seconds = Int(remaining) % 60
             HStack(spacing: 3) {
                 Image(systemName: "timer")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: fontSize - 2, weight: .bold))
                 if hours > 0 {
                     Text(String(format: "%d:%02d:%02d", hours, minutes, seconds))
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: fontSize, weight: .semibold, design: .monospaced))
                 } else {
                     Text(String(format: "%02d:%02d", minutes, seconds))
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: fontSize, weight: .semibold, design: .monospaced))
                 }
             }
             .foregroundStyle(tintColor ?? (remaining <= 120 ? Color.orange : Color.secondary))
