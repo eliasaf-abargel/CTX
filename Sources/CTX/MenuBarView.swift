@@ -22,14 +22,10 @@ struct MenuBarView: View {
                         openSettings()
                     } label: {
                         Image(systemName: "gearshape")
-                            .font(.system(size: 12))
+                            .font(.system(size: 13))
                             .foregroundColor(.secondary)
                             .frame(width: 24, height: 24)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .stroke(.separator.opacity(0.3), lineWidth: 0.5)
-                            }
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Open Settings")

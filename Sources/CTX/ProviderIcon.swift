@@ -22,29 +22,17 @@ struct ProviderIcon: View {
     }
 
     var body: some View {
-        let bundle = Bundle.module
-        
-        // 1. First attempt: Load SVG natively from Bundle.module
-        if let url = bundle.url(forResource: assetName, withExtension: "svg"),
+        // We use Bundle.safeModule exclusively to prevent Bundle.module crashes
+        // when the compiled app runs outside standard SwiftPM environment contexts.
+        if let bundle = Bundle.safeModule,
+           let url = bundle.url(forResource: assetName, withExtension: "svg"),
            let nsImage = NSImage(contentsOf: url) {
             Image(nsImage: nsImage)
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
-        }
-        // 2. Second attempt: Fallback to safeModule (for CLI/tests/build processes)
-        else if let safeBundle = Bundle.safeModule,
-                let url = safeBundle.url(forResource: assetName, withExtension: "svg"),
-                let nsImage = NSImage(contentsOf: url) {
-            Image(nsImage: nsImage)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .frame(width: size, height: size)
-        }
-        // 3. Fallback: Use SF Symbol
-        else {
+        } else {
             Image(systemName: provider.systemImage + ".fill")
                 .font(.system(size: size))
                 .foregroundStyle(fallbackTint ?? .secondary)
