@@ -161,7 +161,8 @@ struct ProfileDisclosureGroup: View {
             ForEach(group.profiles) { profile in
                 SidebarProfileRow(
                     profile: profile,
-                    isSelected: selectedSelection == .profile(profile.id)
+                    isSelected: selectedSelection == .profile(profile.id),
+                    store: store
                 )
                 .tag(SidebarSelection.profile(profile.id))
                 .contextMenu {
@@ -234,6 +235,7 @@ struct ProfileDisclosureGroup: View {
 struct SidebarProfileRow: View {
     let profile: CloudProfile
     let isSelected: Bool
+    @ObservedObject var store: ProfileStore
 
     var body: some View {
         HStack(spacing: 8) {
@@ -248,17 +250,29 @@ struct SidebarProfileRow: View {
                 .font(.body)
                 .lineLimit(1)
 
-            if profile.status == .connected {
+            Spacer(minLength: 8)
+
+            if store.isActive(profile) {
+                HStack(spacing: 6) {
+                    if profile.provider == .aws, let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
+                        SessionCountdownView(expiresAt: expiresAt)
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(isSelected ? .white.opacity(0.9) : .orange)
+                    }
+                    
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 6, height: 6)
+                }
+            } else if profile.status == .connected {
                 Circle()
-                    .fill(Color.green)
+                    .fill(Color.green.opacity(0.5))
                     .frame(width: 6, height: 6)
             } else if profile.status == .needsLogin {
                 Circle()
                     .fill(Color.orange)
                     .frame(width: 6, height: 6)
             }
-
-            Spacer(minLength: 8)
         }
         .frame(height: 28)
         .contentShape(Rectangle())

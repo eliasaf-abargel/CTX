@@ -55,8 +55,6 @@ struct DetailPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ActiveEnvironmentsBar(store: store)
-
             // Inline notification bars — part of the layout so they NEVER cover content
             if store.showExpirationWarning || store.updateAvailable {
                 VStack(spacing: 8) {
@@ -122,11 +120,200 @@ struct DetailPane: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.showExpirationWarning)
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.updateAvailable)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.activeAWSProfile)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.activeGCPProfile)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.activeAzureProfile)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.activeKubeContext)
         .toolbar {
+            // Principal active profile indicator in the titlebar (uses native alignment)
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 12) {
+                    if !store.activeAWSProfile.isEmpty,
+                       let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile }) {
+                        let statusColor = activeAWS.status.color
+                        
+                        HStack(spacing: 6) {
+                            Image(systemName: "cloud.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(statusColor)
+                            
+                            Text("AWS: \(store.activeAWSProfile)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
+
+                            if !activeAWS.region.isEmpty {
+                                Text("· \(activeAWS.region)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            if activeAWS.status == .connected, let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
+                                SessionCountdownView(expiresAt: expiresAt)
+                            }
+
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
+                            
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeAWS)
+                                }
+                                .help("Disconnect active AWS profile")
+                        }
+                        .padding(.leading, 8)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .help("AWS \(store.activeAWSProfile) · Account \(activeAWS.accountID.isEmpty ? "—" : activeAWS.accountID) · \(activeAWS.status.rawValue)")
+                    }
+                    
+                    if !store.activeGCPProfile.isEmpty,
+                       let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile }) {
+                        let statusColor = activeGCP.status.color
+                        
+                        HStack(spacing: 6) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 9))
+                                .foregroundStyle(statusColor)
+                            
+                            Text("GCP: \(store.activeGCPProfile)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
+
+                            if !activeGCP.accountID.isEmpty {
+                                Text("· \(activeGCP.accountID)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .frame(maxWidth: 120)
+                            }
+
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
+                            
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeGCP)
+                                }
+                                .help("Disconnect active GCP configuration")
+                        }
+                        .padding(.leading, 8)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .help("GCP \(store.activeGCPProfile) · Project \(activeGCP.accountID.isEmpty ? "—" : activeGCP.accountID) · \(activeGCP.status.rawValue)")
+                    }
+
+                    if !store.activeAzureProfile.isEmpty,
+                       let activeAzure = store.profiles.first(where: { $0.provider == .azure && $0.name == store.activeAzureProfile }) {
+                        let statusColor = activeAzure.status.color
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "triangle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(statusColor)
+
+                            Text("Azure: \(store.activeAzureProfile)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
+
+                            if !activeAzure.region.isEmpty {
+                                Text("· \(activeAzure.region)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
+
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeAzure)
+                                }
+                                .help("Disconnect active Azure subscription")
+                        }
+                        .padding(.leading, 8)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .help("Azure \(store.activeAzureProfile) · Subscription \(activeAzure.accountID.isEmpty ? "—" : activeAzure.accountID) · \(activeAzure.status.rawValue)")
+                    }
+
+                    if !store.activeKubeContext.isEmpty,
+                       let activeKube = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == store.activeKubeContext }) {
+                        let statusColor = activeKube.status.color
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "shippingbox.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(statusColor)
+
+                            Text("K8s: \(store.activeKubeContext)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
+
+                            Divider()
+                                .frame(height: 10)
+                                .background(Color.secondary.opacity(0.3))
+
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.logout(activeKube)
+                                }
+                                .help("Clear current Kubernetes context")
+                        }
+                        .padding(.leading, 8)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .help("Kubernetes context \(store.activeKubeContext) · \(activeKube.status.rawValue)")
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     openSettings()
@@ -140,142 +327,6 @@ struct DetailPane: View {
                 .buttonStyle(.plain)
                 .help("Signed in as \(store.activeIdentityLabel)")
             }
-        }
-    }
-}
-
-struct ActiveEnvironmentsBar: View {
-    @ObservedObject var store: ProfileStore
-
-    var body: some View {
-        let hasActive = !store.activeAWSProfile.isEmpty || !store.activeGCPProfile.isEmpty || !store.activeAzureProfile.isEmpty || !store.activeKubeContext.isEmpty
-        
-        if hasActive {
-            HStack(spacing: 12) {
-                HStack(spacing: 6) {
-                    Image(systemName: "bolt.horizontal.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    Text("Active:")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                }
-                
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        // AWS Capsule
-                        if !store.activeAWSProfile.isEmpty,
-                           let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile }) {
-                            compactCapsule(
-                                provider: .aws,
-                                title: store.activeAWSProfile,
-                                region: activeAWS.region,
-                                statusColor: activeAWS.status.color,
-                                expiresAt: activeAWS.status == .connected ? store.activeAWSExpiresAt : nil,
-                                onDisconnect: { store.logout(activeAWS) }
-                            )
-                        }
-
-                        // GCP Capsule
-                        if !store.activeGCPProfile.isEmpty,
-                           let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile }) {
-                            compactCapsule(
-                                provider: .gcp,
-                                title: store.activeGCPProfile,
-                                region: activeGCP.region.isEmpty ? activeGCP.accountID : activeGCP.region,
-                                statusColor: activeGCP.status.color,
-                                expiresAt: nil,
-                                onDisconnect: { store.logout(activeGCP) }
-                            )
-                        }
-
-                        // Azure Capsule
-                        if !store.activeAzureProfile.isEmpty,
-                           let activeAzure = store.profiles.first(where: { $0.provider == .azure && $0.name == store.activeAzureProfile }) {
-                            compactCapsule(
-                                provider: .azure,
-                                title: store.activeAzureProfile,
-                                region: activeAzure.region,
-                                statusColor: activeAzure.status.color,
-                                expiresAt: nil,
-                                onDisconnect: { store.logout(activeAzure) }
-                            )
-                        }
-
-                        // K8s Capsule
-                        if !store.activeKubeContext.isEmpty,
-                           let activeKube = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == store.activeKubeContext }) {
-                            compactCapsule(
-                                provider: .kubernetes,
-                                title: store.activeKubeContext,
-                                region: activeKube.region, // namespace
-                                statusColor: activeKube.status.color,
-                                expiresAt: nil,
-                                onDisconnect: { store.logout(activeKube) }
-                            )
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
-            .overlay(alignment: .bottom) {
-                Divider()
-            }
-            .transition(.move(edge: .top).combined(with: .opacity))
-        }
-    }
-
-    private func compactCapsule(
-        provider: CloudProvider,
-        title: String,
-        region: String,
-        statusColor: Color,
-        expiresAt: Date?,
-        onDisconnect: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 6) {
-            ProviderIcon(provider: provider, size: 10)
-
-            Text("\(provider.rawValue): \(title)")
-                .font(.system(size: 10, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 140)
-
-            if !region.isEmpty {
-                Text("· \(region)")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: 100)
-            }
-
-            if let expiresAt {
-                SessionCountdownView(expiresAt: expiresAt)
-            }
-
-            Divider()
-                .frame(height: 8)
-                .background(Color.secondary.opacity(0.3))
-
-            Button(action: onDisconnect) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Disconnect active \(provider.rawValue) profile")
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(.separator.opacity(0.15), lineWidth: 0.5)
         }
     }
 }
