@@ -13,120 +13,90 @@ struct ProfileDetailView: View {
             HStack {
                 Spacer()
                 VStack(alignment: .leading, spacing: 28) {
-                    // Header Hero
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack(alignment: .center, spacing: 16) {
-                            ProviderIcon(provider: profile.provider, size: 32, fallbackTint: store.isActive(profile) ? Color.accentColor : (profile.status == .connected ? Color.green : Color.secondary))
-                                .padding(12)
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(.separator.opacity(0.3), lineWidth: 1)
-                                }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 8) {
-                                    Text(profile.name)
-                                        .font(.title2.weight(.semibold))
-                                    
-                                    if store.isActive(profile) {
-                                        Text("Active Context")
-                                            .font(.caption2.weight(.bold))
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(Color.accentColor, in: Capsule())
-                                        
-                                        if profile.provider == .aws, let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
-                                            SessionCountdownView(expiresAt: expiresAt)
-                                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                                .foregroundStyle(.orange)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 3)
-                                                .background(Color.orange.opacity(0.12), in: Capsule())
-                                                .overlay {
-                                                    Capsule()
-                                                        .stroke(Color.orange.opacity(0.25), lineWidth: 0.5)
-                                                }
-                                        }
-                                    }
-                                }
+                    // Header Hero Section
+                    HStack(alignment: .center, spacing: 16) {
+                        ProviderIcon(
+                            provider: profile.provider,
+                            size: 32,
+                            fallbackTint: store.isActive(profile) ? Color.accentColor : (profile.status == .connected ? Color.green : Color.secondary)
+                        )
+                        .padding(12)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.separator.opacity(0.3), lineWidth: 1)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text(profile.name)
+                                    .font(.title2.weight(.semibold))
                                 
-                                HStack(spacing: 6) {
-                                    Image(systemName: profile.status.systemImage)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(profile.status.color)
-                                    Text(statusText)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                if store.isActive(profile) {
+                                    Text("ACTIVE")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.accentColor, in: Capsule())
                                 }
                             }
                             
-                            Spacer()
+                            Text("\(profile.provider.rawValue) · \(profile.typeDescription)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
                         
-                        // Actions Bar Row (Scrollable horizontally when space is limited)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                if profile.status == .connected {
-                                    Button(role: .destructive) {
-                                        store.logout(profile)
-                                    } label: {
-                                        Label("Disconnect", systemImage: "bolt.slash.fill")
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.regular)
-                                } else {
-                                    Button {
-                                        store.login(profile)
-                                    } label: {
-                                        Label("Connect", systemImage: "bolt.fill")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .controlSize(.regular)
-                                }
-                                
-                                Button {
-                                    store.setActive(profile)
+                        Spacer()
+                        
+                        // Top-Right Action Buttons
+                        HStack(spacing: 8) {
+                            Button {
+                                sheet = .editProfile(profile)
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
+                            
+                            if profile.status == .connected {
+                                Button(role: .destructive) {
+                                    store.logout(profile)
                                 } label: {
-                                    Text("Set Active")
+                                    Text("Disconnect")
+                                        .foregroundStyle(.red)
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.regular)
-                                
+                            } else {
                                 Button {
+                                    store.login(profile)
+                                } label: {
+                                    Text("Connect")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.regular)
+                            }
+                            
+                            // More Actions Dropdown Menu (...)
+                            Menu {
+                                if !store.isActive(profile) {
+                                    Button("Set Active") {
+                                        store.setActive(profile)
+                                    }
+                                }
+                                
+                                Button("Verify Status") {
                                     Task { await store.verify(profile) }
-                                } label: {
-                                    Label("Verify", systemImage: "checkmark.shield")
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
-
-                                Divider()
-                                    .frame(height: 16)
-                                    .padding(.horizontal, 4)
-
-                                Button {
-                                    sheet = .editProfile(profile)
-                                } label: {
-                                    Image(systemName: "pencil")
-                                        .frame(width: 16, height: 16)
+                                
+                                if profile.provider != .kubernetes {
+                                    Button("Duplicate...") {
+                                        sheet = .duplicateProfile(profile)
+                                    }
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
-                                .help("Edit \(profile.typeDescription)")
-
-                                Button {
-                                    sheet = .duplicateProfile(profile)
-                                } label: {
-                                    Image(systemName: "plus.square.on.square")
-                                        .frame(width: 16, height: 16)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
-                                .help("Duplicate \(profile.typeDescription)")
-
-                                Menu {
+                                
+                                Menu("Move profile to...") {
                                     ForEach(store.allFolders) { folder in
                                         if folder.provider == profile.provider {
                                             Button(folder.name) {
@@ -134,147 +104,249 @@ struct ProfileDetailView: View {
                                             }
                                         }
                                     }
-                                } label: {
-                                    Image(systemName: "folder")
-                                        .frame(width: 16, height: 16)
                                 }
-                                .menuStyle(.button)
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
-                                .help("Move \(profile.typeDescription) to Folder")
-
-                                Button(role: .destructive) {
+                                
+                                Divider()
+                                
+                                Button("Delete Profile", role: .destructive) {
                                     deleteCandidate = profile
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .frame(width: 16, height: 16)
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
-                                .tint(.red)
-                                .help("Delete \(profile.typeDescription)")
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .frame(width: 12, height: 16)
                             }
-                            .padding(.vertical, 2)
+                            .menuStyle(.button)
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
                         }
                     }
                     .padding(.bottom, 8)
 
-                // Configuration Details Card
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Configuration Details")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-
-                    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 12) {
-                        GridRow {
-                            Text(profile.accountLabel)
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 8) {
-                                Text(profile.accountID.isEmpty ? "-" : profile.accountID)
-                                    .font(.system(.body, design: .monospaced))
-                                    .textSelection(.enabled)
-                                if !profile.accountID.isEmpty {
-                                    copyButton(for: profile.accountID, fieldName: "account")
+                    // SESSION CARD (Only when connected or has session data)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("SESSION")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 4)
+                        
+                        VStack(spacing: 0) {
+                            // Row 1: Connection Status
+                            HStack {
+                                Text("Connection")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(profile.status == .connected ? Color.green : Color.orange)
+                                        .frame(width: 6, height: 6)
+                                    Text(statusText)
+                                        .fontWeight(.medium)
                                 }
                             }
-                        }
-                        
-                        Divider()
-                        
-                        GridRow {
-                            Text(profile.roleLabel)
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 8) {
-                                Text(profile.roleName.isEmpty ? "-" : profile.roleName)
-                                    .font(.system(.body, design: .monospaced))
-                                    .textSelection(.enabled)
-                                if !profile.roleName.isEmpty {
-                                    copyButton(for: profile.roleName, fieldName: "role")
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            
+                            // Row 2: AWS Expires Countdown (if active AWS SSO session)
+                            if profile.provider == .aws, store.isActive(profile), let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
+                                Divider()
+                                    .padding(.leading, 16)
+                                HStack {
+                                    Text("Expires in")
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    SessionCountdownView(expiresAt: expiresAt)
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.orange)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                            }
+                            
+                            // Row 3: Connected Identity initials and label
+                            Divider()
+                                .padding(.leading, 16)
+                            HStack {
+                                Text("Identity")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    Text(store.activeIdentityInitials)
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(Color.accentColor)
+                                        .frame(width: 18, height: 18)
+                                        .background(Color.accentColor.opacity(0.15), in: Circle())
+                                    
+                                    Text(store.activeIdentityLabel)
+                                        .fontWeight(.medium)
                                 }
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                         }
-                        
-                        if profile.provider == .aws {
-                            Divider()
-                            
-                            GridRow {
-                                Text("SSO Start URL")
-                                    .foregroundStyle(.secondary)
-                                Text(profile.ssoStartURL.isEmpty ? "-" : profile.ssoStartURL)
-                                    .lineLimit(1)
-                                    .textSelection(.enabled)
-                            }
-                            
-                            Divider()
-                            
-                            GridRow {
-                                Text("SSO Region")
-                                    .foregroundStyle(.secondary)
-                                Text(profile.ssoRegion.isEmpty ? "-" : profile.ssoRegion)
-                                    .font(.system(.body, design: .monospaced))
-                            }
-                        }
-                        
-                        if !profile.region.isEmpty {
-                            Divider()
-                            
-                            GridRow {
-                                Text(profile.regionLabel)
-                                    .foregroundStyle(.secondary)
-                                Text(profile.region)
-                                    .font(.system(.body, design: .monospaced))
-                            }
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.separator.opacity(0.3), lineWidth: 1)
                         }
                     }
-                    .padding(18)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(.separator.opacity(0.3), lineWidth: 1)
+
+                    // ACCOUNT / CONFIGURATION DETAILS CARD
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("ACCOUNT")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 4)
+                        
+                        VStack(spacing: 0) {
+                            // Row 1: Account ID
+                            HStack {
+                                Text(profile.accountLabel)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    Text(profile.accountID.isEmpty ? "-" : profile.accountID)
+                                        .font(.system(.body, design: .monospaced))
+                                        .fontWeight(.medium)
+                                        .textSelection(.enabled)
+                                    if !profile.accountID.isEmpty {
+                                        copyButton(for: profile.accountID, fieldName: "account")
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            
+                            // Row 2: Region (if not empty)
+                            if !profile.region.isEmpty {
+                                Divider()
+                                    .padding(.leading, 16)
+                                HStack {
+                                    Text(profile.regionLabel)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(profile.region)
+                                        .font(.system(.body, design: .monospaced))
+                                        .fontWeight(.medium)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                            }
+                            
+                            // Row 3: Role (if not empty)
+                            if !profile.roleName.isEmpty {
+                                Divider()
+                                    .padding(.leading, 16)
+                                HStack {
+                                    Text(profile.roleLabel)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    HStack(spacing: 6) {
+                                        Text(profile.roleName)
+                                            .font(.system(.body, design: .monospaced))
+                                            .fontWeight(.medium)
+                                            .textSelection(.enabled)
+                                        copyButton(for: profile.roleName, fieldName: "role")
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                            }
+                            
+                            // Row 4: AWS SSO Start URL (if AWS)
+                            if profile.provider == .aws && !profile.ssoStartURL.isEmpty {
+                                Divider()
+                                    .padding(.leading, 16)
+                                HStack {
+                                    Text("SSO Start URL")
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(profile.ssoStartURL)
+                                        .lineLimit(1)
+                                        .fontWeight(.medium)
+                                        .textSelection(.enabled)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                            }
+                            
+                            // Row 5: AWS SSO Region (if AWS)
+                            if profile.provider == .aws && !profile.ssoRegion.isEmpty {
+                                Divider()
+                                    .padding(.leading, 16)
+                                HStack {
+                                    Text("SSO Region")
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(profile.ssoRegion)
+                                        .font(.system(.body, design: .monospaced))
+                                        .fontWeight(.medium)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                            }
+                        }
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.separator.opacity(0.3), lineWidth: 1)
+                        }
+                    }
+
+                    // DIAGNOSTICS CARD
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("DIAGNOSTICS")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 4)
+                        
+                        VStack(spacing: 0) {
+                            HStack {
+                                Text("Last Login")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formatted(store.lastLoginAt))
+                                    .fontWeight(.medium)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            
+                            Divider()
+                                .padding(.leading, 16)
+                            
+                            HStack {
+                                Text("Last Verification")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formatted(store.lastVerifiedAt))
+                                    .fontWeight(.medium)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            
+                            Divider()
+                                .padding(.leading, 16)
+                            
+                            HStack {
+                                Text("Last Call Duration")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(duration(store.lastCommandDuration))
+                                    .fontWeight(.medium)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                        }
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.separator.opacity(0.3), lineWidth: 1)
+                        }
                     }
                 }
-
-                // Diagnostics Card
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Session Diagnostics")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-
-                    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 12) {
-                        GridRow {
-                            Text("Last Login")
-                                .foregroundStyle(.secondary)
-                            Text(formatted(store.lastLoginAt))
-                        }
-                        
-                        Divider()
-                        
-                        GridRow {
-                            Text("Last Verification")
-                                .foregroundStyle(.secondary)
-                            Text(formatted(store.lastVerifiedAt))
-                        }
-                        
-                        Divider()
-                        
-                        GridRow {
-                            Text("Last Call Duration")
-                                .foregroundStyle(.secondary)
-                            Text(duration(store.lastCommandDuration))
-                        }
-                    }
-                    .padding(18)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(.separator.opacity(0.3), lineWidth: 1)
-                    }
-                }
+                .frame(maxWidth: 680)
+                Spacer()
             }
-            .frame(maxWidth: 680)
-            Spacer()
-        }
-        .padding(32)
+            .padding(32)
         .alert(
             "Delete \(deleteCandidate?.name ?? "profile")?",
             isPresented: Binding(
