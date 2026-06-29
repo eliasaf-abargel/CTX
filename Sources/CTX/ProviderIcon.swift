@@ -21,12 +21,15 @@ struct ProviderIcon: View {
         }
     }
 
+    @ViewBuilder
     var body: some View {
         // We use Bundle.safeModule exclusively to prevent Bundle.module crashes
         // when the compiled app runs outside standard SwiftPM environment contexts.
         if let bundle = Bundle.safeModule,
            let url = bundle.url(forResource: assetName, withExtension: "svg"),
            let nsImage = NSImage(contentsOf: url) {
+            // Force NSImage to render at target vector size to ensure pixel-perfect Retina sharpness.
+            let _ = { nsImage.size = NSSize(width: size, height: size) }()
             Image(nsImage: nsImage)
                 .resizable()
                 .interpolation(.high)
