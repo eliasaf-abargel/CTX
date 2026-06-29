@@ -42,7 +42,9 @@ struct ProfileDetailView: View {
                                 }
                             }
                             
-                            Text("\(profile.provider.rawValue) · \(profile.typeDescription)")
+                            let env = CloudEnvironment.infer(from: profile).rawValue
+                            let typeSuffix = profile.provider == .aws ? "SSO" : (profile.provider == .gcp ? "Config" : (profile.provider == .kubernetes ? "Context" : "Subscription"))
+                            Text("\(profile.provider.rawValue) · \(env) · \(typeSuffix)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -169,14 +171,20 @@ struct ProfileDetailView: View {
                                 Text("Identity")
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                HStack(spacing: 6) {
-                                    Text(store.activeIdentityInitials)
-                                        .font(.system(size: 9, weight: .bold))
-                                        .foregroundColor(Color.accentColor)
-                                        .frame(width: 18, height: 18)
-                                        .background(Color.accentColor.opacity(0.15), in: Circle())
-                                    
-                                    Text(store.activeIdentityLabel)
+                                if profile.status == .connected && store.isActive(profile) {
+                                    HStack(spacing: 6) {
+                                        Text(store.activeIdentityInitials)
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(Color.accentColor)
+                                            .frame(width: 18, height: 18)
+                                            .background(Color.accentColor.opacity(0.15), in: Circle())
+                                        
+                                        Text(store.activeIdentityLabel)
+                                            .fontWeight(.medium)
+                                    }
+                                } else {
+                                    Text("Not Active")
+                                        .foregroundStyle(.secondary)
                                         .fontWeight(.medium)
                                 }
                             }
