@@ -231,14 +231,18 @@ struct SettingsView: View {
             case .addKubeContext:
                 AddKubeContextView(store: store)
             case .editProfile(let profile):
-                ProfileDetailView(store: store, profile: profile)
+                switch profile.provider {
+                case .aws: AddAWSProfileView(store: store, mode: .edit(profile))
+                case .gcp: AddGCPProfileView(store: store, mode: .edit(profile))
+                case .azure: AddAzureProfileView(store: store, mode: .edit(profile))
+                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile))
+                }
             case .duplicateProfile(let profile):
-                if profile.provider == .aws {
-                    AddAWSProfileView(store: store, duplicateFrom: profile)
-                } else if profile.provider == .gcp {
-                    AddGCPProfileView(store: store, duplicateFrom: profile)
-                } else if profile.provider == .azure {
-                    AddAzureProfileView(store: store, duplicateFrom: profile)
+                switch profile.provider {
+                case .aws: AddAWSProfileView(store: store, mode: .duplicate(profile))
+                case .gcp: AddGCPProfileView(store: store, mode: .duplicate(profile))
+                case .azure: AddAzureProfileView(store: store, mode: .duplicate(profile))
+                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile))
                 }
             case .addFolder:
                 FolderEditorView(store: store)
