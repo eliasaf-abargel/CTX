@@ -38,20 +38,16 @@ struct ProfileDetailView: View {
                                             .background(Color.accentColor, in: Capsule())
                                         
                                         if profile.provider == .aws, let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "timer")
-                                                    .font(.system(size: 9, weight: .bold))
-                                                SessionCountdownView(expiresAt: expiresAt)
-                                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                            }
-                                            .foregroundStyle(.orange)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(Color.orange.opacity(0.12), in: Capsule())
-                                            .overlay {
-                                                Capsule()
-                                                    .stroke(Color.orange.opacity(0.25), lineWidth: 0.5)
-                                            }
+                                            SessionCountdownView(expiresAt: expiresAt)
+                                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                                .foregroundStyle(.orange)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 3)
+                                                .background(Color.orange.opacity(0.12), in: Capsule())
+                                                .overlay {
+                                                    Capsule()
+                                                        .stroke(Color.orange.opacity(0.25), lineWidth: 0.5)
+                                                }
                                         }
                                     }
                                 }

@@ -318,21 +318,17 @@ struct DetailPane: View {
                 HStack(spacing: 8) {
                     if !store.activeAWSProfile.isEmpty,
                        let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
-                        HStack(spacing: 4) {
-                            Image(systemName: "timer")
-                                .font(.system(size: 8, weight: .bold))
-                            SessionCountdownView(expiresAt: expiresAt)
-                        }
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.orange.opacity(0.12), in: Capsule())
-                        .overlay {
-                            Capsule()
-                                .stroke(Color.orange.opacity(0.25), lineWidth: 0.5)
-                        }
-                        .help("AWS active session expiry countdown")
+                        SessionCountdownView(expiresAt: expiresAt)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.12), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(Color.orange.opacity(0.25), lineWidth: 0.5)
+                            }
+                            .help("AWS active session expiry countdown")
                     } else if !store.activeAWSProfile.isEmpty || !store.activeGCPProfile.isEmpty || !store.activeAzureProfile.isEmpty || !store.activeKubeContext.isEmpty {
                         Image(systemName: "cloud.fill")
                             .font(.system(size: 10))
@@ -546,16 +542,22 @@ struct SessionCountdownView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let remaining = max(0, expiresAt.timeIntervalSince(context.date))
-            let minutes = Int(remaining) / 60
+            let hours = Int(remaining) / 3600
+            let minutes = (Int(remaining) % 3600) / 60
             let seconds = Int(remaining) % 60
             HStack(spacing: 3) {
                 Image(systemName: "timer")
                     .font(.system(size: 8, weight: .bold))
-                Text(String(format: "%02d:%02d", minutes, seconds))
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                if hours > 0 {
+                    Text(String(format: "%d:%02d:%02d", hours, minutes, seconds))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                } else {
+                    Text(String(format: "%02d:%02d", minutes, seconds))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                }
             }
             .foregroundStyle(remaining <= 120 ? Color.orange : Color.secondary)
-            .help("Active AWS session expires in \(minutes)m \(seconds)s")
+            .help(hours > 0 ? "Active AWS session expires in \(hours)h \(minutes)m" : "Active AWS session expires in \(minutes)m \(seconds)s")
         }
     }
 }
