@@ -156,6 +156,7 @@ public enum CloudFolderIcon: String, CaseIterable, Identifiable, Codable, Sendab
     case folder
     case shield
     case terminal
+    case code
 
     public var id: String { rawValue }
 
@@ -179,6 +180,8 @@ public enum CloudFolderIcon: String, CaseIterable, Identifiable, Codable, Sendab
             "shield"
         case .terminal:
             "terminal"
+        case .code:
+            "chevron.left.forwardslash.chevron.right"
         }
     }
 }

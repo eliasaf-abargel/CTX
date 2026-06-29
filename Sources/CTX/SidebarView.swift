@@ -224,8 +224,20 @@ struct ProfileDisclosureGroup: View {
                 }
             }
             .contextMenu {
-                Button("Rename Folder") { editFolder(group.folder) }
-                Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
+                Button {
+                    editFolder(group.folder)
+                } label: {
+                    Label("Rename & change icon...", systemImage: "pencil")
+                }
+                
+                Divider()
+                
+                Button(role: .destructive) {
+                    deleteFolder(group.folder)
+                } label: {
+                    Label("Delete Folder", systemImage: "trash")
+                        .foregroundStyle(.red)
+                }
             }
         }
     }

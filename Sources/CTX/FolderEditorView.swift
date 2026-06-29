@@ -5,10 +5,12 @@ struct FolderEditorView: View {
     @ObservedObject var store: ProfileStore
     @Environment(\.dismiss) private var dismiss
     let folder: CloudFolder?
+    
     @State private var name: String
     @State private var provider: CloudProvider
     @State private var icon: CloudFolderIcon
     @State private var errorMessage = ""
+    @State private var showingDeleteAlert = false
 
     private var availableProviders: [CloudProvider] {
         let activeProviders = Set(store.profiles.map(\.provider))
@@ -33,38 +35,71 @@ struct FolderEditorView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(folder == nil ? "Create Folder" : "Edit Folder")
                     .font(.title2.weight(.semibold))
-                Text("Organize profiles into folders to group environments or clients together.")
+                Text("Choose a name and icon for this environment")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             
             Divider()
 
-            Form {
-                Section("Folder Identity") {
-                    TextField("Folder Name:", text: $name, prompt: Text("e.g. Production, Client A"))
+            // Form Content
+            VStack(spacing: 16) {
+                // Provider Selection (Only for Create Mode)
+                if folder == nil {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("PROVIDER")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        
+                        Picker("", selection: $provider) {
+                            ForEach(availableProviders, id: \.self) { provider in
+                                Text(provider.rawValue)
+                                    .tag(provider)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                // Folder Name input field
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("NAME")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    
+                    TextField("Folder Name", text: $name, prompt: Text("e.g. Production, Staging, Client A"))
                         .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 13))
                 }
                 
-                Section("Settings") {
-                    Picker("Provider:", selection: $provider) {
-                        ForEach(availableProviders, id: \.self) { provider in
-                            Label(provider.rawValue, systemImage: provider.systemImage)
-                                .tag(provider)
-                        }
-                    }
-                    .disabled(folder != nil)
-
-                    Picker("Folder Icon:", selection: $icon) {
-                        ForEach(CloudFolderIcon.allCases) { icon in
-                            Label(icon.rawValue.capitalized, systemImage: icon.systemImage)
-                                .tag(icon)
+                // Icon Picker Grid (2x5 Grid matching the mockup)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("ICON")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
+                        ForEach(CloudFolderIcon.allCases) { iconItem in
+                            Button {
+                                self.icon = iconItem
+                            } label: {
+                                Image(systemName: iconItem.systemImage)
+                                    .font(.system(size: 16))
+                                    .frame(width: 58, height: 46)
+                                    .foregroundStyle(self.icon == iconItem ? .white : .primary)
+                                    .background(self.icon == iconItem ? Color.accentColor : Color.clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(self.icon == iconItem ? Color.accentColor : .separator.opacity(0.3), lineWidth: 1)
+                                    }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
-            .formStyle(.grouped)
-            .frame(height: 200)
 
             // Error banner
             if !errorMessage.isEmpty {
@@ -82,23 +117,54 @@ struct FolderEditorView: View {
                 .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
             }
 
+            Divider()
+
             // Footer Actions
             HStack {
+                if let folder {
+                    Button(role: .destructive) {
+                        showingDeleteAlert = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "trash")
+                            Text("Delete")
+                        }
+                        .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .controlSize(.regular)
+                }
+                
                 Spacer()
+                
                 Button("Cancel") {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
                 
                 Button(folder == nil ? "Create" : "Save") {
                     save()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                .controlSize(.regular)
             }
         }
         .padding(24)
-        .frame(width: 400)
+        .frame(width: 380)
+        .alert("Delete Folder?", isPresented: $showingDeleteAlert) {
+            Button("Delete", role: .destructive) {
+                if let folder {
+                    store.deleteFolder(folder)
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to delete this folder? The profiles inside will not be deleted.")
+        }
     }
 
     private func save() {
