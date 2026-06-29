@@ -115,11 +115,12 @@ struct ProfileDetailView: View {
                                 }
                             } label: {
                                 Image(systemName: "ellipsis")
-                                    .frame(width: 12, height: 16)
+                                    .frame(width: 16, height: 16)
                             }
                             .menuStyle(.button)
                             .buttonStyle(.bordered)
                             .controlSize(.regular)
+                            .fixedSize()
                         }
                     }
                     .padding(.bottom, 8)
