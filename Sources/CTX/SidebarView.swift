@@ -223,10 +223,12 @@ struct ProfileDisclosureGroup: View {
                     isExpanded.toggle()
                 }
             }
-        }
-        .contextMenu {
-            Button("Rename Folder") { editFolder(group.folder) }
-            Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
+            .contextMenu {
+                if group.folder.isCustom {
+                    Button("Rename Folder") { editFolder(group.folder) }
+                    Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
+                }
+            }
         }
     }
 }
