@@ -81,19 +81,20 @@ struct FolderEditorView: View {
                     
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
                         ForEach(CloudFolderIcon.allCases) { iconItem in
+                            let isSelected = self.icon == iconItem
                             Button {
                                 self.icon = iconItem
                             } label: {
                                 Image(systemName: iconItem.systemImage)
                                     .font(.system(size: 16))
                                     .frame(width: 58, height: 46)
-                                    .foregroundStyle(self.icon == iconItem ? .white : .primary)
-                                    .background(self.icon == iconItem ? Color.accentColor : Color.clear)
+                                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+                                    .background(isSelected ? Color.accentColor : Color.clear)
                                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                    .overlay {
+                                    .overlay(
                                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(self.icon == iconItem ? Color.accentColor : .separator.opacity(0.3), lineWidth: 1)
-                                    }
+                                            .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: 1)
+                                    )
                             }
                             .buttonStyle(.plain)
                         }
