@@ -166,6 +166,7 @@ public enum AWSConfigWriter {
         accessKeyId: String,
         secretAccessKey: String,
         sessionToken: String,
+        expiration: String? = nil,
         to url: URL = AWSConfigPaths.credentialsURL
     ) throws {
         let manager = FileManager.default
@@ -174,13 +175,16 @@ public enum AWSConfigWriter {
         let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         
         let text = removingCredentialsSection(from: existing, profileName: profileName)
-        let stanza = """
+        var stanza = """
 
         [\(profileName)]
         aws_access_key_id = \(accessKeyId)
         aws_secret_access_key = \(secretAccessKey)
         aws_session_token = \(sessionToken)
         """
+        if let expiration {
+            stanza += "\n        aws_session_expiration = \(expiration)"
+        }
         
         try (text.trimmingCharacters(in: .whitespacesAndNewlines) + stanza + "\n").write(
             to: url,

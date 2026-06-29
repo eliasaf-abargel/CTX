@@ -826,19 +826,30 @@ public final class ProfileStore: ObservableObject {
                    let secretAccessKey = json["SecretAccessKey"] as? String,
                    let sessionToken = json["SessionToken"] as? String {
                     
+                    let expiration = json["Expiration"] as? String
+                    
                     try AWSConfigWriter.updateCredentials(
                         profileName: profile.name,
                         accessKeyId: accessKeyId,
                         secretAccessKey: secretAccessKey,
-                        sessionToken: sessionToken
+                        sessionToken: sessionToken,
+                        expiration: expiration
                     )
                     if profile.name == activeAWSProfile {
+                        // Update expiry for the live countdown
+                        if let expStr = expiration {
+                            let fmt = ISO8601DateFormatter()
+                            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                            let exp = fmt.date(from: expStr) ?? ISO8601DateFormatter().date(from: expStr)
+                            if let exp { activeAWSExpiresAt = exp }
+                        }
                         try AWSConfigWriter.copyConfig(from: profile.name, to: "default")
                         try AWSConfigWriter.updateCredentials(
                             profileName: "default",
                             accessKeyId: accessKeyId,
                             secretAccessKey: secretAccessKey,
-                            sessionToken: sessionToken
+                            sessionToken: sessionToken,
+                            expiration: expiration
                         )
                     }
                     lastMessage = "STS credentials retrieved & stored in ~/.aws/credentials"
@@ -974,11 +985,18 @@ public final class ProfileStore: ObservableObject {
             verifyAllProfiles()
         }
         
-        for profile in profiles {
+        for profile in profiles where profile.provider == .aws {
             guard !profile.ssoStartURL.isEmpty else { continue }
             let normalizedStartUrl = profile.ssoStartURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             
-            if let expiresAt = cachedSessions[normalizedStartUrl] {
+            // Prefer expiry from ~/.aws/credentials (written by fetchAndStoreCredentials)
+            // as it reflects the actual STS token lifetime, not the SSO session.
+            var resolvedExpiry = cachedSessions[normalizedStartUrl]
+            if let credExpStr = Self.credentialsExpiry(for: profile.name) {
+                resolvedExpiry = credExpStr
+            }
+            
+            if let expiresAt = resolvedExpiry {
                 let timeLeft = expiresAt.timeIntervalSince(now)
                 
                 if timeLeft <= 0 {
@@ -999,6 +1017,28 @@ public final class ProfileStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Reads `aws_session_expiration` from `~/.aws/credentials` for the given profile name.
+    private static func credentialsExpiry(for profileName: String) -> Date? {
+        guard let text = try? String(contentsOf: AWSConfigPaths.credentialsURL, encoding: .utf8) else { return nil }
+        var inSection = false
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "[\(profileName)]" { inSection = true; continue }
+            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") { inSection = false; continue }
+            guard inSection else { continue }
+            if trimmed.hasPrefix("aws_session_expiration") {
+                let parts = trimmed.split(separator: "=", maxSplits: 1)
+                guard parts.count == 2 else { continue }
+                let expStr = parts[1].trimmingCharacters(in: .whitespaces)
+                let fmtFrac = ISO8601DateFormatter()
+                fmtFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let d = fmtFrac.date(from: expStr) { return d }
+                return ISO8601DateFormatter().date(from: expStr)
+            }
+        }
+        return nil
     }
 
     private func triggerExpirationWarning(profileName: String, expired: Bool) {
