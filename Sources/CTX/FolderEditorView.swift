@@ -122,7 +122,7 @@ struct FolderEditorView: View {
 
             // Footer Actions
             HStack {
-                if let folder {
+                if folder != nil {
                     Button(role: .destructive) {
                         showingDeleteAlert = true
                     } label: {
