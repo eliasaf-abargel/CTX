@@ -344,21 +344,16 @@ struct DetailPane: View {
                     .buttonStyle(.plain)
                     .help("Open Settings")
 
-                    Button {
-                        openSettings()
-                    } label: {
-                        Text(store.activeIdentityInitials)
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(Color.accentColor)
-                            .frame(width: 24, height: 24)
-                            .background(Color.accentColor.opacity(0.15), in: Circle())
-                            .overlay {
-                                Circle()
-                                    .stroke(Color.accentColor.opacity(0.3), lineWidth: 0.5)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    .help("Signed in as \(store.activeIdentityLabel)")
+                    Text(store.activeIdentityInitials)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color.accentColor)
+                        .frame(width: 24, height: 24)
+                        .background(Color.accentColor.opacity(0.15), in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(Color.accentColor.opacity(0.3), lineWidth: 0.5)
+                        }
+                        .help("Signed in as \(store.activeIdentityLabel)")
                 }
             }
         }
