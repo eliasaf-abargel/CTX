@@ -45,6 +45,18 @@ struct ContentView: View {
                 FolderEditorView(store: store, folder: folder)
             }
         }
+        .alert(
+            "Connection Failed",
+            isPresented: Binding(
+                get: { store.connectionErrorMessage != nil },
+                set: { if !$0 { store.connectionErrorMessage = nil } }
+            ),
+            presenting: store.connectionErrorMessage
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error)
+        }
     }
 }
 

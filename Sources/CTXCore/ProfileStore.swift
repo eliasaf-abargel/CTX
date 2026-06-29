@@ -22,6 +22,7 @@ public final class ProfileStore: ObservableObject {
     @Published public private(set) var folderOverrides: [String: String] = [:]
     @Published public private(set) var hiddenFolderIDs: Set<String> = []
     @Published public var showExpirationWarning = false
+    @Published public var connectionErrorMessage: String? = nil
     @Published public var expirationWarningMessage = ""
     @Published public var updateAvailable = false
     @Published public var latestVersionString = ""
@@ -558,6 +559,7 @@ public final class ProfileStore: ObservableObject {
                     lastMessage = "AWS SSO login completed"
                 } else {
                     lastMessage = result.output
+                    connectionErrorMessage = result.output
                 }
             case .gcp:
                 gcpManuallyClearedByUser = false   // user is re-connecting, resume auto-detection
@@ -569,6 +571,7 @@ public final class ProfileStore: ObservableObject {
                     lastMessage = "GCP auth login completed"
                 } else {
                     lastMessage = result.output
+                    connectionErrorMessage = result.output
                 }
             case .azure:
                 lastMessage = "Starting az login for \(profile.name)"
@@ -586,6 +589,7 @@ public final class ProfileStore: ObservableObject {
                     }
                 } else {
                     lastMessage = result.output
+                    connectionErrorMessage = result.output
                 }
             case .kubernetes:
                 lastMessage = "Kubernetes context \(profile.name) selected"
