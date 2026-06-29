@@ -5,8 +5,7 @@ import SwiftUI
 /// to a monochrome SF Symbol when the image asset isn't present.
 ///
 /// Drop the official logo files into `Sources/CTX/Resources/` named exactly:
-///   aws.png · gcp.png · azure.png   (kubernetes.png reserved for Phase 3)
-/// PNG with transparency is preferred; JPEG also works.
+///   aws.svg · gcp.svg · azure.svg · kubernetes.svg
 struct ProviderIcon: View {
     let provider: CloudProvider
     var size: CGFloat = 18
@@ -23,14 +22,29 @@ struct ProviderIcon: View {
     }
 
     var body: some View {
-        if let module = Bundle.safeModule,
-           let nsImage = module.image(forResource: assetName) {
+        let bundle = Bundle.module
+        
+        // 1. First attempt: Load SVG natively from Bundle.module
+        if let url = bundle.url(forResource: assetName, withExtension: "svg"),
+           let nsImage = NSImage(contentsOf: url) {
             Image(nsImage: nsImage)
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
-        } else {
+        }
+        // 2. Second attempt: Fallback to safeModule (for CLI/tests/build processes)
+        else if let safeBundle = Bundle.safeModule,
+                let url = safeBundle.url(forResource: assetName, withExtension: "svg"),
+                let nsImage = NSImage(contentsOf: url) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        }
+        // 3. Fallback: Use SF Symbol
+        else {
             Image(systemName: provider.systemImage + ".fill")
                 .font(.system(size: size))
                 .foregroundStyle(fallbackTint ?? .secondary)

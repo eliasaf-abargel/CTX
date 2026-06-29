@@ -96,12 +96,14 @@ struct SettingsView: View {
                 Section {
                     ForEach(store.groupedProfiles.map(\.folder)) { folder in
                         HStack {
-                            Label {
+                            HStack(spacing: 8) {
+                                Image(systemName: folder.icon.systemImage)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.accentColor)
+                                    .frame(width: 18)
+                                
                                 Text("\(folder.provider.rawValue) · \(folder.name)")
                                     .font(.body)
-                            } icon: {
-                                Image(systemName: folder.icon.systemImage)
-                                    .foregroundColor(.accentColor)
                             }
                             
                             Spacer()
