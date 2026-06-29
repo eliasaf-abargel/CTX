@@ -48,6 +48,9 @@ public final class ProfileStore: ObservableObject {
     private var gcpActiveConfigSource: DispatchSourceFileSystemObject?
     private var gcpConfigsDirSource: DispatchSourceFileSystemObject?
     private var azureProfilesDirSource: DispatchSourceFileSystemObject?
+    /// True when the user explicitly clicked X to disconnect GCP — prevents refresh() from
+    /// immediately re-activating the profile that is still in ~/.config/gcloud/active_config.
+    private var gcpManuallyClearedByUser = false
 
     public init(
         configURL: URL = AWSConfigPaths.configURL,
@@ -149,6 +152,8 @@ public final class ProfileStore: ObservableObject {
         gcpActiveConfigSource = makeWatcher(path: GCPConfigPaths.activeConfigURL.path) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Respect user's explicit disconnect — don't override it
+                guard !self.gcpManuallyClearedByUser else { return }
                 let activeGCPName = GCPConfigParser.parseActiveConfig()
                 if !activeGCPName.isEmpty && activeGCPName != self.activeGCPProfile {
                     self.activeGCPProfile = activeGCPName
@@ -259,10 +264,14 @@ public final class ProfileStore: ObservableObject {
         
         self.profiles = loadedProfiles
         
-        let activeGCPName = GCPConfigParser.parseActiveConfig()
-        if !activeGCPName.isEmpty {
-            self.activeGCPProfile = activeGCPName
-            UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
+        // Only auto-detect active GCP profile if the user hasn't manually disconnected.
+        // If the user clicked X in the toolbar, we respect that choice and don't restore it.
+        if !gcpManuallyClearedByUser {
+            let activeGCPName = GCPConfigParser.parseActiveConfig()
+            if !activeGCPName.isEmpty {
+                self.activeGCPProfile = activeGCPName
+                UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
+            }
         }
         
         if let selection = selectedSelection, case .profile(let pId) = selection, !profiles.contains(where: { $0.id == pId }) {
@@ -305,6 +314,7 @@ public final class ProfileStore: ObservableObject {
             
             checkAllSessionsExpiration()
         case .gcp:
+            gcpManuallyClearedByUser = false   // user is explicitly choosing a profile
             activeGCPProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeGCPProfile")
             lastMessage = "Active GCP configuration=\(profile.name)"
@@ -371,6 +381,7 @@ public final class ProfileStore: ObservableObject {
                 // Ignore clearing errors
             }
         case .gcp:
+            gcpManuallyClearedByUser = true
             activeGCPProfile = ""
             UserDefaults.standard.removeObject(forKey: "activeGCPProfile")
             lastMessage = "No active GCP configuration"
@@ -549,6 +560,7 @@ public final class ProfileStore: ObservableObject {
                     lastMessage = result.output
                 }
             case .gcp:
+                gcpManuallyClearedByUser = false   // user is re-connecting, resume auto-detection
                 lastMessage = "Starting gcloud auth login for \(profile.name)"
                 let result = await runner.run(["gcloud", "auth", "login", "--update-adc", "--configuration", profile.name])
                 lastCommandDuration = Date().timeIntervalSince(startedAt)
