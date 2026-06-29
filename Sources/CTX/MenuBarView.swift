@@ -17,17 +17,39 @@ struct MenuBarView: View {
 
                 Spacer()
 
-                Button {
-                    openSettings()
-                } label: {
-                    Text(store.activeIdentityInitials)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Color.accentColor)
-                        .frame(width: 24, height: 24)
-                        .background(Color.accentColor.opacity(0.15), in: Circle())
+                HStack(spacing: 8) {
+                    Button {
+                        openSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .frame(width: 24, height: 24)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(.separator.opacity(0.3), lineWidth: 0.5)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open Settings")
+
+                    Button {
+                        openSettings()
+                    } label: {
+                        Text(store.activeIdentityInitials)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color.accentColor)
+                            .frame(width: 24, height: 24)
+                            .background(Color.accentColor.opacity(0.15), in: Circle())
+                            .overlay {
+                                Circle()
+                                    .stroke(Color.accentColor.opacity(0.3), lineWidth: 0.5)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Signed in as \(store.activeIdentityLabel)")
                 }
-                .buttonStyle(.plain)
-                .help("Signed in as \(store.activeIdentityLabel)")
             }
 
             // Header Row 2: Active Profile Capsules (Flowing/Scrollable)
