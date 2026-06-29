@@ -9,115 +9,11 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack(spacing: 8) {
+            // Header Row 1: App Title & User Avatar
+            HStack {
                 Text("CTX")
                     .font(.headline)
                     .foregroundStyle(.primary)
-
-                if !store.activeAWSProfile.isEmpty,
-                   let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile }) {
-                    let statusColor = activeAWS.status.color
-                    HStack(spacing: 5) {
-                        Image(systemName: "cloud.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(statusColor)
-                        Text("AWS:\(store.activeAWSProfile)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        
-                        Button {
-                            store.logout(activeAWS)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.leading, 6)
-                    .padding(.trailing, 4)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.12), in: Capsule())
-                }
-
-                if !store.activeGCPProfile.isEmpty,
-                   let activeGCP = store.profiles.first(where: { $0.provider == .gcp && $0.name == store.activeGCPProfile }) {
-                    let statusColor = activeGCP.status.color
-                    HStack(spacing: 5) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 8))
-                            .foregroundStyle(statusColor)
-                        Text("GCP:\(store.activeGCPProfile)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        
-                        Button {
-                            store.logout(activeGCP)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.leading, 6)
-                    .padding(.trailing, 4)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.12), in: Capsule())
-                }
-
-                if !store.activeAzureProfile.isEmpty,
-                   let activeAzure = store.profiles.first(where: { $0.provider == .azure && $0.name == store.activeAzureProfile }) {
-                    let statusColor = activeAzure.status.color
-                    HStack(spacing: 5) {
-                        Image(systemName: "triangle.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(statusColor)
-                        Text("AZ:\(store.activeAzureProfile)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-
-                        Button {
-                            store.logout(activeAzure)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.leading, 6)
-                    .padding(.trailing, 4)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.12), in: Capsule())
-                }
-
-                if !store.activeKubeContext.isEmpty,
-                   let activeKube = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == store.activeKubeContext }) {
-                    let statusColor = activeKube.status.color
-                    HStack(spacing: 5) {
-                        Image(systemName: "shippingbox.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(statusColor)
-                        Text("K8s:\(store.activeKubeContext)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-
-                        Button {
-                            store.logout(activeKube)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.leading, 6)
-                    .padding(.trailing, 4)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.12), in: Capsule())
-                }
 
                 Spacer()
 
@@ -132,6 +28,108 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Signed in as \(store.activeIdentityLabel)")
+            }
+
+            // Header Row 2: Active Profile Capsules (Flowing/Scrollable)
+            let hasActive = !store.activeAWSProfile.isEmpty || !store.activeGCPProfile.isEmpty || !store.activeAzureProfile.isEmpty || !store.activeKubeContext.isEmpty
+            
+            if hasActive {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        // AWS Active Capsule
+                        if !store.activeAWSProfile.isEmpty,
+                           let activeAWS = store.profiles.first(where: { $0.provider == .aws && $0.name == store.activeAWSProfile }) {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                                
+                                Text("AWS \(store.activeAWSProfile)")
+                                    .font(.system(size: 9, weight: .bold))
+                                
+                                if activeAWS.status == .connected, let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
+                                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                                        let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+                                        let hours = Int(remaining) / 3600
+                                        let minutes = (Int(remaining) % 3600) / 60
+                                        let seconds = Int(remaining) % 60
+                                        if hours > 0 {
+                                            Text(String(format: "%d:%02d:%02d", hours, minutes, seconds))
+                                        } else {
+                                            Text(String(format: "%02d:%02d", minutes, seconds))
+                                        }
+                                    }
+                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                }
+                            }
+                            .foregroundStyle(Color.orange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange.opacity(0.12), in: Capsule())
+                            .overlay {
+                                Capsule().stroke(Color.orange.opacity(0.2), lineWidth: 0.5)
+                            }
+                        }
+
+                        // GCP Active Capsule
+                        if !store.activeGCPProfile.isEmpty {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                                
+                                Text("GCP \(store.activeGCPProfile)")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundStyle(Color.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.blue.opacity(0.12), in: Capsule())
+                            .overlay {
+                                Capsule().stroke(Color.blue.opacity(0.2), lineWidth: 0.5)
+                            }
+                        }
+
+                        // Azure Active Capsule
+                        if !store.activeAzureProfile.isEmpty {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                                
+                                Text("Azure \(store.activeAzureProfile)")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundStyle(Color.cyan)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.cyan.opacity(0.12), in: Capsule())
+                            .overlay {
+                                Capsule().stroke(Color.cyan.opacity(0.2), lineWidth: 0.5)
+                            }
+                        }
+
+                        // K8s Active Capsule
+                        if !store.activeKubeContext.isEmpty {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                                
+                                Text("K8s \(store.activeKubeContext)")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundStyle(Color.indigo)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.indigo.opacity(0.12), in: Capsule())
+                            .overlay {
+                                Capsule().stroke(Color.indigo.opacity(0.2), lineWidth: 0.5)
+                            }
+                        }
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             // Expiration warning banner inside the popover
