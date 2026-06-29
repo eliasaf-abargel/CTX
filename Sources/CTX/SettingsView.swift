@@ -4,148 +4,102 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: ProfileStore
     @State private var editingFolder: CloudFolder?
+    @State private var localSheet: SidebarSheet?
 
     var body: some View {
         TabView(selection: $store.selectedSettingsTab) {
-            Form {
-                Section("AWS Environment") {
-                    LabeledContent("Config Path") {
-                        HStack(spacing: 8) {
-                            Text(AWSConfigPaths.configURL.path)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .textSelection(.enabled)
-                            
-                            Button {
-                                copyToClipboard(AWSConfigPaths.configURL.path)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Copy config file path")
-
-                            Button {
-                                NSWorkspace.shared.selectFile(AWSConfigPaths.configURL.path, inFileViewerRootedAtPath: "")
-                            } label: {
-                                Image(systemName: "arrow.right.circle")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Reveal config file in Finder")
+            // Tab 0: Redesigned Cloud Config Tab (Connected Providers)
+            VStack(alignment: .leading, spacing: 14) {
+                Text("CONNECTED PROVIDERS")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                
+                VStack(spacing: 0) {
+                    providerRow(
+                        title: "AWS",
+                        provider: .aws,
+                        defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".aws").appendingPathComponent("config").path,
+                        customKey: "customAWSConfigPath",
+                        countString: "\(store.profiles.filter { $0.provider == .aws }.count) profiles",
+                        iconName: "cloud",
+                        iconBg: Color.orange
+                    )
+                    
+                    Divider()
+                        .padding(.horizontal, 16)
+                    
+                    providerRow(
+                        title: "Google Cloud",
+                        provider: .gcp,
+                        defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config").appendingPathComponent("gcloud").appendingPathComponent("configurations").path,
+                        customKey: "customGCPConfigDirPath",
+                        countString: "\(store.profiles.filter { $0.provider == .gcp }.count) config",
+                        iconName: "globe",
+                        iconBg: Color.blue
+                    )
+                    
+                    Divider()
+                        .padding(.horizontal, 16)
+                    
+                    providerRow(
+                        title: "Azure",
+                        provider: .azure,
+                        defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config").appendingPathComponent("ctx").appendingPathComponent("azure").path,
+                        customKey: "customAzureProfilesDirPath",
+                        countString: "\(store.profiles.filter { $0.provider == .azure }.count) sub",
+                        iconName: "triangle.fill",
+                        iconBg: Color.blue
+                    )
+                    
+                    Divider()
+                        .padding(.horizontal, 16)
+                    
+                    providerRow(
+                        title: "Kubernetes",
+                        provider: .kubernetes,
+                        defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".kube").appendingPathComponent("config").path,
+                        customKey: "customKubeconfigPath",
+                        countString: "\(store.profiles.filter { $0.provider == .kubernetes }.count) contexts",
+                        iconName: "square.stack.3d.up",
+                        iconBg: Color.indigo
+                    )
+                }
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(.separator.opacity(0.3), lineWidth: 0.5)
+                }
+                .padding(.horizontal, 16)
+                
+                HStack {
+                    Spacer()
+                    Menu {
+                        Button("AWS Profile...") { localSheet = .addAWSProfile }
+                        Button("Google Cloud Config...") { localSheet = .addGCPProfile }
+                        Button("Azure Subscription...") { localSheet = .addAzureProfile }
+                        Button("Kubernetes Context...") { localSheet = .addKubeContext }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                            Text("Connect another provider...")
                         }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
                     }
-                    LabeledContent("Active Profile", value: store.activeAWSProfile.isEmpty ? "None" : store.activeAWSProfile)
-                    LabeledContent("Total Profiles", value: "\(store.profiles.filter { $0.provider == .aws }.count)")
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    Spacer()
                 }
-
-                Section("GCP Environment") {
-                    LabeledContent("Configurations Path") {
-                        HStack(spacing: 8) {
-                            Text(GCPConfigPaths.configurationsDirURL.path)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .textSelection(.enabled)
-                            
-                            Button {
-                                copyToClipboard(GCPConfigPaths.configurationsDirURL.path)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Copy configurations path")
-
-                            Button {
-                                NSWorkspace.shared.selectFile(GCPConfigPaths.configurationsDirURL.path, inFileViewerRootedAtPath: "")
-                            } label: {
-                                Image(systemName: "arrow.right.circle")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Reveal configurations in Finder")
-                        }
-                    }
-                    LabeledContent("Active Config", value: store.activeGCPProfile.isEmpty ? "None" : store.activeGCPProfile)
-                    LabeledContent("Total Configurations", value: "\(store.profiles.filter { $0.provider == .gcp }.count)")
-                }
-
-                Section("Azure Environment") {
-                    LabeledContent("Profiles Path") {
-                        HStack(spacing: 8) {
-                            Text(AzureConfigPaths.profilesDirURL.path)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .textSelection(.enabled)
-
-                            Button {
-                                copyToClipboard(AzureConfigPaths.profilesDirURL.path)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Copy Azure profiles path")
-
-                            Button {
-                                NSWorkspace.shared.selectFile(AzureConfigPaths.profilesDirURL.path, inFileViewerRootedAtPath: "")
-                            } label: {
-                                Image(systemName: "arrow.right.circle")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Reveal Azure profiles in Finder")
-                        }
-                    }
-                    LabeledContent("Active Subscription", value: store.activeAzureProfile.isEmpty ? "None" : store.activeAzureProfile)
-                    LabeledContent("Total Subscriptions", value: "\(store.profiles.filter { $0.provider == .azure }.count)")
-                }
-
-                Section("Kubernetes Environment") {
-                    LabeledContent("Kubeconfig Path") {
-                        HStack(spacing: 8) {
-                            Text(KubeConfigPaths.configURL.path)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .textSelection(.enabled)
-
-                            Button {
-                                copyToClipboard(KubeConfigPaths.configURL.path)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Copy kubeconfig path")
-
-                            Button {
-                                NSWorkspace.shared.selectFile(KubeConfigPaths.configURL.path, inFileViewerRootedAtPath: "")
-                            } label: {
-                                Image(systemName: "arrow.right.circle")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Reveal kubeconfig in Finder")
-                        }
-                    }
-                    LabeledContent("Current Context", value: store.activeKubeContext.isEmpty ? "None" : store.activeKubeContext)
-                    LabeledContent("Total Contexts", value: "\(store.profiles.filter { $0.provider == .kubernetes }.count)")
-                }
-
-                Section("Folders Info") {
-                    LabeledContent("Custom Folders", value: "\(store.allFolders.filter(\.isCustom).count)")
-                }
+                .padding(.bottom, 16)
             }
-            .formStyle(.grouped)
             .tabItem {
                 Label("Cloud Config", systemImage: "cloud")
             }
             .tag(0)
 
+            // Tab 1: Folders
             List {
                 Section {
                     ForEach(store.groupedProfiles.map(\.folder)) { folder in
@@ -204,6 +158,7 @@ struct SettingsView: View {
             }
             .tag(1)
 
+            // Tab 2: About
             Form {
                 Section("Application Info") {
                     LabeledContent("Name", value: "CTX")
@@ -261,19 +216,113 @@ struct SettingsView: View {
         }
         .id(store.selectedSettingsTab)
         .scenePadding()
-        .frame(width: 520, height: 340)
+        .frame(width: 540, height: 380)
         .sheet(item: $editingFolder) { folder in
             FolderEditorView(store: store, folder: folder)
+        }
+        .sheet(item: $localSheet) { item in
+            switch item {
+            case .addAWSProfile:
+                AddAWSProfileView(store: store)
+            case .addGCPProfile:
+                AddGCPProfileView(store: store)
+            case .addAzureProfile:
+                AddAzureProfileView(store: store)
+            case .addKubeContext:
+                AddKubeContextView(store: store)
+            case .editProfile(let profile):
+                ProfileDetailView(store: store, profile: profile)
+            case .duplicateProfile(let profile):
+                if profile.provider == .aws {
+                    AddAWSProfileView(store: store, duplicateFrom: profile)
+                } else if profile.provider == .gcp {
+                    AddGCPProfileView(store: store, duplicateFrom: profile)
+                } else if profile.provider == .azure {
+                    AddAzureProfileView(store: store, duplicateFrom: profile)
+                }
+            case .addFolder:
+                FolderEditorView(store: store)
+            case .editFolder(let folder):
+                FolderEditorView(store: store, folder: folder)
+            }
         }
         .onAppear {
             store.checkForUpdates()
         }
     }
 
-    private func copyToClipboard(_ value: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.declareTypes([.string], owner: nil)
-        pasteboard.setString(value, forType: .string)
+    private func providerRow(
+        title: String,
+        provider: CloudProvider,
+        defaultPath: String,
+        customKey: String,
+        countString: String,
+        iconName: String,
+        iconBg: Color
+    ) -> some View {
+        let currentPath = UserDefaults.standard.string(forKey: customKey) ?? defaultPath
+        let displayPath = currentPath.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
+        
+        return HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 28, height: 28)
+                .background(iconBg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                
+                Button {
+                    selectCustomPath(for: provider, customKey: customKey)
+                } label: {
+                    Text(displayPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .help("Click to change config path")
+            }
+            
+            Spacer()
+            
+            HStack(spacing: 8) {
+                Text(countString)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                
+                if UserDefaults.standard.string(forKey: customKey) != nil {
+                    Button {
+                        UserDefaults.standard.removeObject(forKey: customKey)
+                        store.refresh()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reset to default path")
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(minHeight: 52)
+    }
+
+    private func selectCustomPath(for provider: CloudProvider, customKey: String) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = (provider != .gcp && provider != .azure)
+        panel.canChooseDirectories = (provider == .gcp || provider == .azure)
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            UserDefaults.standard.set(url.path, forKey: customKey)
+            store.refresh()
+        }
     }
 
     private var appVersion: String {
