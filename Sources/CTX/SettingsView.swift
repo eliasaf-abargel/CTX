@@ -3,7 +3,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: ProfileStore
-    @State private var editingFolder: CloudFolder?
     @State private var localSheet: SidebarSheet?
 
     var body: some View {
@@ -110,7 +109,7 @@ struct SettingsView: View {
                             
                             HStack(spacing: 12) {
                                 Button {
-                                    editingFolder = folder
+                                    localSheet = .editFolder(folder)
                                 } label: {
                                     Image(systemName: "pencil")
                                         .foregroundColor(.secondary)
@@ -211,9 +210,7 @@ struct SettingsView: View {
         .id(store.selectedSettingsTab)
         .scenePadding()
         .frame(width: 540, height: 380)
-        .sheet(item: $editingFolder) { folder in
-            FolderEditorView(store: store, folder: folder)
-        }
+
         .sheet(item: $localSheet) { item in
             switch item {
             case .addAWSProfile:
