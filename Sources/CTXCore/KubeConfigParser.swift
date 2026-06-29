@@ -2,7 +2,10 @@ import Foundation
 
 public enum KubeConfigPaths {
     public static var configURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let path = UserDefaults.standard.string(forKey: "customKubeconfigPath"), !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".kube")
             .appendingPathComponent("config")
     }

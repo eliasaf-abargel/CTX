@@ -18,6 +18,7 @@ struct CTXApp: App {
                 }
         }
         .defaultSize(width: 980, height: 620)
+        .windowResizability(.contentSize)
 
         MenuBarExtra {
             MenuBarView(store: store)

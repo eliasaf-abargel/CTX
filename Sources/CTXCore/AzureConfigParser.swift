@@ -3,7 +3,10 @@ import Foundation
 public enum AzureConfigPaths {
     /// CTX-managed directory holding one JSON file per Azure subscription profile.
     public static var profilesDirURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let path = UserDefaults.standard.string(forKey: "customAzureProfilesDirPath"), !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config")
             .appendingPathComponent("ctx")
             .appendingPathComponent("azure")
@@ -11,7 +14,10 @@ public enum AzureConfigPaths {
 
     /// The Azure CLI's own configuration directory (used for diagnostics in Settings).
     public static var azureCLIDirURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let path = UserDefaults.standard.string(forKey: "customAzureCLIDirPath"), !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".azure")
     }
 }

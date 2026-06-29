@@ -2,13 +2,19 @@ import Foundation
 
 public enum AWSConfigPaths {
     public static var configURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let path = UserDefaults.standard.string(forKey: "customAWSConfigPath"), !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".aws")
             .appendingPathComponent("config")
     }
 
     public static var credentialsURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let path = UserDefaults.standard.string(forKey: "customAWSCredentialsPath"), !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".aws")
             .appendingPathComponent("credentials")
     }

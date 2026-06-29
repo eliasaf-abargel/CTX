@@ -1,18 +1,21 @@
 import Foundation
 
 public enum GCPConfigPaths {
-    public static var activeConfigURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+    private static var baseDirURL: URL {
+        if let path = UserDefaults.standard.string(forKey: "customGCPConfigDirPath"), !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config")
             .appendingPathComponent("gcloud")
-            .appendingPathComponent("active_config")
+    }
+
+    public static var activeConfigURL: URL {
+        baseDirURL.appendingPathComponent("active_config")
     }
 
     public static var configurationsDirURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config")
-            .appendingPathComponent("gcloud")
-            .appendingPathComponent("configurations")
+        baseDirURL.appendingPathComponent("configurations")
     }
 }
 
