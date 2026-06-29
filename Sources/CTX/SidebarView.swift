@@ -196,6 +196,16 @@ struct ProfileDisclosureGroup: View {
                         }
                     }
                     
+                    Menu("Move profile to...") {
+                        ForEach(store.allFolders) { folder in
+                            if folder.provider == profile.provider {
+                                Button(folder.name) {
+                                    store.move(profile, to: folder)
+                                }
+                            }
+                        }
+                    }
+                    
                     Divider()
                     
                     Button("Delete \(profile.typeDescription)...", role: .destructive) {
