@@ -57,7 +57,7 @@ struct ContentView: View {
         } message: { error in
             Text(error)
         }
-        .onChange(of: store.triggerSheet) { newValue in
+        .onChange(of: store.triggerSheet) { _, newValue in
             if let newValue {
                 switch newValue {
                 case .addAWSProfile: sheet = .addAWSProfile
