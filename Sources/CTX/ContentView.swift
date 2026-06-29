@@ -358,17 +358,15 @@ struct FolderDetailView: View {
                                 Text("\(folder.provider.rawValue) · \(folder.name)")
                                     .font(.title2.weight(.semibold))
                                 
-                                if folder.isCustom {
-                                    Button {
-                                        sheet = .editFolder(folder)
-                                    } label: {
-                                        Image(systemName: "pencil")
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Rename Folder")
+                                Button {
+                                    sheet = .editFolder(folder)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.secondary)
                                 }
+                                .buttonStyle(.plain)
+                                .help("Rename Folder")
                             }
                             Text("Environment folder containing profiles")
                                 .font(.subheadline)

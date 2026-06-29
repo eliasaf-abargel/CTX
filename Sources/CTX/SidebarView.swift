@@ -215,15 +215,7 @@ struct ProfileDisclosureGroup: View {
                 Spacer()
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(selectedSelection == .folder(group.folder.id) ? Color.accentColor : Color.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                selectedSelection == .folder(group.folder.id)
-                    ? Color.accentColor.opacity(0.12)
-                    : Color.clear,
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-            )
+            .foregroundStyle(.secondary)
             .contentShape(Rectangle())
             .onTapGesture {
                 selectedSelection = .folder(group.folder.id)
@@ -232,10 +224,8 @@ struct ProfileDisclosureGroup: View {
                 }
             }
             .contextMenu {
-                if group.folder.isCustom {
-                    Button("Rename Folder") { editFolder(group.folder) }
-                    Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
-                }
+                Button("Rename Folder") { editFolder(group.folder) }
+                Button("Delete Folder", role: .destructive) { deleteFolder(group.folder) }
             }
         }
     }
