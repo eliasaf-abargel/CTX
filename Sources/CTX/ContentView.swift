@@ -136,11 +136,15 @@ struct DetailPane: View {
                             Text("AWS: \(store.activeAWSProfile)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
 
                             if !activeAWS.region.isEmpty {
                                 Text("· \(activeAWS.region)")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
 
                             if activeAWS.status == .connected, let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
@@ -183,11 +187,17 @@ struct DetailPane: View {
                             Text("GCP: \(store.activeGCPProfile)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
 
                             if !activeGCP.accountID.isEmpty {
                                 Text("· \(activeGCP.accountID)")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .frame(maxWidth: 120)
                             }
 
                             Divider()
@@ -226,11 +236,15 @@ struct DetailPane: View {
                             Text("Azure: \(store.activeAzureProfile)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
 
                             if !activeAzure.region.isEmpty {
                                 Text("· \(activeAzure.region)")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
 
                             Divider()
@@ -269,6 +283,9 @@ struct DetailPane: View {
                             Text("K8s: \(store.activeKubeContext)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.primary.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 140)
 
                             Divider()
                                 .frame(height: 10)
