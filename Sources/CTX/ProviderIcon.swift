@@ -55,14 +55,17 @@ extension Bundle {
            let bundle = Bundle(url: execURL) {
             return bundle
         }
-        // 4. Fallback: try standard build paths
-        let buildPath = "/Users/eliasafa/IdeaProjects/CTX/.build/arm64-apple-macosx/debug/CTX_CTX.bundle"
-        if let bundle = Bundle(path: buildPath) {
-            return bundle
-        }
-        let buildPathRelease = "/Users/eliasafa/IdeaProjects/CTX/.build/arm64-apple-macosx/release/CTX_CTX.bundle"
-        if let bundle = Bundle(path: buildPathRelease) {
-            return bundle
+        // 4. Fallback: try to locate the bundle relative to the Swift build directory
+        //    Works on any machine regardless of username or project path.
+        if let execURL = Bundle.main.executableURL {
+            // .build/<arch>/debug or .build/<arch>/release sibling to the executable
+            let archDir = execURL.deletingLastPathComponent()
+            for bundleName in ["CTX_CTX.bundle"] {
+                let candidate = archDir.appendingPathComponent(bundleName)
+                if let bundle = Bundle(url: candidate) {
+                    return bundle
+                }
+            }
         }
         return nil
     }

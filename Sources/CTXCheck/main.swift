@@ -80,7 +80,7 @@ try FileManager.default.createDirectory(at: tempGCPConfigDir, withIntermediateDi
 let tempGCPConfigURL = tempGCPConfigDir.appendingPathComponent("config_default")
 let gcpConfigContent = """
 [core]
-account = eliasafa@example.com
+account = user@example.com
 project = support-prod-157422
 
 [compute]
@@ -93,7 +93,7 @@ assert(gcpProfile != nil)
 assert(gcpProfile?.provider == .gcp)
 assert(gcpProfile?.name == "default")
 assert(gcpProfile?.accountID == "support-prod-157422")
-assert(gcpProfile?.roleName == "eliasafa@example.com")
+assert(gcpProfile?.roleName == "user@example.com")
 assert(gcpProfile?.region == "us-central1")
 assert(CloudFolder.builtIn(provider: .gcp, environment: .production).icon == .server)
 assert(CloudEnvironment.infer(from: gcpProfile!) == .production)
