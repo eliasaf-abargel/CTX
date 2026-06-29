@@ -101,7 +101,7 @@ struct ProfileDetailView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.regular)
-                                .help("Edit Profile")
+                                .help("Edit \(profile.typeDescription)")
 
                                 Button {
                                     sheet = .duplicateProfile(profile)
@@ -111,7 +111,7 @@ struct ProfileDetailView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.regular)
-                                .help("Duplicate Profile")
+                                .help("Duplicate \(profile.typeDescription)")
 
                                 Menu {
                                     ForEach(store.allFolders) { folder in
@@ -128,7 +128,7 @@ struct ProfileDetailView: View {
                                 .menuStyle(.button)
                                 .buttonStyle(.bordered)
                                 .controlSize(.regular)
-                                .help("Move Profile to Folder")
+                                .help("Move \(profile.typeDescription) to Folder")
 
                                 Button(role: .destructive) {
                                     deleteCandidate = profile
@@ -139,7 +139,7 @@ struct ProfileDetailView: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.regular)
                                 .tint(.red)
-                                .help("Delete Profile")
+                                .help("Delete \(profile.typeDescription)")
                             }
                             .padding(.vertical, 2)
                         }
@@ -280,7 +280,13 @@ struct ProfileDetailView: View {
                         case .azure:
                             try store.deleteAzureProfile(profile)
                         case .kubernetes:
-                            break
+                            Task {
+                                do {
+                                    try await store.deleteKubeContext(profile)
+                                } catch {
+                                    store.report(error.localizedDescription)
+                                }
+                            }
                         }
                     } catch {
                         store.report(error.localizedDescription)
@@ -291,10 +297,15 @@ struct ProfileDetailView: View {
             Button("Cancel", role: .cancel) { deleteCandidate = nil }
         } message: {
             if let profile = deleteCandidate {
-                if profile.provider == .aws {
+                switch profile.provider {
+                case .aws:
                     Text("CTX will remove this AWS profile and its matching SSO session from ~/.aws/config after creating a backup.")
-                } else {
+                case .gcp:
                     Text("CTX will permanently delete the gcloud configuration file config_\(profile.name) from ~/.config/gcloud/configurations/.")
+                case .azure:
+                    Text("CTX will permanently delete the Azure profile JSON file config_\(profile.name).json from ~/.config/ctx/azure/.")
+                case .kubernetes:
+                    Text("CTX will delete the context \(profile.name) from your ~/.kube/config configuration file.")
                 }
             }
         }

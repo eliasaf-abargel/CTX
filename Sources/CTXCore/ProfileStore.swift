@@ -823,6 +823,158 @@ public final class ProfileStore: ObservableObject {
         lastMessage = "Deleted \(profile.name)"
     }
 
+    // MARK: - Kubernetes Context Management
+
+    public func addKubeContext(
+        name: String,
+        server: String,
+        cluster: String,
+        user: String,
+        namespace: String,
+        token: String?
+    ) async throws {
+        let clusterName = cluster.isEmpty ? "\(name)-cluster" : cluster
+        let userName = user.isEmpty ? "\(name)-user" : user
+
+        var clusterArgs = [
+            "kubectl", "config", "set-cluster", clusterName,
+            "--server=\(server)"
+        ]
+        if server.lowercased().contains("https") {
+            clusterArgs.append("--insecure-skip-tls-verify=true")
+        }
+        let clusterResult = await runner.run(clusterArgs)
+        guard clusterResult.exitCode == 0 else {
+            throw AWSConfigWriterError.invalid("Failed to configure cluster: \(clusterResult.output)")
+        }
+
+        if let token = token, !token.isEmpty {
+            let credsResult = await runner.run([
+                "kubectl", "config", "set-credentials", userName,
+                "--token=\(token)"
+            ])
+            guard credsResult.exitCode == 0 else {
+                throw AWSConfigWriterError.invalid("Failed to configure credentials: \(credsResult.output)")
+            }
+        }
+
+        var contextArgs = [
+            "kubectl", "config", "set-context", name,
+            "--cluster=\(clusterName)",
+            "--user=\(userName)"
+        ]
+        if !namespace.isEmpty {
+            contextArgs.append("--namespace=\(namespace)")
+        }
+        let contextResult = await runner.run(contextArgs)
+        guard contextResult.exitCode == 0 else {
+            throw AWSConfigWriterError.invalid("Failed to configure context: \(contextResult.output)")
+        }
+
+        refresh()
+        if let profile = profiles.first(where: { $0.provider == .kubernetes && $0.name == name }) {
+            setActive(profile)
+        }
+    }
+
+    public func updateKubeContext(
+        _ profile: CloudProfile,
+        newName: String,
+        server: String,
+        cluster: String,
+        user: String,
+        namespace: String,
+        token: String?
+    ) async throws {
+        let oldName = profile.name
+
+        if oldName != newName {
+            let renameResult = await runner.run([
+                "kubectl", "config", "rename-context", oldName, newName
+            ])
+            guard renameResult.exitCode == 0 else {
+                throw AWSConfigWriterError.invalid("Failed to rename context: \(renameResult.output)")
+            }
+        }
+
+        let clusterName = cluster.isEmpty ? "\(newName)-cluster" : cluster
+        let userName = user.isEmpty ? "\(newName)-user" : user
+
+        var clusterArgs = [
+            "kubectl", "config", "set-cluster", clusterName,
+            "--server=\(server)"
+        ]
+        if server.lowercased().contains("https") {
+            clusterArgs.append("--insecure-skip-tls-verify=true")
+        }
+        let clusterResult = await runner.run(clusterArgs)
+        guard clusterResult.exitCode == 0 else {
+            throw AWSConfigWriterError.invalid("Failed to update cluster: \(clusterResult.output)")
+        }
+
+        if let token = token, !token.isEmpty {
+            let credsResult = await runner.run([
+                "kubectl", "config", "set-credentials", userName,
+                "--token=\(token)"
+            ])
+            guard credsResult.exitCode == 0 else {
+                throw AWSConfigWriterError.invalid("Failed to update credentials: \(credsResult.output)")
+            }
+        }
+
+        var contextArgs = [
+            "kubectl", "config", "set-context", newName,
+            "--cluster=\(clusterName)",
+            "--user=\(userName)"
+        ]
+        if !namespace.isEmpty {
+            contextArgs.append("--namespace=\(namespace)")
+        } else {
+            contextArgs.append("--namespace=")
+        }
+        let contextResult = await runner.run(contextArgs)
+        guard contextResult.exitCode == 0 else {
+            throw AWSConfigWriterError.invalid("Failed to update context: \(contextResult.output)")
+        }
+
+        let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
+        refresh()
+
+        if let updated = profiles.first(where: { $0.provider == .kubernetes && $0.name == newName }) {
+            if let oldFolderID {
+                folderOverrides[updated.id] = oldFolderID
+                saveFolderOverrides()
+            }
+            setActive(updated)
+        }
+    }
+
+    public func deleteKubeContext(_ profile: CloudProfile) async throws {
+        let result = await runner.run([
+            "kubectl", "config", "delete-context", profile.name
+        ])
+        guard result.exitCode == 0 else {
+            throw AWSConfigWriterError.invalid("Failed to delete context: \(result.output)")
+        }
+
+        folderOverrides.removeValue(forKey: profile.id)
+        saveFolderOverrides()
+
+        if activeKubeContext == profile.name {
+            clearActive(for: .kubernetes)
+        }
+        refresh()
+        lastMessage = "Deleted context \(profile.name)"
+    }
+
+    public func resolveKubeServer(for clusterName: String) async -> String {
+        let result = await runner.run([
+            "kubectl", "config", "view",
+            "-o", "jsonpath={.clusters[?(@.name==\"\(clusterName)\")].cluster.server}"
+        ])
+        return result.exitCode == 0 ? result.output.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+    }
+
     private func fetchAndStoreCredentials(for profile: CloudProfile) async {
         lastMessage = "Fetching STS credentials for \(profile.name)..."
         let result = await runner.run([

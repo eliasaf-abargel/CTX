@@ -85,6 +85,15 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         case .kubernetes: "Namespace"
         }
     }
+
+    public var typeDescription: String {
+        switch provider {
+        case .aws: "AWS SSO Profile"
+        case .gcp: "GCP Configuration"
+        case .azure: "Azure Subscription"
+        case .kubernetes: "Kubernetes Context"
+        }
+    }
 }
 
 

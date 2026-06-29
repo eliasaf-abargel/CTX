@@ -23,19 +23,21 @@ struct ContentView: View {
                 AddGCPProfileView(store: store)
             case .addAzureProfile:
                 AddAzureProfileView(store: store)
+            case .addKubeContext:
+                AddKubeContextView(store: store)
             case .editProfile(let profile):
                 switch profile.provider {
                 case .aws: AddAWSProfileView(store: store, mode: .edit(profile))
                 case .gcp: AddGCPProfileView(store: store, mode: .edit(profile))
                 case .azure: AddAzureProfileView(store: store, mode: .edit(profile))
-                case .kubernetes: KubernetesContextSheet(store: store, profile: profile)
+                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile))
                 }
             case .duplicateProfile(let profile):
                 switch profile.provider {
                 case .aws: AddAWSProfileView(store: store, mode: .duplicate(profile))
                 case .gcp: AddGCPProfileView(store: store, mode: .duplicate(profile))
                 case .azure: AddAzureProfileView(store: store, mode: .duplicate(profile))
-                case .kubernetes: KubernetesContextSheet(store: store, profile: profile)
+                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile))
                 }
             case .addFolder:
                 FolderEditorView(store: store)
