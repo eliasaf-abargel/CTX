@@ -22,14 +22,7 @@ struct CTXApp: App {
         MenuBarExtra {
             MenuBarView(store: store)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: (store.activeAWSProfile.isEmpty && store.activeGCPProfile.isEmpty && store.activeAzureProfile.isEmpty && store.activeKubeContext.isEmpty) ? "cloud" : "cloud.fill")
-                
-                if !store.activeAWSProfile.isEmpty,
-                   let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
-                    MenuBarTimerView(expiresAt: expiresAt)
-                }
-            }
+            Image(systemName: (store.activeAWSProfile.isEmpty && store.activeGCPProfile.isEmpty && store.activeAzureProfile.isEmpty && store.activeKubeContext.isEmpty) ? "cloud" : "cloud.fill")
         }
         .menuBarExtraStyle(.window)
 
@@ -108,26 +101,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             NSApp.activate(ignoringOtherApps: true)
         }
         return true
-    }
-}
-
-struct MenuBarTimerView: View {
-    let expiresAt: Date
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
-            let hours = Int(remaining) / 3600
-            let minutes = (Int(remaining) % 3600) / 60
-            let seconds = Int(remaining) % 60
-            
-            if hours > 0 {
-                Text(String(format: "%d:%02d:%02d", hours, minutes, seconds))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-            } else {
-                Text(String(format: "%02d:%02d", minutes, seconds))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-            }
-        }
     }
 }
