@@ -11,7 +11,7 @@ struct CTXApp: App {
     var body: some Scene {
         Window("CTX", id: "main") {
             ContentView(store: store)
-                .frame(minWidth: 680, minHeight: 480)
+                .frame(minWidth: 760, minHeight: 500)
                 .onAppear {
                     appDelegate.openWindow = openWindow
                     appDelegate.store = store
