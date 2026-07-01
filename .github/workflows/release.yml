@@ -22,6 +22,9 @@ jobs:
       - name: Setup JFrog Fly
         uses: jfrog/fly-action@v1
 
+      - name: Run Tests
+        run: swift run CTXCoreTests
+
       - name: Build and Package Release
         run: ./script/build_and_run.sh release
         env:
@@ -91,5 +94,3 @@ jobs:
           git add Casks/ctx.rb
           git commit -m "Update CTX Cask to $VERSION"
           git push origin main
-
-

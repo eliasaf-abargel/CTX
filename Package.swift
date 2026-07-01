@@ -22,6 +22,10 @@ let package = Package(
         .executableTarget(
             name: "CTXCheck",
             dependencies: ["CTXCore"]
+        ),
+        .executableTarget(
+            name: "CTXCoreTests",
+            dependencies: ["CTXCore"]
         )
     ]
 )

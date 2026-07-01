@@ -8,35 +8,36 @@ struct ProfileDetailView: View {
     @State private var copiedField: String? = nil
     @State private var deleteCandidate: CloudProfile? = nil
 
+
     var body: some View {
         ScrollView {
             HStack {
                 Spacer()
-                VStack(alignment: .leading, spacing: 28) {
-                    // Header Hero Section
+                VStack(alignment: .leading, spacing: 30) {
                     HStack(alignment: .center, spacing: 16) {
                         ProviderIcon(
                             provider: profile.provider,
-                            size: 32,
+                            size: 34,
                             fallbackTint: store.isActive(profile) ? Color.accentColor : (profile.status == .connected ? Color.green : Color.secondary)
                         )
-                        .padding(12)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(14)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(.separator.opacity(0.3), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(.white.opacity(0.22), lineWidth: 1)
                         }
+                        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
                         
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 8) {
                                 Text(profile.name)
-                                    .font(.title2.weight(.semibold))
+                                    .font(.system(size: 18, weight: .bold))
                                 
                                 if store.isActive(profile) {
                                     Text("ACTIVE")
-                                        .font(.system(size: 8, weight: .bold))
+                                        .font(.system(size: 9, weight: .bold))
                                         .foregroundStyle(.white)
-                                        .padding(.horizontal, 6)
+                                        .padding(.horizontal, 8)
                                         .padding(.vertical, 2)
                                         .background(Color.accentColor, in: Capsule())
                                 }
@@ -51,85 +52,107 @@ struct ProfileDetailView: View {
                         
                         Spacer()
                         
-                        // Top-Right Action Buttons
                         HStack(spacing: 8) {
                             Button {
                                 sheet = .editProfile(profile)
                             } label: {
                                 Label("Edit", systemImage: "pencil")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .frame(height: 34)
+                                    .padding(.horizontal, 13)
+                                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.regular)
+                            .buttonStyle(.plain)
+                            .ctxHeaderButton()
                             
                             if profile.status == .connected {
                                 Button(role: .destructive) {
                                     store.logout(profile)
                                 } label: {
                                     Text("Disconnect")
-                                        .foregroundStyle(.red)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .frame(height: 34)
+                                        .padding(.horizontal, 14)
+                                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
+                                .buttonStyle(.plain)
+                                .ctxHeaderButton(tint: .red, isProminent: false)
                             } else {
                                 Button {
                                     store.login(profile)
                                 } label: {
                                     Text("Connect")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .frame(height: 34)
+                                        .padding(.horizontal, 18)
+                                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.regular)
+                                .buttonStyle(.plain)
+                                .ctxHeaderButton(tint: .blue, isProminent: true)
                             }
                             
-                            // More Actions Dropdown Menu (...)
                             Menu {
                                 if !store.isActive(profile) {
-                                    Button("Set Active") {
+                                    Button {
                                         store.setActive(profile)
+                                    } label: {
+                                        Label("Set Active", systemImage: "checkmark.circle")
                                     }
                                 }
-                                
-                                Button("Verify Status") {
+
+                                Button {
                                     Task { await store.verify(profile) }
+                                } label: {
+                                    Label("Verify Status", systemImage: "checkmark.shield")
                                 }
-                                
+
                                 if profile.provider != .kubernetes {
-                                    Button("Duplicate...") {
+                                    Button {
                                         sheet = .duplicateProfile(profile)
+                                    } label: {
+                                        Label("Duplicate", systemImage: "plus.square.on.square")
                                     }
                                 }
-                                
-                                Menu("Move profile to...") {
-                                    ForEach(store.allFolders) { folder in
-                                        if folder.provider == profile.provider {
-                                            Button(folder.name) {
-                                                store.move(profile, to: folder)
-                                            }
+
+                                Menu {
+                                    ForEach(store.allFolders.filter { $0.provider == profile.provider }) { folder in
+                                        Button {
+                                            store.move(profile, to: folder)
+                                        } label: {
+                                            Label(folder.name, systemImage: folder.icon.systemImage)
                                         }
                                     }
+                                } label: {
+                                    Label("Move to Folder", systemImage: "folder")
                                 }
-                                
+
                                 Divider()
-                                
-                                Button("Delete Profile", role: .destructive) {
+
+                                Button(role: .destructive) {
                                     deleteCandidate = profile
+                                } label: {
+                                    Label("Delete Profile", systemImage: "trash")
                                 }
                             } label: {
                                 Image(systemName: "ellipsis")
-                                    .frame(width: 16, height: 16)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .frame(width: 42, height: 34)
+                                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
                             .menuStyle(.button)
-                            .buttonStyle(.bordered)
-                            .controlSize(.regular)
-                            .fixedSize()
+                            .menuIndicator(.hidden)
+                            .buttonStyle(.plain)
+                            .ctxHeaderButton()
+                            .accessibilityLabel("More actions")
                         }
                     }
                     .padding(.bottom, 8)
 
-                    // SESSION CARD (Only when connected or has session data)
                     VStack(alignment: .leading, spacing: 8) {
                         Text("SESSION")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.secondary)
+                            .tracking(1.1)
                             .padding(.leading, 4)
                         
                         VStack(spacing: 0) {
@@ -146,8 +169,8 @@ struct ProfileDetailView: View {
                                         .fontWeight(.medium)
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 38)
                             
                             // Row 2: AWS Expires Countdown (if active AWS SSO session)
                             if profile.provider == .aws, store.isActive(profile), let expiresAt = store.activeAWSExpiresAt, expiresAt > Date() {
@@ -161,8 +184,8 @@ struct ProfileDetailView: View {
                                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                         .foregroundStyle(.orange)
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
+                                .padding(.horizontal, 18)
+                                .frame(minHeight: 38)
                             }
                             
                             // Row 3: Connected Identity initials and label
@@ -189,21 +212,17 @@ struct ProfileDetailView: View {
                                         .fontWeight(.medium)
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 38)
                         }
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(.separator.opacity(0.3), lineWidth: 1)
-                        }
+                        .ctxGlassCard()
                     }
 
-                    // ACCOUNT / CONFIGURATION DETAILS CARD
                     VStack(alignment: .leading, spacing: 8) {
                         Text("ACCOUNT")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.secondary)
+                            .tracking(1.1)
                             .padding(.leading, 4)
                         
                         VStack(spacing: 0) {
@@ -222,8 +241,8 @@ struct ProfileDetailView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 38)
                             
                             // Row 2: Region (if not empty)
                             if !profile.region.isEmpty {
@@ -237,8 +256,8 @@ struct ProfileDetailView: View {
                                         .font(.system(.body, design: .monospaced))
                                         .fontWeight(.medium)
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
+                                .padding(.horizontal, 18)
+                                .frame(minHeight: 38)
                             }
                             
                             // Row 3: Role (if not empty)
@@ -257,8 +276,8 @@ struct ProfileDetailView: View {
                                         copyButton(for: profile.roleName, fieldName: "role")
                                     }
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
+                                .padding(.horizontal, 18)
+                                .frame(minHeight: 38)
                             }
                             
                             // Row 4: AWS SSO Start URL (if AWS)
@@ -274,8 +293,8 @@ struct ProfileDetailView: View {
                                         .fontWeight(.medium)
                                         .textSelection(.enabled)
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
+                                .padding(.horizontal, 18)
+                                .frame(minHeight: 38)
                             }
                             
                             // Row 5: AWS SSO Region (if AWS)
@@ -290,22 +309,18 @@ struct ProfileDetailView: View {
                                         .font(.system(.body, design: .monospaced))
                                         .fontWeight(.medium)
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
+                                .padding(.horizontal, 18)
+                                .frame(minHeight: 38)
                             }
                         }
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(.separator.opacity(0.3), lineWidth: 1)
-                        }
+                        .ctxGlassCard()
                     }
 
-                    // DIAGNOSTICS CARD
                     VStack(alignment: .leading, spacing: 8) {
                         Text("DIAGNOSTICS")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.secondary)
+                            .tracking(1.1)
                             .padding(.leading, 4)
                         
                         VStack(spacing: 0) {
@@ -316,8 +331,8 @@ struct ProfileDetailView: View {
                                 Text(formatted(store.lastLoginAt))
                                     .fontWeight(.medium)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 38)
                             
                             Divider()
                                 .padding(.leading, 16)
@@ -329,8 +344,8 @@ struct ProfileDetailView: View {
                                 Text(formatted(store.lastVerifiedAt))
                                     .fontWeight(.medium)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 38)
                             
                             Divider()
                                 .padding(.leading, 16)
@@ -342,17 +357,13 @@ struct ProfileDetailView: View {
                                 Text(duration(store.lastCommandDuration))
                                     .fontWeight(.medium)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 38)
                         }
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(.separator.opacity(0.3), lineWidth: 1)
-                        }
+                        .ctxGlassCard()
                     }
                 }
-                .frame(maxWidth: 680)
+                .frame(maxWidth: 720)
                 Spacer()
             }
             .padding(32)
@@ -414,6 +425,8 @@ struct ProfileDetailView: View {
             return profile.status.rawValue
         }
     }
+
+
     
     private func copyButton(for value: String, fieldName: String) -> some View {
         Button {
@@ -431,10 +444,14 @@ struct ProfileDetailView: View {
         } label: {
             Image(systemName: copiedField == fieldName ? "checkmark.circle.fill" : "doc.on.doc")
                 .foregroundStyle(copiedField == fieldName ? .green : .secondary)
-                .font(.system(size: 11))
+                .font(.system(size: 12))
+                .frame(width: 28, height: 28)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(.plain)
         .help("Copy to clipboard")
+        .accessibilityLabel("Copy \(fieldName)")
     }
 
     private func copyToClipboard(_ value: String) {
@@ -455,6 +472,32 @@ struct ProfileDetailView: View {
             return "-"
         }
         return String(format: "%.2fs", duration)
+    }
+}
+
+private extension View {
+    func ctxGlassCard() -> some View {
+        background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(.separator.opacity(0.30), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
+    }
+
+    func ctxHeaderButton(tint: Color = .primary, isProminent: Bool = false) -> some View {
+        foregroundStyle(isProminent ? Color.white : tint)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isProminent ? tint : Color.secondary.opacity(0.12))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isProminent ? Color.white.opacity(0.20) : Color.white.opacity(0.16), lineWidth: 0.75)
+            }
+            .shadow(color: isProminent ? .clear : .black.opacity(0.10), radius: isProminent ? 0 : 8, y: isProminent ? 0 : 4)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

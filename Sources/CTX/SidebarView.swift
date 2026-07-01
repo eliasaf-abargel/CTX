@@ -2,6 +2,7 @@ import CTXCore
 import SwiftUI
 
 enum SidebarSheet: Identifiable {
+    case selectProvider
     case addAWSProfile
     case addGCPProfile
     case addAzureProfile
@@ -13,6 +14,8 @@ enum SidebarSheet: Identifiable {
 
     var id: String {
         switch self {
+        case .selectProvider:
+            "selectProvider"
         case .addAWSProfile:
             "addAWSProfile"
         case .addGCPProfile:
@@ -36,50 +39,145 @@ enum SidebarSheet: Identifiable {
 struct SidebarView: View {
     @ObservedObject var store: ProfileStore
     @Binding var sheet: SidebarSheet?
+    @Environment(\.openSettings) private var openSettings: OpenSettingsAction
     @State private var expandedGroups: Set<String> = []
-    @State private var showingCreateMenu = false
     @State private var deleteCandidate: CloudProfile? = nil
+    @State private var sidebarSearchQuery = ""
 
-    var body: some View {
-        List(selection: $store.selectedSelection) {
-            ForEach(store.groupedProfiles) { group in
-                ProfileDisclosureGroup(
-                    group: group,
-                    selectedSelection: $store.selectedSelection,
-                    isExpanded: binding(for: group.id),
-                    sheet: $sheet,
-                    deleteCandidate: $deleteCandidate,
-                    store: store,
-                    editFolder: { sheet = .editFolder($0) },
-                    deleteFolder: { store.deleteFolder($0) }
-                )
-                .tag(SidebarSelection.folder(group.folder.id))
+    private var filteredGroupedProfiles: [ProfileGroup] {
+        if sidebarSearchQuery.isEmpty {
+            return store.groupedProfiles
+        }
+        return store.groupedProfiles.compactMap { group in
+            let matchesFolder = group.folder.name.localizedCaseInsensitiveContains(sidebarSearchQuery)
+                || group.folder.provider.rawValue.localizedCaseInsensitiveContains(sidebarSearchQuery)
+
+            let matchingProfiles = group.profiles.filter { profile in
+                profile.name.localizedCaseInsensitiveContains(sidebarSearchQuery)
+                    || profile.provider.rawValue.localizedCaseInsensitiveContains(sidebarSearchQuery)
+            }
+
+            if matchesFolder {
+                return group
+            } else if !matchingProfiles.isEmpty {
+                return ProfileGroup(folder: group.folder, profiles: matchingProfiles)
+            } else {
+                return nil
             }
         }
-        .listStyle(.sidebar)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Custom Search Bar (No Blue Focus Ring!)
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+
+                TextField("Search...", text: $sidebarSearchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+
+                if !sidebarSearchQuery.isEmpty {
+                    Button {
+                        sidebarSearchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(.separator.opacity(0.1), lineWidth: 0.5)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            List(selection: $store.selectedSelection) {
+                ForEach(filteredGroupedProfiles) { group in
+                    ProfileDisclosureGroup(
+                        group: group,
+                        selectedSelection: $store.selectedSelection,
+                        isExpanded: binding(for: group.id),
+                        sheet: $sheet,
+                        deleteCandidate: $deleteCandidate,
+                        store: store,
+                        editFolder: { sheet = .editFolder($0) },
+                        deleteFolder: { store.deleteFolder($0) }
+                    )
+                    .tag(SidebarSelection.folder(group.folder.id))
+                }
+            }
+            .listStyle(.sidebar)
+            
+            Divider()
+                .padding(.horizontal, 12)
+            
+            // Settings & Profile Footer
+            HStack(spacing: 8) {
+                Text(store.activeIdentityInitials)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Color.accentColor)
+                    .frame(width: 22, height: 22)
+                    .background(Color.accentColor.opacity(0.15), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color.accentColor.opacity(0.3), lineWidth: 0.5)
+                    }
+                
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(store.activeIdentityLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    Text("Identity Connected")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                Button {
+                    openSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open Settings")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
         .navigationTitle("Profiles")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    if let folder = store.selectedFolder {
-                        Button("Add Profile to \(folder.name)...") {
-                            switch folder.provider {
-                            case .aws: sheet = .addAWSProfile
-                            case .gcp: sheet = .addGCPProfile
-                            case .azure: sheet = .addAzureProfile
-                            case .kubernetes: sheet = .addKubeContext
-                            }
-                        }
-                        Divider()
+                    Button {
+                        openNewProfile()
+                    } label: {
+                        Label("New Profile", systemImage: "plus")
                     }
-                    Button("AWS Profile...") { sheet = .addAWSProfile }
-                    Button("GCP Configuration...") { sheet = .addGCPProfile }
-                    Button("Azure Subscription...") { sheet = .addAzureProfile }
-                    Button("Kubernetes Context...") { sheet = .addKubeContext }
-                    Button("New Folder...") { sheet = .addFolder }
+
+                    Button {
+                        sheet = .addFolder
+                    } label: {
+                        Label("New Folder", systemImage: "folder")
+                    }
                 } label: {
-                    Label("Create", systemImage: "plus")
+                    Image(systemName: "plus")
                 }
+                .menuIndicator(.hidden)
                 .help("Create Profile or Folder")
             }
         }
@@ -132,9 +230,13 @@ struct SidebarView: View {
         }
     }
 
+    private func openNewProfile() {
+        sheet = .selectProvider
+    }
+
     private func binding(for id: String) -> Binding<Bool> {
         Binding(
-            get: { expandedGroups.contains(id) },
+            get: { expandedGroups.contains(id) || !sidebarSearchQuery.isEmpty },
             set: { isExpanded in
                 if isExpanded {
                     expandedGroups.insert(id)
@@ -164,54 +266,6 @@ struct ProfileDisclosureGroup: View {
                     isSelected: selectedSelection == .profile(profile.id)
                 )
                 .tag(SidebarSelection.profile(profile.id))
-                .contextMenu {
-                    Button(store.isActive(profile) ? "Active" : "Set Active") {
-                        store.setActive(profile)
-                    }
-                    .disabled(store.isActive(profile))
-                    
-                    if profile.status == .connected {
-                        Button("Disconnect") {
-                            store.logout(profile)
-                        }
-                    } else {
-                        Button("Connect") {
-                            store.login(profile)
-                        }
-                    }
-                    
-                    Button("Verify Status") {
-                        Task { await store.verify(profile) }
-                    }
-                    
-                    Divider()
-                    
-                    Button("Edit \(profile.typeDescription)...") {
-                        sheet = .editProfile(profile)
-                    }
-                    
-                    if profile.provider != .kubernetes {
-                        Button("Duplicate...") {
-                            sheet = .duplicateProfile(profile)
-                        }
-                    }
-                    
-                    Menu("Move profile to...") {
-                        ForEach(store.allFolders) { folder in
-                            if folder.provider == profile.provider {
-                                Button(folder.name) {
-                                    store.move(profile, to: folder)
-                                }
-                            }
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    Button("Delete \(profile.typeDescription)...", role: .destructive) {
-                        deleteCandidate = profile
-                    }
-                }
             }
         } label: {
             HStack(spacing: 6) {

@@ -84,7 +84,7 @@ public final class ProfileStore: ObservableObject {
                 self?.checkAllSessionsExpiration()
             }
         
-        if Bundle.main.bundleIdentifier != nil && Bundle.main.infoDictionary?["CFBundlePackageType"] as? String == "APPL" {
+        if Self.canUseNotifications {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
         checkForUpdates()
@@ -1290,7 +1290,9 @@ public final class ProfileStore: ObservableObject {
             trigger: nil
         )
         
-        UNUserNotificationCenter.current().add(request) { _ in }
+        if Self.canUseNotifications {
+            UNUserNotificationCenter.current().add(request) { _ in }
+        }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
             self.showExpirationWarning = false
@@ -1400,6 +1402,8 @@ public final class ProfileStore: ObservableObject {
     }
 
     private func triggerUpdateNotification(version: String) {
+        guard Self.canUseNotifications else { return }
+
         let content = UNMutableNotificationContent()
         content.title = "Update Available"
         content.body = "A new version \(version) of CTX is available. Click to open Settings and update."
@@ -1413,6 +1417,10 @@ public final class ProfileStore: ObservableObject {
         )
         
         UNUserNotificationCenter.current().add(request) { _ in }
+    }
+
+    private static var canUseNotifications: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
     }
 
     public func installUpdate() {

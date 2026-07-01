@@ -8,6 +8,9 @@ LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.2.0")
 APP_VERSION="${CTX_RELEASE_VERSION:-$LATEST_TAG}"
 APP_VERSION="${APP_VERSION#v}"
 APP_BUILD="${GITHUB_RUN_NUMBER:-1}"
+if [[ "$MODE" == "preview" ]]; then
+  APP_BUILD="${CTX_PREVIEW_BUILD:-$(date +%Y%m%d%H%M%S)}"
+fi
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,8 +33,9 @@ fi
 killall "$APP_NAME" >/dev/null 2>&1 || true
 
 BUILD_CONFIG="debug"
-if [[ "$MODE" == "release" ]]; then
+if [[ "$MODE" == "release" || "$MODE" == "preview" ]]; then
   BUILD_CONFIG="release"
+  swift run CTXCoreTests
 fi
 
 swift build -c "$BUILD_CONFIG"
@@ -111,6 +115,11 @@ case "$MODE" in
     zip -qy -r "$APP_NAME.app.zip" "$APP_NAME.app"
     echo "Release packaged: $DIST_DIR/$APP_NAME.app.zip"
     ;;
+  preview)
+    open_app
+    echo "Preview build opened: $APP_BUNDLE"
+    echo "Version: $APP_VERSION ($APP_BUILD)"
+    ;;
   --debug|debug)
     lldb -- "$APP_BINARY"
     ;;
@@ -128,7 +137,7 @@ case "$MODE" in
     pgrep -x "$APP_NAME" >/dev/null
     ;;
   *)
-    echo "usage: $0 [run|release|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|preview|release|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac

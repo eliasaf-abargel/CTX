@@ -13,96 +13,88 @@ struct FolderEditorView: View {
     @State private var showingDeleteAlert = false
 
     private var availableProviders: [CloudProvider] {
-        let activeProviders = Set(store.profiles.map(\.provider))
-        if activeProviders.isEmpty {
-            return [.aws]
-        }
-        return Array(activeProviders).sorted(by: { $0.rawValue < $1.rawValue })
+        CloudProvider.allCases
+    }
+
+    private var visibleIcons: [CloudFolderIcon] {
+        [.server, .cube, .tools, .database, .folder]
     }
 
     init(store: ProfileStore, folder: CloudFolder? = nil) {
         self.store = store
         self.folder = folder
         self._name = State(initialValue: folder?.name ?? "")
-        let initialProvider = folder?.provider ?? Set(store.profiles.map(\.provider)).first ?? .aws
+        let initialProvider = folder?.provider ?? .aws
         self._provider = State(initialValue: initialProvider)
-        self._icon = State(initialValue: folder?.icon ?? .folder)
+        self._icon = State(initialValue: folder?.icon ?? .server)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Header
+        VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(folder == nil ? "Create Folder" : "Edit Folder")
-                    .font(.title2.weight(.semibold))
-                Text("Choose a name and icon for this environment")
+                Text(folder == nil ? "New Folder" : "Edit Folder")
+                    .font(.title.weight(.semibold))
+                Text("Group profiles by environment under a provider.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 22)
             
             Divider()
 
-            // Form Content
-            VStack(spacing: 16) {
-                // Provider Selection (Only for Create Mode)
+            VStack(alignment: .leading, spacing: 22) {
                 if folder == nil {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("PROVIDER")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.secondary)
-                        
-                        Picker("", selection: $provider) {
-                            ForEach(availableProviders, id: \.self) { provider in
-                                Text(provider.rawValue)
-                                    .tag(provider)
-                            }
+                    Picker("", selection: $provider) {
+                        ForEach(availableProviders, id: \.self) { provider in
+                            Text(provider.shortName)
+                                .tag(provider)
                         }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
                 }
 
-                // Folder Name input field
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("NAME")
-                        .font(.system(size: 10, weight: .bold))
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Folder Name")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
                     
-                    TextField("Folder Name", text: $name, prompt: Text("e.g. Production, Staging, Client A"))
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 13))
+                    TextField("Production", text: $name)
+                        .textFieldStyle(.plain)
+                        .font(.title3)
+                        .padding(.horizontal, 14)
+                        .frame(height: 44)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(.separator.opacity(0.25), lineWidth: 1)
+                        }
                 }
                 
-                // Icon Picker Grid (2x5 Grid matching the mockup)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("ICON")
-                        .font(.system(size: 10, weight: .bold))
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Icon")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
                     
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
-                        ForEach(CloudFolderIcon.allCases) { iconItem in
+                    HStack(spacing: 12) {
+                        ForEach(visibleIcons) { iconItem in
                             let isSelected = self.icon == iconItem
                             Button {
                                 self.icon = iconItem
                             } label: {
-                                Image(systemName: iconItem.systemImage)
-                                    .font(.system(size: 16))
-                                    .frame(width: 58, height: 46)
-                                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-                                    .background(isSelected ? Color.accentColor : Color.clear)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: 1)
-                                    )
+                                FolderIconSwatch(icon: iconItem, isSelected: isSelected)
                             }
                             .buttonStyle(.plain)
+                            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .accessibilityLabel(iconItem.rawValue)
                         }
                     }
                 }
             }
+            .padding(24)
 
-            // Error banner
             if !errorMessage.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.octagon.fill")
@@ -116,11 +108,10 @@ struct FolderEditorView: View {
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
             }
 
-            Divider()
-
-            // Footer Actions
             HStack {
                 if folder != nil {
                     Button(role: .destructive) {
@@ -148,13 +139,16 @@ struct FolderEditorView: View {
                 Button(folder == nil ? "Create" : "Save") {
                     save()
                 }
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .controlSize(.regular)
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .padding(24)
-        .frame(width: 380)
+        .frame(width: 540)
+        .background(.regularMaterial)
         .alert("Delete Folder?", isPresented: $showingDeleteAlert) {
             Button("Delete", role: .destructive) {
                 if let folder {
@@ -170,14 +164,36 @@ struct FolderEditorView: View {
 
     private func save() {
         do {
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             if let folder {
-                try store.updateFolder(folder, name: name, icon: icon)
+                try store.updateFolder(folder, name: trimmedName, icon: icon)
             } else {
-                try store.addFolder(name: name, provider: provider, icon: icon)
+                try store.addFolder(name: trimmedName, provider: provider, icon: icon)
             }
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct FolderIconSwatch: View {
+    let icon: CloudFolderIcon
+    let isSelected: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+        Image(systemName: icon.systemImage)
+            .font(.system(size: 22, weight: .semibold))
+            .frame(width: 64, height: 54)
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .background {
+                shape.fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.10))
+            }
+            .overlay {
+                shape.stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.secondary.opacity(0.25), lineWidth: 1)
+            }
+            .shadow(color: isSelected ? Color.accentColor.opacity(0.35) : .clear, radius: 10, y: 4)
     }
 }

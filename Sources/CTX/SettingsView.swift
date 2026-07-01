@@ -32,7 +32,7 @@ struct SettingsView: View {
                         provider: .gcp,
                         defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config").appendingPathComponent("gcloud").appendingPathComponent("configurations").path,
                         customKey: "customGCPConfigDirPath",
-                        countString: "\(store.profiles.filter { $0.provider == .gcp }.count) config"
+                        countString: "\(store.profiles.filter { $0.provider == .gcp }.count) configurations"
                     )
                     
                     Divider()
@@ -43,7 +43,7 @@ struct SettingsView: View {
                         provider: .azure,
                         defaultPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config").appendingPathComponent("ctx").appendingPathComponent("azure").path,
                         customKey: "customAzureProfilesDirPath",
-                        countString: "\(store.profiles.filter { $0.provider == .azure }.count) sub"
+                        countString: "\(store.profiles.filter { $0.provider == .azure }.count) subscriptions"
                     )
                     
                     Divider()
@@ -213,6 +213,8 @@ struct SettingsView: View {
 
         .sheet(item: $localSheet) { item in
             switch item {
+            case .selectProvider:
+                SelectProviderView(sheet: $localSheet)
             case .addAWSProfile:
                 AddAWSProfileView(store: store)
             case .addGCPProfile:
@@ -273,6 +275,7 @@ struct SettingsView: View {
                         .underline()
                 }
                 .buttonStyle(.plain)
+                .focusable(false) // Prevents the blue focus ring glitch!
                 .help("Click to change config path")
             }
             
