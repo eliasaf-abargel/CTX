@@ -26,7 +26,10 @@ struct ContentView: View {
             case .addAzureProfile:
                 AddAzureProfileView(store: store)
             case .addKubeContext:
-                AddKubeContextView(store: store)
+                AddKubeContextView(
+                    store: store,
+                    targetFolder: store.selectedFolder?.provider == .kubernetes ? store.selectedFolder : nil
+                )
             case .editProfile(let profile):
                 switch profile.provider {
                 case .aws: AddAWSProfileView(store: store, mode: .edit(profile))

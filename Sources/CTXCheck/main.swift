@@ -2,7 +2,7 @@ import CTXCore
 import Foundation
 
 let profiles = AWSConfigParser.parse("""
-[profile it-admin]
+[profile ops-admin]
 sso_account_id = 123456789012
 sso_role_name = AdministratorAccess
 region = eu-west-1
@@ -14,7 +14,7 @@ sso_start_url = https://example.awsapps.com/start
 assert(profiles == [
     CloudProfile(
         provider: .aws,
-        name: "it-admin",
+        name: "ops-admin",
         accountID: "123456789012",
         roleName: "AdministratorAccess",
         region: "eu-west-1"
@@ -36,7 +36,7 @@ region = eu-west-1
 assert(linkedProfiles.first?.ssoStartURL == "https://corp.awsapps.com/start")
 assert(linkedProfiles.first?.ssoRegion == "eu-west-1")
 assert(CloudFolder.builtIn(provider: .aws, environment: .production).icon == .server)
-assert(CloudEnvironment.infer(from: CloudProfile(provider: .aws, name: "seller-prod")) == .production)
+assert(CloudEnvironment.infer(from: CloudProfile(provider: .aws, name: "shop-prod")) == .production)
 
 var draft = AWSProfileDraft()
 draft.name = "demo"
@@ -81,7 +81,7 @@ let tempGCPConfigURL = tempGCPConfigDir.appendingPathComponent("config_default")
 let gcpConfigContent = """
 [core]
 account = user@example.com
-project = support-prod-157422
+project = example-prod-123456
 
 [compute]
 region = us-central1
@@ -92,7 +92,7 @@ let gcpProfile = GCPConfigParser.parse(contentsOf: tempGCPConfigURL, name: "defa
 assert(gcpProfile != nil)
 assert(gcpProfile?.provider == .gcp)
 assert(gcpProfile?.name == "default")
-assert(gcpProfile?.accountID == "support-prod-157422")
+assert(gcpProfile?.accountID == "example-prod-123456")
 assert(gcpProfile?.roleName == "user@example.com")
 assert(gcpProfile?.region == "us-central1")
 assert(CloudFolder.builtIn(provider: .gcp, environment: .production).icon == .server)

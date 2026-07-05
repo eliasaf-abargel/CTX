@@ -24,10 +24,19 @@ enum KubeContextEditorMode {
     }
 }
 
+private enum KubeContextAuthMode: String, CaseIterable, Identifiable {
+    case internalProxy = "Internal"
+    case bearerToken = "Bearer token"
+    case awsEKS = "AWS EKS"
+
+    var id: String { rawValue }
+}
+
 struct AddKubeContextView: View {
     @ObservedObject var store: ProfileStore
     @Environment(\.dismiss) private var dismiss
     let mode: KubeContextEditorMode
+    let targetFolder: CloudFolder?
 
     @State private var name = ""
     @State private var server = ""
@@ -35,13 +44,17 @@ struct AddKubeContextView: View {
     @State private var user = ""
     @State private var namespace = ""
     @State private var token = ""
+    @State private var authMode: KubeContextAuthMode = .bearerToken
+    @State private var awsRegion = ""
+    @State private var awsProfile = ""
     @State private var isResolvingServer = false
     @State private var isSaving = false
     @State private var errorMessage = ""
 
-    init(store: ProfileStore, mode: KubeContextEditorMode = .create) {
+    init(store: ProfileStore, mode: KubeContextEditorMode = .create, targetFolder: CloudFolder? = nil) {
         self.store = store
         self.mode = mode
+        self.targetFolder = targetFolder
     }
 
     var body: some View {
@@ -83,15 +96,35 @@ struct AddKubeContextView: View {
                 }
 
                 Section("Authentication") {
+                    Picker("Auth Mode:", selection: $authMode) {
+                        ForEach(KubeContextAuthMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
                     TextField("User Name:", text: $user, prompt: Text("e.g. my-user (optional, defaults to name-user)"))
                         .textFieldStyle(.roundedBorder)
-                    
-                    SecureField("Token:", text: $token, prompt: Text("Bearer token (optional)"))
-                        .textFieldStyle(.roundedBorder)
+                        .disabled(authMode == .internalProxy)
+
+                    if authMode == .awsEKS {
+                        TextField("AWS Region:", text: $awsRegion, prompt: Text("e.g. us-east-1"))
+                            .textFieldStyle(.roundedBorder)
+                        Picker("AWS Profile:", selection: $awsProfile) {
+                            Text("Default AWS credentials").tag("")
+                            ForEach(awsProfiles, id: \.name) { profile in
+                                Text(profile.name).tag(profile.name)
+                            }
+                        }
+                    } else {
+                        SecureField("Token:", text: $token, prompt: Text("Bearer token (optional)"))
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(authMode == .internalProxy)
+                    }
                 }
             }
             .formStyle(.grouped)
-            .frame(height: 320)
+            .frame(height: 380)
 
             // Error banner
             if !errorMessage.isEmpty {
@@ -132,6 +165,21 @@ struct AddKubeContextView: View {
         .onAppear {
             setupInitialValues()
         }
+        .onChange(of: server) { _, newValue in
+            if authMode == .awsEKS, awsRegion.isEmpty {
+                awsRegion = Self.eksRegion(from: newValue)
+            }
+        }
+        .onChange(of: authMode) { _, newValue in
+            if newValue == .awsEKS {
+                if awsProfile.isEmpty {
+                    awsProfile = store.activeAWSProfile
+                }
+                if awsRegion.isEmpty {
+                    awsRegion = Self.eksRegion(from: server)
+                }
+            }
+        }
     }
 
     private var isEditing: Bool {
@@ -141,10 +189,16 @@ struct AddKubeContextView: View {
         return false
     }
 
+    private var awsProfiles: [CloudProfile] {
+        store.profiles
+            .filter { $0.provider == .aws }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     private func setupInitialValues() {
         switch mode {
         case .create:
-            break
+            awsProfile = store.activeAWSProfile
         case .edit(let profile):
             name = profile.name
             cluster = profile.accountID // accountID is cluster
@@ -173,13 +227,26 @@ struct AddKubeContextView: View {
             do {
                 switch mode {
                 case .create:
+                    let credential: KubeConfigCredential = switch authMode {
+                    case .internalProxy:
+                        .internalProxy
+                    case .bearerToken:
+                        .bearerToken(token.isEmpty ? nil : token)
+                    case .awsEKS:
+                        .awsEKS(
+                            region: awsRegion.trimmingCharacters(in: .whitespaces),
+                            profile: awsProfile.trimmingCharacters(in: .whitespaces)
+                        )
+                    }
+
                     try await store.addKubeContext(
                         name: name.trimmingCharacters(in: .whitespaces),
                         server: server.trimmingCharacters(in: .whitespaces),
                         cluster: cluster.trimmingCharacters(in: .whitespaces),
                         user: user.trimmingCharacters(in: .whitespaces),
                         namespace: namespace.trimmingCharacters(in: .whitespaces),
-                        token: token.isEmpty ? nil : token
+                        credential: credential,
+                        targetFolder: targetFolder
                     )
                 case .edit(let profile):
                     try await store.updateKubeContext(
@@ -203,5 +270,12 @@ struct AddKubeContextView: View {
                 }
             }
         }
+    }
+
+    private static func eksRegion(from server: String) -> String {
+        guard let host = URL(string: server)?.host else { return "" }
+        let parts = host.split(separator: ".").map(String.init)
+        guard let eksIndex = parts.firstIndex(of: "eks"), eksIndex > 0 else { return "" }
+        return parts[eksIndex - 1]
     }
 }

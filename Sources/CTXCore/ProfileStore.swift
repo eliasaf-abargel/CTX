@@ -44,7 +44,7 @@ public final class ProfileStore: ObservableObject {
     @Published public private(set) var activeAWSExpiresAt: Date?
 
     private let configURL: URL
-    private let runner: CloudCommandRunner
+    private let runner: any CloudCommandRunning
     private let kubeConfigMutations: KubeConfigMutationService
     private let kubeConfigDiscoveryService: KubeConfigDiscoveryService
     private let localProfileDiscovery: LocalProfileDiscoveryService
@@ -67,7 +67,7 @@ public final class ProfileStore: ObservableObject {
 
     public init(
         configURL: URL = AWSConfigPaths.configURL,
-        runner: CloudCommandRunner = CloudCommandRunner(),
+        runner: any CloudCommandRunning = CloudCommandRunner(),
         kubeConfigMutations: KubeConfigMutationService? = nil,
         kubeConfigDiscoveryService: KubeConfigDiscoveryService = KubeConfigDiscoveryService(),
         profileCommands: ProfileCommandService? = nil,
@@ -77,7 +77,8 @@ public final class ProfileStore: ObservableObject {
         awsCredentials: AWSCredentialService? = nil,
         profilePersistence: CloudProfilePersistenceService? = nil,
         fileWatchers: ProfileFileWatcherService = ProfileFileWatcherService(),
-        folderPreferences: CloudFolderPreferencesStore = CloudFolderPreferencesStore()
+        folderPreferences: CloudFolderPreferencesStore = CloudFolderPreferencesStore(),
+        startsBackgroundServices: Bool = true
     ) {
         self.configURL = configURL
         self.runner = runner
@@ -102,23 +103,28 @@ public final class ProfileStore: ObservableObject {
         self.folderCustomizations = folderState.folderCustomizations
         self.folderOverrides = folderState.folderOverrides
         self.hiddenFolderIDs = folderState.hiddenFolderIDs
-        refresh()
-        verifyAllProfiles()
-        
-        self.expirationTimer = Timer.publish(every: 10, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.checkAllSessionsExpiration()
+
+        if startsBackgroundServices {
+            refresh()
+            verifyAllProfiles()
+
+            self.expirationTimer = Timer.publish(every: 10, on: .main, in: .common)
+                .autoconnect()
+                .sink { [weak self] _ in
+                    self?.checkAllSessionsExpiration()
+                }
+
+            notifications.requestAuthorizationIfAvailable()
+            checkForUpdates()
+            startAllFileWatchers()
+
+            Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.checkForUpdates()
+                }
             }
-        
-        notifications.requestAuthorizationIfAvailable()
-        checkForUpdates()
-        startAllFileWatchers()
-        
-        Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkForUpdates()
-            }
+        } else {
+            refreshImmediately(runVerification: false)
         }
     }
 
@@ -205,32 +211,44 @@ public final class ProfileStore: ObservableObject {
             
             guard !Task.isCancelled else { return }
             
-            self.kubernetesContexts = discovered.kubernetesContexts
-            if !discovered.currentKubeContext.isEmpty {
-                self.activeKubeContext = discovered.currentKubeContext
-                UserDefaults.standard.set(discovered.currentKubeContext, forKey: "activeKubeContext")
+            self.apply(discovered, runVerification: true)
+        }
+    }
+
+    private func refreshImmediately(runVerification: Bool = true) {
+        refreshDebounceTask?.cancel()
+        let discovered = localProfileDiscovery.discover()
+        apply(discovered, runVerification: runVerification)
+    }
+
+    private func apply(_ discovered: LocalProfileDiscoveryResult, runVerification: Bool) {
+        kubernetesContexts = discovered.kubernetesContexts
+        if !discovered.currentKubeContext.isEmpty {
+            activeKubeContext = discovered.currentKubeContext
+            UserDefaults.standard.set(discovered.currentKubeContext, forKey: "activeKubeContext")
+        }
+
+        profiles = discovered.profiles
+
+        // Only auto-detect active GCP profile if the user hasn't manually disconnected.
+        if !gcpManuallyClearedByUser {
+            let activeGCPName = discovered.activeGCPProfile
+            if !activeGCPName.isEmpty {
+                activeGCPProfile = activeGCPName
+                UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
             }
-            
-            self.profiles = discovered.profiles
-            
-            // Only auto-detect active GCP profile if the user hasn't manually disconnected.
-            if !self.gcpManuallyClearedByUser {
-                let activeGCPName = discovered.activeGCPProfile
-                if !activeGCPName.isEmpty {
-                    self.activeGCPProfile = activeGCPName
-                    UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
-                }
-            }
-            
-            if let selection = self.selectedSelection, case .profile(let pId) = selection, !self.profiles.contains(where: { $0.id == pId }) {
-                self.selectedSelection = nil
-            }
-            
-            let awsCount = self.profiles.filter { $0.provider == .aws }.count
-            let gcpCount = self.profiles.filter { $0.provider == .gcp }.count
-            let kubeCount = self.profiles.filter { $0.provider == .kubernetes }.count
-            self.lastMessage = "Loaded \(awsCount) AWS profiles, \(gcpCount) GCP configurations and \(kubeCount) Kubernetes contexts"
-            self.verifyAllProfiles()
+        }
+
+        if let selection = selectedSelection, case .profile(let pId) = selection, !profiles.contains(where: { $0.id == pId }) {
+            selectedSelection = nil
+        }
+
+        let awsCount = profiles.filter { $0.provider == .aws }.count
+        let gcpCount = profiles.filter { $0.provider == .gcp }.count
+        let kubeCount = profiles.filter { $0.provider == .kubernetes }.count
+        lastMessage = "Loaded \(awsCount) AWS profiles, \(gcpCount) GCP configurations and \(kubeCount) Kubernetes contexts"
+        if runVerification {
+            verifyAllProfiles()
         }
     }
 
@@ -656,7 +674,7 @@ public final class ProfileStore: ObservableObject {
 
     public func addAWSProfile(_ draft: AWSProfileDraft) throws {
         try profilePersistence.addAWSProfile(draft)
-        refresh()
+        refreshImmediately()
         if let profile = profiles.first(where: { $0.name == draft.name }) {
             setActive(profile)
         }
@@ -665,7 +683,7 @@ public final class ProfileStore: ObservableObject {
     public func updateAWSProfile(_ profile: CloudProfile, draft: AWSProfileDraft) throws {
         try profilePersistence.updateAWSProfile(originalName: profile.name, draft: draft)
         let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
-        refresh()
+        refreshImmediately()
         if let updated = profiles.first(where: { $0.name == draft.name }) {
             if let oldFolderID {
                 folderOverrides[updated.id] = oldFolderID
@@ -688,7 +706,7 @@ public final class ProfileStore: ObservableObject {
 
     public func addGCPProfile(_ draft: GCPProfileDraft) throws {
         try profilePersistence.addGCPProfile(draft)
-        refresh()
+        refreshImmediately()
         if let profile = profiles.first(where: { $0.provider == .gcp && $0.name == draft.name }) {
             setActive(profile)
         }
@@ -697,7 +715,7 @@ public final class ProfileStore: ObservableObject {
     public func updateGCPProfile(_ profile: CloudProfile, draft: GCPProfileDraft) throws {
         try profilePersistence.updateGCPProfile(originalName: profile.name, draft: draft)
         let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
-        refresh()
+        refreshImmediately()
         if let updated = profiles.first(where: { $0.provider == .gcp && $0.name == draft.name }) {
             if let oldFolderID {
                 folderOverrides[updated.id] = oldFolderID
@@ -720,7 +738,7 @@ public final class ProfileStore: ObservableObject {
 
     public func addAzureProfile(_ draft: AzureProfileDraft) throws {
         try profilePersistence.addAzureProfile(draft)
-        refresh()
+        refreshImmediately()
         if let profile = profiles.first(where: { $0.provider == .azure && $0.name == draft.name }) {
             setActive(profile)
         }
@@ -729,7 +747,7 @@ public final class ProfileStore: ObservableObject {
     public func updateAzureProfile(_ profile: CloudProfile, draft: AzureProfileDraft) throws {
         try profilePersistence.updateAzureProfile(originalName: profile.name, draft: draft)
         let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
-        refresh()
+        refreshImmediately()
         if let updated = profiles.first(where: { $0.provider == .azure && $0.name == draft.name }) {
             if let oldFolderID {
                 folderOverrides[updated.id] = oldFolderID
@@ -758,11 +776,36 @@ public final class ProfileStore: ObservableObject {
         cluster: String,
         user: String,
         namespace: String,
-        token: String?
+        token: String?,
+        targetFolder: CloudFolder? = nil
     ) async throws {
-        try await kubeConfigMutations.addContext(name: name, server: server, cluster: cluster, user: user, namespace: namespace, token: token)
-        refresh()
+        try await addKubeContext(
+            name: name,
+            server: server,
+            cluster: cluster,
+            user: user,
+            namespace: namespace,
+            credential: .bearerToken(token),
+            targetFolder: targetFolder
+        )
+    }
+
+    public func addKubeContext(
+        name: String,
+        server: String,
+        cluster: String,
+        user: String,
+        namespace: String,
+        credential: KubeConfigCredential,
+        targetFolder: CloudFolder? = nil
+    ) async throws {
+        try await kubeConfigMutations.addContext(name: name, server: server, cluster: cluster, user: user, namespace: namespace, credential: credential)
+        refreshImmediately()
         if let profile = profiles.first(where: { $0.provider == .kubernetes && $0.name == name }) {
+            if let targetFolder, targetFolder.provider == .kubernetes {
+                folderOverrides[profile.id] = targetFolder.id
+                saveFolderOverrides()
+            }
             setActive(profile)
         }
     }
@@ -780,7 +823,7 @@ public final class ProfileStore: ObservableObject {
         try await kubeConfigMutations.updateContext(oldName: oldName, newName: newName, server: server, cluster: cluster, user: user, namespace: namespace, token: token)
 
         let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
-        refresh()
+        refreshImmediately()
 
         if let updated = profiles.first(where: { $0.provider == .kubernetes && $0.name == newName }) {
             if let oldFolderID {
