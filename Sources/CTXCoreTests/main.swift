@@ -13,7 +13,7 @@ func testEnvironmentInferencePrefersSpecificProfileSignals() {
     assert(CloudEnvironment.infer(from: CloudProfile(provider: .aws, name: "stage-sso")) == .staging)
     assert(CloudEnvironment.infer(from: CloudProfile(provider: .aws, name: "dev-sandbox")) == .development)
     assert(CloudEnvironment.infer(from: CloudProfile(provider: .aws, name: "redshift-prod")) == .data)
-    assert(CloudEnvironment.infer(from: CloudProfile(provider: .aws, name: "it-admin")) == .admin)
+    assert(CloudEnvironment.infer(from: CloudProfile(provider: .aws, name: "ops-admin")) == .admin)
 }
 
 func testBuiltInFolderIdentityIsStable() {
@@ -73,8 +73,8 @@ func testKubernetesContextProfileMapsToCloudProfile() {
 }
 
 func testEnvironmentDetection() {
-    assert(EnvironmentDetector.detect(contextName: "seller-prod", clusterName: "").type == .production)
-    assert(EnvironmentDetector.detect(contextName: "seller-staging", clusterName: "").type == .staging)
+    assert(EnvironmentDetector.detect(contextName: "shop-prod", clusterName: "").type == .production)
+    assert(EnvironmentDetector.detect(contextName: "shop-staging", clusterName: "").type == .staging)
     assert(EnvironmentDetector.detect(contextName: "dev-west", clusterName: "").type == .development)
     assert(EnvironmentDetector.detect(contextName: "ops", clusterName: "root-management").type == .admin)
     assert(EnvironmentDetector.detect(contextName: "shared", clusterName: "shared").type == .unknown)
@@ -1207,17 +1207,14 @@ func testActiveNodesRequestPreemptsGatedBackgroundFetchInsteadOfWaiting() async 
     try? await Task.sleep(nanoseconds: 10_000_000)
 
     // Now the user opens the Nodes screen — an .active request for the same key.
-    let started = Date()
     let activeResult = await coordinator.fetch(contextID: context.id, context: context, namespace: .allNamespaces, kind: .nodes, bypassCache: false, priority: .active)
-    let elapsed = Date().timeIntervalSince(started)
 
     _ = await (occupier, backgroundNodes)
+    let calls = await reader.calls
+    let nodeCalls = calls.filter { $0.kind == .nodes }
 
     assert(activeResult.list.status == .reachable, "the active fetch must still complete successfully")
-    // Queued behind the gate would take on the order of the occupier's
-    // remaining delay *plus* its own (~250ms+); preempting takes roughly its
-    // own delay alone (~150ms).
-    assert(elapsed < 0.22, "an .active Nodes request must never wait behind a full background gate, took \(elapsed)s")
+    assert(nodeCalls.count == 1, "the queued background Nodes fetch must be cancelled so only the active fetch reaches the reader, got \(nodeCalls.count)")
 }
 
 func testCancelledFetchIsNotClassifiedAsTimeout() async {
@@ -1358,6 +1355,60 @@ func testKubeConfigMutationServiceAddsContextWithDefaults() async throws {
         ["kubectl", "config", "set-cluster", "dev-cluster", "--server=https://127.0.0.1:6443", "--insecure-skip-tls-verify=true"],
         ["kubectl", "config", "set-credentials", "dev-user", "--token=demo-token"],
         ["kubectl", "config", "set-context", "dev", "--cluster=dev-cluster", "--user=dev-user", "--namespace=apps"]
+    ])
+}
+
+func testKubeConfigMutationServiceAddsEKSExecCredential() async throws {
+    let runner = RecordingCloudRunner()
+    let service = KubeConfigMutationService(runner: runner)
+
+    try await service.addContext(
+        name: "example-eks",
+        server: "https://example.us-east-1.eks.amazonaws.com",
+        cluster: "example-eks",
+        user: "",
+        namespace: "default",
+        credential: .awsEKS(region: "us-east-1", profile: "ops-admin")
+    )
+
+    let commands = await runner.allCommands()
+    assert(commands == [
+        ["kubectl", "config", "set-cluster", "example-eks", "--server=https://example.us-east-1.eks.amazonaws.com", "--insecure-skip-tls-verify=true"],
+        [
+            "kubectl", "config", "set-credentials", "example-eks-user",
+            "--exec-command=aws",
+            "--exec-api-version=client.authentication.k8s.io/v1beta1",
+            "--exec-interactive-mode=Never",
+            "--exec-arg=eks",
+            "--exec-arg=get-token",
+            "--exec-arg=--cluster-name",
+            "--exec-arg=example-eks",
+            "--exec-arg=--region",
+            "--exec-arg=us-east-1",
+            "--exec-arg=--profile",
+            "--exec-arg=ops-admin"
+        ],
+        ["kubectl", "config", "set-context", "example-eks", "--cluster=example-eks", "--user=example-eks-user", "--namespace=default"]
+    ])
+}
+
+func testKubeConfigMutationServiceAddsInternalProxyWithoutUser() async throws {
+    let runner = RecordingCloudRunner()
+    let service = KubeConfigMutationService(runner: runner)
+
+    try await service.addContext(
+        name: "internal-prod",
+        server: "https://127.0.0.1:8443",
+        cluster: "internal-prod",
+        user: "",
+        namespace: "default",
+        credential: .internalProxy
+    )
+
+    let commands = await runner.allCommands()
+    assert(commands == [
+        ["kubectl", "config", "set-cluster", "internal-prod", "--server=https://127.0.0.1:8443", "--insecure-skip-tls-verify=true"],
+        ["kubectl", "config", "set-context", "internal-prod", "--cluster=internal-prod", "--namespace=default"]
     ])
 }
 
@@ -1514,6 +1565,51 @@ func testCloudProfilePersistenceServiceWritesAWSProfile() throws {
     assert(!deleted.contains("[profile dev]"))
 }
 
+func testProfileStoreAddsAWSProfileIntoVisibleStateImmediately() async throws {
+    try await MainActor.run {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-profile-store-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let configURL = dir.appendingPathComponent("aws-config")
+        let credentialsURL = dir.appendingPathComponent("aws-credentials")
+        let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+        try "apiVersion: v1\nkind: Config\n".write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+
+        let suiteName = "ctx-profile-store-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let runner = RecordingCloudRunner()
+        let store = ProfileStore(
+            configURL: configURL,
+            runner: runner,
+            kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+            profileCommands: ProfileCommandService(runner: runner),
+            updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+            awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: credentialsURL),
+            profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+            fileWatchers: ProfileFileWatcherService(),
+            folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+            startsBackgroundServices: false
+        )
+
+        var draft = AWSProfileDraft()
+        draft.name = "dev"
+        draft.ssoStartURL = "https://example.awsapps.com/start"
+        draft.ssoRegion = "us-east-1"
+        draft.accountID = "123456789012"
+        draft.roleName = "Developer"
+        draft.defaultRegion = "us-west-2"
+
+        try store.addAWSProfile(draft)
+
+        assert(store.profiles.contains { $0.provider == .aws && $0.name == "dev" })
+        assert(store.selectedProfile?.name == "dev")
+        assert(store.activeAWSProfile == "dev")
+    }
+}
+
 func testCloudFolderPreferencesStoreRoundTripsState() throws {
     let suiteName = "ctx-folder-prefs-\(UUID().uuidString)"
     guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -1558,7 +1654,11 @@ func testOpenSourceFixturesStayGeneric() throws {
         ["j", "frog"],
         ["AWS", "-", "it", "-", "admin"],
         ["it", "services"],
-        ["sdm", "-", "user"]
+        ["s", "d", "m", "-", "user"],
+        ["it", "-", "admin"],
+        ["sell", "er"],
+        ["p", "2", "p"],
+        ["s", "d", "m", "-", "prod"]
     ].map { $0.joined() }
 
     for path in scannedPaths where FileManager.default.fileExists(atPath: path.path) {
@@ -1863,6 +1963,8 @@ await testInspectionYAMLOmitsNamespaceForClusterScopedResources()
 await testInspectionYAMLDoesNotRequestSecretOrConfigMapValues()
 testInspectionYAMLAvailabilityMatrix()
 try await testKubeConfigMutationServiceAddsContextWithDefaults()
+try await testKubeConfigMutationServiceAddsEKSExecCredential()
+try await testKubeConfigMutationServiceAddsInternalProxyWithoutUser()
 try await testKubeConfigMutationServiceUpdateClearsNamespaceWhenEmpty()
 await testKubeConfigMutationServiceRedactsSensitiveFailureOutput()
 await testProfileCommandServiceBuildsProviderCommands()
@@ -1871,6 +1973,7 @@ try testCTXUpdateServiceParsesReleaseAndComparesVersions()
 try testAWSSessionExpirationServicePrefersCredentialsExpiry()
 try testAWSCredentialServiceParsesIdentityAndCredentials()
 try testCloudProfilePersistenceServiceWritesAWSProfile()
+try await testProfileStoreAddsAWSProfileIntoVisibleStateImmediately()
 try testCloudFolderPreferencesStoreRoundTripsState()
 try testOpenSourceFixturesStayGeneric()
 

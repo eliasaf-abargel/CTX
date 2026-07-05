@@ -125,34 +125,122 @@ struct CTXResourceInspectorHeader: View {
                     .padding(.vertical, 3)
                     .background(.secondary.opacity(0.10), in: Capsule())
             }
-            Button("Done", action: dismiss)
-                .buttonStyle(CTXPrimaryButton())
-                .controlSize(.small)
-                .keyboardShortcut(.defaultAction)
+            CTXInspectorDoneButton(action: dismiss)
         }
     }
 }
 
-/// Native macOS segmented control for switching inspector tabs — not a custom
-/// hand-drawn tab bar. `Picker(.segmented)` is the system's own tabbed-content
-/// idiom (System Settings panes, Xcode inspectors) and comes with correct spacing,
-/// selection styling, and no extra code to keep it looking right.
+/// Compact inspector tab switcher. The system segmented control reads too much
+/// like a form button inside this dark sheet, so this keeps the behavior but uses
+/// the same quiet toolbar language as the rest of CTX.
 struct CTXInspectorTabBar: View {
     let tabs: [CTXInspectorTab]
     let activeTab: CTXInspectorTab
     let onSelect: (CTXInspectorTab) -> Void
 
     var body: some View {
-        Picker("Inspector tab", selection: Binding(
-            get: { activeTab },
-            set: { onSelect($0) }
-        )) {
+        HStack(spacing: 4) {
             ForEach(tabs, id: \.self) { tab in
-                Label(tab.title, systemImage: tab.systemImage)
-                    .tag(tab)
+                CTXInspectorTabButton(
+                    tab: tab,
+                    isSelected: tab == activeTab,
+                    action: { onSelect(tab) }
+                )
             }
         }
-        .labelsHidden()
-        .pickerStyle(.segmented)
+        .padding(4)
+        .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 0.75)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Inspector tab")
+    }
+}
+
+private struct CTXInspectorDoneButton: View {
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("Done")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isHovered ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(
+                    Color.secondary.opacity(isHovered ? 0.16 : 0.10),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.secondary.opacity(isHovered ? 0.26 : 0.16), lineWidth: 0.75)
+                }
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
+        .help("Close inspector")
+    }
+}
+
+private struct CTXInspectorTabButton: View {
+    let tab: CTXInspectorTab
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: tab.systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(tab.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .frame(maxWidth: .infinity)
+            .background(background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(stroke, lineWidth: 0.75)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
+        .accessibilityLabel(tab.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .help(tab.title)
+    }
+
+    private var foreground: Color {
+        if isSelected { return .primary }
+        return isHovered ? .primary : .secondary
+    }
+
+    private var background: Color {
+        if isSelected { return Color.accentColor.opacity(0.20) }
+        return Color.secondary.opacity(isHovered ? 0.11 : 0.0)
+    }
+
+    private var stroke: Color {
+        if isSelected { return Color.accentColor.opacity(0.38) }
+        return Color.secondary.opacity(isHovered ? 0.18 : 0.0)
     }
 }
