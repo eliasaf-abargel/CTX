@@ -29,6 +29,19 @@ struct ClusterWorkspaceContent: View {
                 }
                 .padding(22)
                 .frame(width: min(geometry.size.width, contentMaxWidth), alignment: .leading)
+                // The whole switch shares ONE ScrollView, so its scroll offset was
+                // never reset on its own when the section changed. Scrolling down in
+                // a tall section (a long resource list, the topology map, ...) and
+                // then switching to a shorter one (e.g. Overview) left that old
+                // offset in place, showing the new section's content as if already
+                // scrolled partway down it — everything above the leftover offset
+                // (the header, the first row of cards, the top of the sidebar list)
+                // renders above the visible viewport, colliding with the window's
+                // own title bar. Only `resourceList` had a per-section `.id` before,
+                // so this only misfired when leaving *other* sections. Tying the
+                // identity to the section itself here forces SwiftUI to treat every
+                // switch as fresh content and reset scroll position to the top.
+                .id(viewModel.selectedSection)
             }
         }
         .sheet(item: $viewModel.presentation) { presentation in
