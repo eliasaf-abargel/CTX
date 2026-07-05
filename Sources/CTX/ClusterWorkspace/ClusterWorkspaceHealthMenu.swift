@@ -63,9 +63,9 @@ struct ClusterWorkspaceHealthMenu: View {
 
     private func permissionLabel(_ permission: KubernetesPermissionSummary) -> String {
         switch permission.allowed {
-        case true: "Allowed"
-        case false: "Denied"
-        case nil: permission.status.cardValue
+        case .some(true): "Allowed"
+        case .some(false): "Denied"
+        case .none: permission.status.cardValue
         }
     }
 }
