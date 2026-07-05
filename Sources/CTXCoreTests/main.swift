@@ -1610,6 +1610,118 @@ func testProfileStoreAddsAWSProfileIntoVisibleStateImmediately() async throws {
     }
 }
 
+@MainActor
+func testProfileStoreAddsCloudProfilesIntoTargetFolders() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-profile-folders-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let oldGCPPath = UserDefaults.standard.string(forKey: "customGCPConfigDirPath")
+    let oldAzurePath = UserDefaults.standard.string(forKey: "customAzureProfilesDirPath")
+    UserDefaults.standard.set(dir.appendingPathComponent("gcloud").path, forKey: "customGCPConfigDirPath")
+    UserDefaults.standard.set(dir.appendingPathComponent("azure").path, forKey: "customAzureProfilesDirPath")
+    defer {
+        if let oldGCPPath {
+            UserDefaults.standard.set(oldGCPPath, forKey: "customGCPConfigDirPath")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "customGCPConfigDirPath")
+        }
+        if let oldAzurePath {
+            UserDefaults.standard.set(oldAzurePath, forKey: "customAzureProfilesDirPath")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "customAzureProfilesDirPath")
+        }
+    }
+
+    let suiteName = "ctx-profile-folders-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let runner = RecordingCloudRunner()
+    let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+    try "apiVersion: v1\nkind: Config\n".write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+    let store = ProfileStore(
+        configURL: dir.appendingPathComponent("aws-config"),
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: dir.appendingPathComponent("aws-config"), credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: dir.appendingPathComponent("aws-config")),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+
+    var aws = AWSProfileDraft()
+    aws.name = " cloud-alpha "
+    aws.ssoStartURL = "https://example.awsapps.com/start"
+    aws.ssoRegion = "us-east-1"
+    aws.accountID = "123456789012"
+    aws.roleName = "Developer"
+    aws.defaultRegion = "us-west-2"
+    try store.addAWSProfile(aws, targetFolder: CloudFolder.builtIn(provider: .aws, environment: .data))
+
+    var gcp = GCPProfileDraft()
+    gcp.name = " cloud-beta "
+    gcp.project = "example-project-123456"
+    gcp.account = "user@example.com"
+    try store.addGCPProfile(gcp, targetFolder: CloudFolder.builtIn(provider: .gcp, environment: .development))
+
+    var azure = AzureProfileDraft()
+    azure.name = " cloud-gamma "
+    azure.subscriptionID = "00000000-0000-0000-0000-000000000000"
+    try store.addAzureProfile(azure, targetFolder: CloudFolder.builtIn(provider: .azure, environment: .production))
+
+    assert(store.folderOverrides["AWS:cloud-alpha"] == "AWS:Data")
+    assert(store.folderOverrides["GCP:cloud-beta"] == "GCP:Development")
+    assert(store.folderOverrides["Azure:cloud-gamma"] == "Azure:Production")
+}
+
+@MainActor
+func testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-folder-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let configURL = dir.appendingPathComponent("aws-config")
+    let credentialsURL = dir.appendingPathComponent("aws-credentials")
+    let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+    try "apiVersion: v1\nkind: Config\n".write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+
+    let suiteName = "ctx-kube-folder-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: credentialsURL),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+    let targetFolder = CloudFolder.builtIn(provider: .kubernetes, environment: .development)
+
+    try await store.addKubeContext(
+        name: " internal-dev ",
+        server: " https://127.0.0.1:8443 ",
+        cluster: " internal-dev ",
+        user: "",
+        namespace: "default",
+        credential: .internalProxy,
+        targetFolder: targetFolder
+    )
+
+    assert(store.folderOverrides["Kubernetes:internal-dev"] == targetFolder.id)
+    assert(CloudFolderPreferencesStore(defaults: defaults).load().folderOverrides["Kubernetes:internal-dev"] == targetFolder.id)
+}
+
 func testCloudFolderPreferencesStoreRoundTripsState() throws {
     let suiteName = "ctx-folder-prefs-\(UUID().uuidString)"
     guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -1974,6 +2086,8 @@ try testAWSSessionExpirationServicePrefersCredentialsExpiry()
 try testAWSCredentialServiceParsesIdentityAndCredentials()
 try testCloudProfilePersistenceServiceWritesAWSProfile()
 try await testProfileStoreAddsAWSProfileIntoVisibleStateImmediately()
+try testProfileStoreAddsCloudProfilesIntoTargetFolders()
+try await testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp()
 try testCloudFolderPreferencesStoreRoundTripsState()
 try testOpenSourceFixturesStayGeneric()
 

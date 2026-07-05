@@ -44,12 +44,14 @@ struct AddGCPProfileView: View {
     @ObservedObject var store: ProfileStore
     @Environment(\.dismiss) private var dismiss
     let mode: GCPProfileEditorMode
+    let targetFolder: CloudFolder?
     @State private var draft: GCPProfileDraft
     @State private var errorMessage = ""
 
-    init(store: ProfileStore, mode: GCPProfileEditorMode = .create) {
+    init(store: ProfileStore, mode: GCPProfileEditorMode = .create, targetFolder: CloudFolder? = nil) {
         self.store = store
         self.mode = mode
+        self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.draft)
     }
 
@@ -72,7 +74,7 @@ struct AddGCPProfileView: View {
                         .textFieldStyle(.roundedBorder)
                         .disabled(isEditing)
                     
-                    TextField("Project ID:", text: $draft.project, prompt: Text("e.g. support-prod-157422"))
+                    TextField("Project ID:", text: $draft.project, prompt: Text("e.g. example-project-123456"))
                         .textFieldStyle(.roundedBorder)
                     
                     TextField("Account Email:", text: $draft.account, prompt: Text("e.g. user@example.com"))
@@ -134,7 +136,7 @@ struct AddGCPProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addGCPProfile(draft)
+                try store.addGCPProfile(draft, targetFolder: targetFolder)
             case .edit(let profile):
                 try store.updateGCPProfile(profile, draft: draft)
             }

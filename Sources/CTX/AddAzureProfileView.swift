@@ -44,12 +44,14 @@ struct AddAzureProfileView: View {
     @ObservedObject var store: ProfileStore
     @Environment(\.dismiss) private var dismiss
     let mode: AzureProfileEditorMode
+    let targetFolder: CloudFolder?
     @State private var draft: AzureProfileDraft
     @State private var errorMessage = ""
 
-    init(store: ProfileStore, mode: AzureProfileEditorMode = .create) {
+    init(store: ProfileStore, mode: AzureProfileEditorMode = .create, targetFolder: CloudFolder? = nil) {
         self.store = store
         self.mode = mode
+        self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.draft)
     }
 
@@ -131,7 +133,7 @@ struct AddAzureProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addAzureProfile(draft)
+                try store.addAzureProfile(draft, targetFolder: targetFolder)
             case .edit(let profile):
                 try store.updateAzureProfile(profile, draft: draft)
             }

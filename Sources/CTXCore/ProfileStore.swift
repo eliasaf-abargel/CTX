@@ -672,10 +672,15 @@ public final class ProfileStore: ObservableObject {
         updateStatus(profile, status: newStatus)
     }
 
-    public func addAWSProfile(_ draft: AWSProfileDraft) throws {
+    public func addAWSProfile(_ draft: AWSProfileDraft, targetFolder: CloudFolder? = nil) throws {
         try profilePersistence.addAWSProfile(draft)
+        let profileName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let targetFolder, targetFolder.provider == .aws {
+            folderOverrides[CloudProfile(provider: .aws, name: profileName).id] = targetFolder.id
+            saveFolderOverrides()
+        }
         refreshImmediately()
-        if let profile = profiles.first(where: { $0.name == draft.name }) {
+        if let profile = profiles.first(where: { $0.provider == .aws && $0.name == profileName }) {
             setActive(profile)
         }
     }
@@ -684,7 +689,7 @@ public final class ProfileStore: ObservableObject {
         try profilePersistence.updateAWSProfile(originalName: profile.name, draft: draft)
         let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
         refreshImmediately()
-        if let updated = profiles.first(where: { $0.name == draft.name }) {
+        if let updated = profiles.first(where: { $0.provider == .aws && $0.name == draft.name }) {
             if let oldFolderID {
                 folderOverrides[updated.id] = oldFolderID
                 saveFolderOverrides()
@@ -700,14 +705,19 @@ public final class ProfileStore: ObservableObject {
         if activeAWSProfile == profile.name {
             clearActive()
         }
-        refresh()
+        refreshImmediately()
         lastMessage = "Deleted \(profile.name)"
     }
 
-    public func addGCPProfile(_ draft: GCPProfileDraft) throws {
+    public func addGCPProfile(_ draft: GCPProfileDraft, targetFolder: CloudFolder? = nil) throws {
         try profilePersistence.addGCPProfile(draft)
+        let profileName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let targetFolder, targetFolder.provider == .gcp {
+            folderOverrides[CloudProfile(provider: .gcp, name: profileName).id] = targetFolder.id
+            saveFolderOverrides()
+        }
         refreshImmediately()
-        if let profile = profiles.first(where: { $0.provider == .gcp && $0.name == draft.name }) {
+        if let profile = profiles.first(where: { $0.provider == .gcp && $0.name == profileName }) {
             setActive(profile)
         }
     }
@@ -732,14 +742,19 @@ public final class ProfileStore: ObservableObject {
         if activeGCPProfile == profile.name {
             clearActive(for: .gcp)
         }
-        refresh()
+        refreshImmediately()
         lastMessage = "Deleted \(profile.name)"
     }
 
-    public func addAzureProfile(_ draft: AzureProfileDraft) throws {
+    public func addAzureProfile(_ draft: AzureProfileDraft, targetFolder: CloudFolder? = nil) throws {
         try profilePersistence.addAzureProfile(draft)
+        let profileName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let targetFolder, targetFolder.provider == .azure {
+            folderOverrides[CloudProfile(provider: .azure, name: profileName).id] = targetFolder.id
+            saveFolderOverrides()
+        }
         refreshImmediately()
-        if let profile = profiles.first(where: { $0.provider == .azure && $0.name == draft.name }) {
+        if let profile = profiles.first(where: { $0.provider == .azure && $0.name == profileName }) {
             setActive(profile)
         }
     }
@@ -764,7 +779,7 @@ public final class ProfileStore: ObservableObject {
         if activeAzureProfile == profile.name {
             clearActive(for: .azure)
         }
-        refresh()
+        refreshImmediately()
         lastMessage = "Deleted \(profile.name)"
     }
 
@@ -799,13 +814,21 @@ public final class ProfileStore: ObservableObject {
         credential: KubeConfigCredential,
         targetFolder: CloudFolder? = nil
     ) async throws {
-        try await kubeConfigMutations.addContext(name: name, server: server, cluster: cluster, user: user, namespace: namespace, credential: credential)
+        let profileName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await kubeConfigMutations.addContext(
+            name: profileName,
+            server: server.trimmingCharacters(in: .whitespacesAndNewlines),
+            cluster: cluster.trimmingCharacters(in: .whitespacesAndNewlines),
+            user: user.trimmingCharacters(in: .whitespacesAndNewlines),
+            namespace: namespace.trimmingCharacters(in: .whitespacesAndNewlines),
+            credential: credential
+        )
+        if let targetFolder, targetFolder.provider == .kubernetes {
+            folderOverrides[CloudProfile(provider: .kubernetes, name: profileName).id] = targetFolder.id
+            saveFolderOverrides()
+        }
         refreshImmediately()
-        if let profile = profiles.first(where: { $0.provider == .kubernetes && $0.name == name }) {
-            if let targetFolder, targetFolder.provider == .kubernetes {
-                folderOverrides[profile.id] = targetFolder.id
-                saveFolderOverrides()
-            }
+        if let profile = profiles.first(where: { $0.provider == .kubernetes && $0.name == profileName }) {
             setActive(profile)
         }
     }
@@ -848,7 +871,7 @@ public final class ProfileStore: ObservableObject {
         if activeKubeContext == profile.name {
             clearActive(for: .kubernetes)
         }
-        refresh()
+        refreshImmediately()
         lastMessage = "Deleted context \(profile.name)"
 
         // A removed context's disk-cached metadata must not resurface if a future

@@ -44,6 +44,7 @@ struct AddAWSProfileView: View {
     @ObservedObject var store: ProfileStore
     @Environment(\.dismiss) private var dismiss
     let mode: AWSProfileEditorMode
+    let targetFolder: CloudFolder?
     @State private var draft: AWSProfileDraft
     @State private var errorMessage = ""
     @State private var ssoRegionSelection = ""
@@ -51,9 +52,10 @@ struct AddAWSProfileView: View {
     @State private var defaultRegionSelection = ""
     @State private var customDefaultRegion = ""
 
-    init(store: ProfileStore, mode: AWSProfileEditorMode = .create) {
+    init(store: ProfileStore, mode: AWSProfileEditorMode = .create, targetFolder: CloudFolder? = nil) {
         self.store = store
         self.mode = mode
+        self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.draft)
     }
 
@@ -255,7 +257,7 @@ struct AddAWSProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addAWSProfile(draft)
+                try store.addAWSProfile(draft, targetFolder: targetFolder)
             case .edit(let profile):
                 try store.updateAWSProfile(profile, draft: draft)
             }

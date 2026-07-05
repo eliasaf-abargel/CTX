@@ -20,11 +20,20 @@ struct ContentView: View {
             case .selectProvider:
                 SelectProviderView(sheet: $sheet)
             case .addAWSProfile:
-                AddAWSProfileView(store: store)
+                AddAWSProfileView(
+                    store: store,
+                    targetFolder: store.selectedFolder?.provider == .aws ? store.selectedFolder : nil
+                )
             case .addGCPProfile:
-                AddGCPProfileView(store: store)
+                AddGCPProfileView(
+                    store: store,
+                    targetFolder: store.selectedFolder?.provider == .gcp ? store.selectedFolder : nil
+                )
             case .addAzureProfile:
-                AddAzureProfileView(store: store)
+                AddAzureProfileView(
+                    store: store,
+                    targetFolder: store.selectedFolder?.provider == .azure ? store.selectedFolder : nil
+                )
             case .addKubeContext:
                 AddKubeContextView(
                     store: store,
@@ -39,10 +48,10 @@ struct ContentView: View {
                 }
             case .duplicateProfile(let profile):
                 switch profile.provider {
-                case .aws: AddAWSProfileView(store: store, mode: .duplicate(profile))
-                case .gcp: AddGCPProfileView(store: store, mode: .duplicate(profile))
-                case .azure: AddAzureProfileView(store: store, mode: .duplicate(profile))
-                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile))
+                case .aws: AddAWSProfileView(store: store, mode: .duplicate(profile), targetFolder: store.folder(for: profile))
+                case .gcp: AddGCPProfileView(store: store, mode: .duplicate(profile), targetFolder: store.folder(for: profile))
+                case .azure: AddAzureProfileView(store: store, mode: .duplicate(profile), targetFolder: store.folder(for: profile))
+                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile), targetFolder: store.folder(for: profile))
                 }
             case .addFolder:
                 FolderEditorView(store: store)
