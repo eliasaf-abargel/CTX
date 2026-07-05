@@ -209,7 +209,7 @@ struct AddKubeContextView: View {
             if !cluster.isEmpty {
                 isResolvingServer = true
                 Task {
-                    let resolved = await store.resolveKubeServer(for: cluster)
+                    let resolved = await store.resolveKubeServer(for: cluster, contextName: profile.name)
                     await MainActor.run {
                         server = resolved
                         isResolvingServer = false

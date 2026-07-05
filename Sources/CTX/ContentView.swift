@@ -59,6 +59,11 @@ struct ContentView: View {
                 FolderEditorView(store: store, folder: folder)
             }
         }
+        .sheet(item: $store.pendingFolderPrompt) { profile in
+            ChooseFolderPromptView(store: store, profile: profile) {
+                store.pendingFolderPrompt = nil
+            }
+        }
         .alert(
             "Connection Failed",
             isPresented: Binding(

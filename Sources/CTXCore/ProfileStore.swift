@@ -31,6 +31,10 @@ public final class ProfileStore: ObservableObject {
     @Published public private(set) var hiddenFolderIDs: Set<String> = []
     @Published public var showExpirationWarning = false
     @Published public var connectionErrorMessage: String? = nil
+    /// Set right after a profile/context is created outside of any folder context
+    /// (e.g. via the sidebar's global "+" button) so the UI can ask which folder it
+    /// belongs in, instead of silently leaving it in the generic default folder.
+    @Published public var pendingFolderPrompt: CloudProfile? = nil
     @Published public var expirationWarningMessage = ""
     @Published public var updateAvailable = false
     @Published public var latestVersionString = ""
@@ -328,7 +332,7 @@ public final class ProfileStore: ObservableObject {
 
             Task {
                 let startedAt = Date()
-                let result = await kubeConfigMutations.useContext(profile.name)
+                let result = await kubeConfigMutations.useContext(profile.name, kubeconfigPath: kubeconfigPath(for: profile.name))
                 lastCommandDuration = Date().timeIntervalSince(startedAt)
                 if result.exitCode == 0 {
                     lastMessage = "Switched kube context to \(profile.name)"
@@ -411,6 +415,15 @@ public final class ProfileStore: ObservableObject {
             return (parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
         }
         return String(base.prefix(2)).uppercased()
+    }
+
+    /// The kubeconfig file a mutation for `contextName` should target: the file it
+    /// was actually discovered in if it already exists (contexts can live in any of
+    /// several merged `KUBECONFIG` paths), otherwise the primary configured path —
+    /// the same one `startAllFileWatchers()` treats as canonical.
+    private func kubeconfigPath(for contextName: String) -> String? {
+        kubernetesContexts.first { $0.contextName == contextName }?.kubeconfigPath
+            ?? kubeConfigDiscoveryService.candidatePaths().first?.path
     }
 
     public func folder(for profile: CloudProfile) -> CloudFolder {
@@ -501,8 +514,27 @@ public final class ProfileStore: ObservableObject {
     }
 
     public func login(_ profile: CloudProfile) {
+        // Kubernetes has no login step distinct from "switch to this context" — route
+        // straight through setActive's real `kubectl config use-context` call instead
+        // of the SSO-login machinery below. Previously this fell through to the
+        // generic path, which only set local bookkeeping and depended on verify()'s
+        // auto-activate heuristic to trigger the actual switch — a heuristic with a
+        // gap: if the profile's cached status was still `.unknown` (e.g. right after
+        // launch, before the first background verify pass), the real switch never
+        // ran, yet the UI already showed the context as "Active".
+        if profile.provider == .kubernetes {
+            // Already the active, verified context — just re-verify instead of
+            // re-running the switch and fanning out a full verifyAllProfiles().
+            if isActive(profile), profiles.first(where: { $0.id == profile.id })?.status == .connected {
+                Task { await verify(profile) }
+                return
+            }
+            setActive(profile)
+            return
+        }
+
         setActive(profile, runActivation: false)
-        
+
         // Lookup the fresh status from the store's source of truth to avoid stale struct copies
         if let freshProfile = profiles.first(where: { $0.id == profile.id }),
            freshProfile.status == .connected {
@@ -604,9 +636,10 @@ public final class ProfileStore: ObservableObject {
             if activeKubeContext == profile.name {
                 clearActive(for: .kubernetes)
             }
+            let logoutKubeconfigPath = kubeconfigPath(for: profile.name)
             Task {
                 lastMessage = "Cleared current kube context"
-                _ = await kubeConfigMutations.clearCurrentContext()
+                _ = await kubeConfigMutations.clearCurrentContext(kubeconfigPath: logoutKubeconfigPath)
                 refresh()
             }
         }
@@ -672,6 +705,17 @@ public final class ProfileStore: ObservableObject {
         updateStatus(profile, status: newStatus)
     }
 
+    /// Asks the UI to offer a folder for a just-created profile that wasn't given
+    /// one at creation time — delayed so it doesn't collide with the creation
+    /// sheet's own dismiss animation (same pattern as `SelectProviderView`'s
+    /// sheet handoff).
+    private func promptForFolderIfUnassigned(_ profile: CloudProfile, targetFolder: CloudFolder?) {
+        guard targetFolder == nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.pendingFolderPrompt = profile
+        }
+    }
+
     public func addAWSProfile(_ draft: AWSProfileDraft, targetFolder: CloudFolder? = nil) throws {
         try profilePersistence.addAWSProfile(draft)
         let profileName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -682,6 +726,7 @@ public final class ProfileStore: ObservableObject {
         refreshImmediately()
         if let profile = profiles.first(where: { $0.provider == .aws && $0.name == profileName }) {
             setActive(profile)
+            promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
         }
     }
 
@@ -719,6 +764,7 @@ public final class ProfileStore: ObservableObject {
         refreshImmediately()
         if let profile = profiles.first(where: { $0.provider == .gcp && $0.name == profileName }) {
             setActive(profile)
+            promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
         }
     }
 
@@ -756,6 +802,7 @@ public final class ProfileStore: ObservableObject {
         refreshImmediately()
         if let profile = profiles.first(where: { $0.provider == .azure && $0.name == profileName }) {
             setActive(profile)
+            promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
         }
     }
 
@@ -821,7 +868,8 @@ public final class ProfileStore: ObservableObject {
             cluster: cluster.trimmingCharacters(in: .whitespacesAndNewlines),
             user: user.trimmingCharacters(in: .whitespacesAndNewlines),
             namespace: namespace.trimmingCharacters(in: .whitespacesAndNewlines),
-            credential: credential
+            credential: credential,
+            kubeconfigPath: kubeConfigDiscoveryService.candidatePaths().first?.path
         )
         if let targetFolder, targetFolder.provider == .kubernetes {
             folderOverrides[CloudProfile(provider: .kubernetes, name: profileName).id] = targetFolder.id
@@ -830,6 +878,7 @@ public final class ProfileStore: ObservableObject {
         refreshImmediately()
         if let profile = profiles.first(where: { $0.provider == .kubernetes && $0.name == profileName }) {
             setActive(profile)
+            promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
         }
     }
 
@@ -843,7 +892,7 @@ public final class ProfileStore: ObservableObject {
         token: String?
     ) async throws {
         let oldName = profile.name
-        try await kubeConfigMutations.updateContext(oldName: oldName, newName: newName, server: server, cluster: cluster, user: user, namespace: namespace, token: token)
+        try await kubeConfigMutations.updateContext(oldName: oldName, newName: newName, server: server, cluster: cluster, user: user, namespace: namespace, token: token, kubeconfigPath: kubeconfigPath(for: oldName))
 
         let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
         refreshImmediately()
@@ -863,7 +912,7 @@ public final class ProfileStore: ObservableObject {
         // name) — look up the real one before it's gone from `kubectl config`.
         let cacheContextID = kubernetesContexts.first { $0.contextName == profile.name }?.id
 
-        try await kubeConfigMutations.deleteContext(profile.name)
+        try await kubeConfigMutations.deleteContext(profile.name, kubeconfigPath: kubeconfigPath(for: profile.name))
 
         folderOverrides.removeValue(forKey: profile.id)
         saveFolderOverrides()
@@ -883,8 +932,9 @@ public final class ProfileStore: ObservableObject {
         }
     }
 
-    public func resolveKubeServer(for clusterName: String) async -> String {
-        await kubeConfigMutations.resolveServer(for: clusterName)
+    public func resolveKubeServer(for clusterName: String, contextName: String? = nil) async -> String {
+        let path = contextName.flatMap(kubeconfigPath(for:)) ?? kubeConfigDiscoveryService.candidatePaths().first?.path
+        return await kubeConfigMutations.resolveServer(for: clusterName, kubeconfigPath: path)
     }
 
     private func fetchAndStoreCredentials(for profile: CloudProfile) async {

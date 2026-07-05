@@ -674,15 +674,21 @@ func testResourceRefreshCoordinatorPreservesGoodDataOnFailedRefresh() async {
 
 func testResourceRefreshCoordinatorCancelDropsInFlightRequest() async {
     let reader = CountingResourceReader()
-    await reader.setDelayNanoseconds(20_000_000)
+    await reader.setHoldUntilReleased(true)
     let coordinator = ResourceRefreshCoordinator(reader: reader)
     let context = testKubernetesContext()
 
     let task = Task {
         await coordinator.fetch(contextID: context.id, context: context, namespace: .namespace("old-namespace"), kind: .pods, bypassCache: false)
     }
-    try? await Task.sleep(nanoseconds: 2_000_000)
+    // Wait for the fetch to genuinely be in-flight (reader invoked and parked)
+    // before cancelling — a fixed sleep here would race actor/thread-pool
+    // scheduling and could pass or fail depending on machine load.
+    while await reader.callCount == 0 {
+        await Task.yield()
+    }
     await coordinator.cancel(contextID: context.id, namespace: .namespace("old-namespace"))
+    await reader.release()
     _ = await task.value
 
     // A namespace switch away from "old-namespace" must not leave a stale entry that
@@ -1358,6 +1364,28 @@ func testKubeConfigMutationServiceAddsContextWithDefaults() async throws {
     ])
 }
 
+func testKubeConfigMutationServiceTargetsGivenKubeconfigPath() async throws {
+    let runner = RecordingCloudRunner()
+    let service = KubeConfigMutationService(runner: runner)
+
+    // A caller scoped to a non-default kubeconfig (Settings > custom path, or a
+    // multi-file KUBECONFIG) must have every mutation explicitly targeted at that
+    // file — otherwise kubectl's own default resolution silently writes somewhere
+    // the app never reads back from, and the change looks "lost".
+    try await service.addContext(
+        name: "dev",
+        server: "https://127.0.0.1:6443",
+        cluster: "",
+        user: "",
+        namespace: "apps",
+        token: "demo-token",
+        kubeconfigPath: "/tmp/custom-kubeconfig"
+    )
+
+    let commands = await runner.allCommands()
+    assert(commands.allSatisfy { $0.count > 2 && $0[1] == "--kubeconfig" && $0[2] == "/tmp/custom-kubeconfig" }, "every kubectl call must be scoped to the caller's kubeconfig path")
+}
+
 func testKubeConfigMutationServiceAddsEKSExecCredential() async throws {
     let runner = RecordingCloudRunner()
     let service = KubeConfigMutationService(runner: runner)
@@ -1722,6 +1750,171 @@ func testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp() asyn
     assert(CloudFolderPreferencesStore(defaults: defaults).load().folderOverrides["Kubernetes:internal-dev"] == targetFolder.id)
 }
 
+@MainActor
+func testProfileStorePromptsForFolderWhenCreatedWithoutOne() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-folder-prompt-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let configURL = dir.appendingPathComponent("aws-config")
+    let credentialsURL = dir.appendingPathComponent("aws-credentials")
+    let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+    try "apiVersion: v1\nkind: Config\n".write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+
+    let suiteName = "ctx-folder-prompt-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: credentialsURL),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+
+    assert(store.pendingFolderPrompt == nil, "no prompt before anything is created")
+
+    var aws = AWSProfileDraft()
+    aws.name = "unfiled-profile"
+    aws.ssoStartURL = "https://example.awsapps.com/start"
+    aws.ssoRegion = "us-east-1"
+    aws.accountID = "123456789012"
+    aws.roleName = "Developer"
+    aws.defaultRegion = "us-west-2"
+
+    // Created with no targetFolder — must prompt for one instead of silently
+    // landing in the generic default folder.
+    try store.addAWSProfile(aws)
+    let deadline = Date().addingTimeInterval(1)
+    while store.pendingFolderPrompt == nil, Date() < deadline {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    assert(store.pendingFolderPrompt?.name == "unfiled-profile", "must offer a folder for a profile created outside any folder")
+
+    store.pendingFolderPrompt = nil
+
+    var filed = AWSProfileDraft()
+    filed.name = "filed-profile"
+    filed.ssoStartURL = "https://example.awsapps.com/start"
+    filed.ssoRegion = "us-east-1"
+    filed.accountID = "123456789012"
+    filed.roleName = "Developer"
+    filed.defaultRegion = "us-west-2"
+
+    // Created with an explicit targetFolder — must not prompt again.
+    try store.addAWSProfile(filed, targetFolder: CloudFolder.builtIn(provider: .aws, environment: .data))
+    try await Task.sleep(nanoseconds: 300_000_000)
+    assert(store.pendingFolderPrompt == nil, "must not prompt when a folder was already chosen at creation time")
+}
+
+@MainActor
+func testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-logout-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Two-file KUBECONFIG where the context under test lives only in the SECOND
+    // file — the primary/first candidate path has no contexts at all. Any call
+    // that falls back to "the primary path" instead of resolving this context's
+    // actual file would silently operate on the wrong (empty) file.
+    let primary = dir.appendingPathComponent("primary")
+    let secondary = dir.appendingPathComponent("secondary")
+    try "apiVersion: v1\nkind: Config\n".write(to: primary, atomically: true, encoding: .utf8)
+    try kubeconfig(context: "team-b", cluster: "team-b-cluster", user: "team-b-user", server: "https://team-b.example.com:6443")
+        .write(to: secondary, atomically: true, encoding: .utf8)
+
+    let env = ["KUBECONFIG": "\(primary.path):\(secondary.path)"]
+    let suiteName = "ctx-kube-logout-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let configURL = dir.appendingPathComponent("aws-config")
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { env }, customPath: { nil }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+
+    guard let profile = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == "team-b" }) else {
+        assertionFailure("expected discovery to find the team-b context")
+        return
+    }
+
+    store.logout(profile)
+    let deadline = Date().addingTimeInterval(1)
+    while (await runner.allCommands()).isEmpty, Date() < deadline {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    let commands = await runner.allCommands()
+    assert(Array(commands.first?.dropFirst(1).prefix(2) ?? []) == ["--kubeconfig", secondary.path], "logout must target the file the context actually lives in, not the primary KUBECONFIG entry")
+
+    _ = await store.resolveKubeServer(for: "team-b-cluster", contextName: "team-b")
+    let resolveCommands = await runner.allCommands()
+    assert(Array(resolveCommands.last?.dropFirst(1).prefix(2) ?? []) == ["--kubeconfig", secondary.path], "resolving the server for an existing context's edit form must target that context's own file, not the primary KUBECONFIG entry")
+}
+
+@MainActor
+func testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-login-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+    try kubeconfig(context: "team-c", cluster: "team-c-cluster", user: "team-c-user", server: "https://team-c.example.com:6443")
+        .write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+
+    let suiteName = "ctx-kube-login-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let configURL = dir.appendingPathComponent("aws-config")
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        // Mirrors real app startup: contexts are discovered before the background
+        // verify pass has run, so a never-yet-verified context sits at `.unknown` —
+        // exactly the state that used to make `login()` skip the real context switch.
+        startsBackgroundServices: false
+    )
+
+    guard let profile = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == "team-c" }) else {
+        assertionFailure("expected discovery to find the team-c context")
+        return
+    }
+    assert(profile.status == .unknown, "test only proves what it claims if the profile truly starts unverified")
+
+    store.login(profile)
+    let deadline = Date().addingTimeInterval(1)
+    while !(await runner.allCommands()).contains(where: { $0.contains("use-context") }), Date() < deadline {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    let commands = await runner.allCommands()
+    assert(commands.contains { $0.contains("use-context") && $0.contains("team-c") }, "Connect on a never-yet-verified kube context must still run the real kubectl context switch, not just update in-app bookkeeping")
+}
+
 func testCloudFolderPreferencesStoreRoundTripsState() throws {
     let suiteName = "ctx-folder-prefs-\(UUID().uuidString)"
     guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -1807,6 +2000,8 @@ actor CountingResourceReader: KubernetesResourceReading {
         KubernetesResourceList(kind: kind, columns: [], rows: [], status: .reachable)
     }
     private var delayNanoseconds: UInt64 = 0
+    private var holdUntilReleased = false
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
 
     func setDelayNanoseconds(_ value: UInt64) {
         delayNanoseconds = value
@@ -1816,9 +2011,26 @@ actor CountingResourceReader: KubernetesResourceReading {
         resultProvider = provider
     }
 
+    /// Makes `list(...)` block right after recording the call, until `release()` is
+    /// called — so a test can deterministically act while a fetch is in-flight
+    /// instead of racing a fixed `Task.sleep` against actor/thread-pool scheduling.
+    func setHoldUntilReleased(_ value: Bool) {
+        holdUntilReleased = value
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
     func list(kind: KubernetesResourceKind, context: KubernetesContextProfile, namespace: KubernetesNamespaceSelection) async -> KubernetesResourceList {
         callCount += 1
         calls.append((context.id, namespace.storageValue, kind))
+        if holdUntilReleased {
+            await withCheckedContinuation { continuation in
+                releaseContinuation = continuation
+            }
+        }
         let delay = delayNanoseconds
         if delay > 0 {
             try? await Task.sleep(nanoseconds: delay)
@@ -2075,6 +2287,7 @@ await testInspectionYAMLOmitsNamespaceForClusterScopedResources()
 await testInspectionYAMLDoesNotRequestSecretOrConfigMapValues()
 testInspectionYAMLAvailabilityMatrix()
 try await testKubeConfigMutationServiceAddsContextWithDefaults()
+try await testKubeConfigMutationServiceTargetsGivenKubeconfigPath()
 try await testKubeConfigMutationServiceAddsEKSExecCredential()
 try await testKubeConfigMutationServiceAddsInternalProxyWithoutUser()
 try await testKubeConfigMutationServiceUpdateClearsNamespaceWhenEmpty()
@@ -2088,6 +2301,9 @@ try testCloudProfilePersistenceServiceWritesAWSProfile()
 try await testProfileStoreAddsAWSProfileIntoVisibleStateImmediately()
 try testProfileStoreAddsCloudProfilesIntoTargetFolders()
 try await testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp()
+try await testProfileStorePromptsForFolderWhenCreatedWithoutOne()
+try await testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne()
+try await testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown()
 try testCloudFolderPreferencesStoreRoundTripsState()
 try testOpenSourceFixturesStayGeneric()
 

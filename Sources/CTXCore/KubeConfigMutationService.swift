@@ -23,61 +23,76 @@ public final class KubeConfigMutationService: Sendable {
         self.runner = runner
     }
 
-    @discardableResult
-    public func useContext(_ name: String) async -> CommandResult {
-        await runner.run(["kubectl", "config", "use-context", name])
+    /// Every mutation below targets `kubeconfigPath` explicitly (when given) instead
+    /// of relying on `kubectl`'s own default resolution — otherwise a context created
+    /// or edited while the app is scoped to a custom kubeconfig path (Settings ›
+    /// "customKubeconfigPath", or a multi-file `KUBECONFIG`) silently lands in the
+    /// wrong file: the write "succeeds" but the app, which reads back from the
+    /// configured path, never sees it.
+    private func run(_ arguments: [String], kubeconfigPath: String?) async -> CommandResult {
+        var args = arguments
+        if let path = kubeconfigPath?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+            args.insert(contentsOf: ["--kubeconfig", path], at: 1)
+        }
+        return await runner.run(args)
     }
 
     @discardableResult
-    public func clearCurrentContext() async -> CommandResult {
-        await runner.run(["kubectl", "config", "unset", "current-context"])
+    public func useContext(_ name: String, kubeconfigPath: String? = nil) async -> CommandResult {
+        await run(["kubectl", "config", "use-context", name], kubeconfigPath: kubeconfigPath)
     }
 
-    public func addContext(name: String, server: String, cluster: String, user: String, namespace: String, token: String?) async throws {
-        try await addContext(name: name, server: server, cluster: cluster, user: user, namespace: namespace, credential: .bearerToken(token))
+    @discardableResult
+    public func clearCurrentContext(kubeconfigPath: String? = nil) async -> CommandResult {
+        await run(["kubectl", "config", "unset", "current-context"], kubeconfigPath: kubeconfigPath)
     }
 
-    public func addContext(name: String, server: String, cluster: String, user: String, namespace: String, credential: KubeConfigCredential) async throws {
+    public func addContext(name: String, server: String, cluster: String, user: String, namespace: String, token: String?, kubeconfigPath: String? = nil) async throws {
+        try await addContext(name: name, server: server, cluster: cluster, user: user, namespace: namespace, credential: .bearerToken(token), kubeconfigPath: kubeconfigPath)
+    }
+
+    public func addContext(name: String, server: String, cluster: String, user: String, namespace: String, credential: KubeConfigCredential, kubeconfigPath: String? = nil) async throws {
         try validate(name: name, server: server)
         let clusterName = cluster.isEmpty ? "\(name)-cluster" : cluster
         let userName = user.isEmpty ? "\(name)-user" : user
 
-        try await setCluster(name: clusterName, server: server, failurePrefix: "Failed to configure cluster")
-        try await setCredentials(userName, clusterName: clusterName, credential: credential, failurePrefix: "Failed to configure credentials")
+        try await setCluster(name: clusterName, server: server, kubeconfigPath: kubeconfigPath, failurePrefix: "Failed to configure cluster")
+        try await setCredentials(userName, clusterName: clusterName, credential: credential, kubeconfigPath: kubeconfigPath, failurePrefix: "Failed to configure credentials")
         try await setContext(
             name: name,
             cluster: clusterName,
             user: credential == .internalProxy ? "" : userName,
             namespace: namespace,
             clearNamespaceWhenEmpty: false,
+            kubeconfigPath: kubeconfigPath,
             failurePrefix: "Failed to configure context"
         )
     }
 
-    public func updateContext(oldName: String, newName: String, server: String, cluster: String, user: String, namespace: String, token: String?) async throws {
+    public func updateContext(oldName: String, newName: String, server: String, cluster: String, user: String, namespace: String, token: String?, kubeconfigPath: String? = nil) async throws {
         try validate(name: newName, server: server)
         if oldName != newName {
-            let result = await runner.run(["kubectl", "config", "rename-context", oldName, newName])
+            let result = await run(["kubectl", "config", "rename-context", oldName, newName], kubeconfigPath: kubeconfigPath)
             try requireSuccess(result, "Failed to rename context")
         }
 
         let clusterName = cluster.isEmpty ? "\(newName)-cluster" : cluster
         let userName = user.isEmpty ? "\(newName)-user" : user
-        try await setCluster(name: clusterName, server: server, failurePrefix: "Failed to update cluster")
-        try await setCredentials(userName, token: token, failurePrefix: "Failed to update credentials")
-        try await setContext(name: newName, cluster: clusterName, user: userName, namespace: namespace, clearNamespaceWhenEmpty: true, failurePrefix: "Failed to update context")
+        try await setCluster(name: clusterName, server: server, kubeconfigPath: kubeconfigPath, failurePrefix: "Failed to update cluster")
+        try await setCredentials(userName, token: token, kubeconfigPath: kubeconfigPath, failurePrefix: "Failed to update credentials")
+        try await setContext(name: newName, cluster: clusterName, user: userName, namespace: namespace, clearNamespaceWhenEmpty: true, kubeconfigPath: kubeconfigPath, failurePrefix: "Failed to update context")
     }
 
-    public func deleteContext(_ name: String) async throws {
-        let result = await runner.run(["kubectl", "config", "delete-context", name])
+    public func deleteContext(_ name: String, kubeconfigPath: String? = nil) async throws {
+        let result = await run(["kubectl", "config", "delete-context", name], kubeconfigPath: kubeconfigPath)
         try requireSuccess(result, "Failed to delete context")
     }
 
-    public func resolveServer(for clusterName: String) async -> String {
-        let result = await runner.run([
+    public func resolveServer(for clusterName: String, kubeconfigPath: String? = nil) async -> String {
+        let result = await run([
             "kubectl", "config", "view",
             "-o", "jsonpath={.clusters[?(@.name==\"\(clusterName)\")].cluster.server}"
-        ])
+        ], kubeconfigPath: kubeconfigPath)
         return result.exitCode == 0 ? result.output.trimmingCharacters(in: .whitespacesAndNewlines) : ""
     }
 
@@ -90,7 +105,7 @@ public final class KubeConfigMutationService: Sendable {
         }
     }
 
-    private func setCluster(name: String, server: String, failurePrefix: String) async throws {
+    private func setCluster(name: String, server: String, kubeconfigPath: String?, failurePrefix: String) async throws {
         var args = [
             "kubectl", "config", "set-cluster", name,
             "--server=\(server)"
@@ -98,15 +113,15 @@ public final class KubeConfigMutationService: Sendable {
         if server.lowercased().contains("https") {
             args.append("--insecure-skip-tls-verify=true")
         }
-        let result = await runner.run(args)
+        let result = await run(args, kubeconfigPath: kubeconfigPath)
         try requireSuccess(result, failurePrefix)
     }
 
-    private func setCredentials(_ userName: String, token: String?, failurePrefix: String) async throws {
-        try await setCredentials(userName, clusterName: "", credential: .bearerToken(token), failurePrefix: failurePrefix)
+    private func setCredentials(_ userName: String, token: String?, kubeconfigPath: String?, failurePrefix: String) async throws {
+        try await setCredentials(userName, clusterName: "", credential: .bearerToken(token), kubeconfigPath: kubeconfigPath, failurePrefix: failurePrefix)
     }
 
-    private func setCredentials(_ userName: String, clusterName: String, credential: KubeConfigCredential, failurePrefix: String) async throws {
+    private func setCredentials(_ userName: String, clusterName: String, credential: KubeConfigCredential, kubeconfigPath: String?, failurePrefix: String) async throws {
         let args: [String]
         switch credential {
         case .internalProxy:
@@ -143,11 +158,11 @@ public final class KubeConfigMutationService: Sendable {
             }
             args = execArgs
         }
-        let result = await runner.run(args)
+        let result = await run(args, kubeconfigPath: kubeconfigPath)
         try requireSuccess(result, failurePrefix)
     }
 
-    private func setContext(name: String, cluster: String, user: String, namespace: String, clearNamespaceWhenEmpty: Bool, failurePrefix: String) async throws {
+    private func setContext(name: String, cluster: String, user: String, namespace: String, clearNamespaceWhenEmpty: Bool, kubeconfigPath: String?, failurePrefix: String) async throws {
         var args = [
             "kubectl", "config", "set-context", name,
             "--cluster=\(cluster)"
@@ -160,7 +175,7 @@ public final class KubeConfigMutationService: Sendable {
         } else if clearNamespaceWhenEmpty {
             args.append("--namespace=")
         }
-        let result = await runner.run(args)
+        let result = await run(args, kubeconfigPath: kubeconfigPath)
         try requireSuccess(result, failurePrefix)
     }
 
