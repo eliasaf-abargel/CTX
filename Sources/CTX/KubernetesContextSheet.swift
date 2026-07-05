@@ -1,7 +1,7 @@
 import CTXCore
 import SwiftUI
 
-/// Read-only detail sheet for a Kubernetes context. Contexts are discovered
+/// Inspection detail sheet for a Kubernetes context. Contexts are discovered
 /// from `~/.kube/config` (not authored in CTX), so this explains that and
 /// offers a refresh rather than editable fields.
 struct KubernetesContextSheet: View {

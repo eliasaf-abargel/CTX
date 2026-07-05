@@ -153,6 +153,14 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(.bordered)
 
+                if let context = activeKubernetesContext {
+                    Button("Workspace") {
+                        NSApp.activate(ignoringOtherApps: true)
+                        openWindow(id: "cluster-workspace", value: context.id)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
                 Spacer()
 
                 Button("Quit") {
@@ -212,12 +220,12 @@ struct MenuBarView: View {
 
                 Text(store.activeIdentityInitials)
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 32, height: 32)
-                    .background(Color.accentColor.gradient, in: Circle())
+                    .background(.ultraThinMaterial, in: Circle())
                     .overlay {
                         Circle()
-                            .stroke(.white.opacity(0.25), lineWidth: 0.5)
+                            .stroke(Color.accentColor.opacity(0.55), lineWidth: 1.5)
                     }
                     .help("Signed in as \(store.activeIdentityLabel)")
             }
@@ -234,6 +242,11 @@ struct MenuBarView: View {
             guard !name.isEmpty else { return nil }
             return store.profiles.first { $0.provider == provider && $0.name == name }
         }
+    }
+
+    private var activeKubernetesContext: KubernetesContextProfile? {
+        guard !store.activeKubeContext.isEmpty else { return nil }
+        return store.kubernetesContexts.first { $0.contextName == store.activeKubeContext }
     }
 
     private func activeName(for provider: CloudProvider) -> String {
@@ -361,7 +374,7 @@ private struct MenuBarProfileRow: View {
             ProviderIcon(
                 provider: profile.provider,
                 size: 12,
-                fallbackTint: isActive ? profile.provider.tint : (profile.status == .connected ? Color.green : Color.secondary)
+                fallbackTint: isActive ? profile.provider.tint : (profile.status == .connected ? Color.green : profile.status.color)
             )
             .frame(width: 14)
 
@@ -373,6 +386,10 @@ private struct MenuBarProfileRow: View {
             if profile.status == .connected {
                 Circle()
                     .fill(Color.green)
+                    .frame(width: 4, height: 4)
+            } else if profile.status.isBusy {
+                Circle()
+                    .fill(profile.status.color)
                     .frame(width: 4, height: 4)
             } else if profile.status == .needsLogin {
                 Circle()

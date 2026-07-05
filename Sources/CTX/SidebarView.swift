@@ -316,7 +316,7 @@ struct SidebarProfileRow: View {
             ProviderIcon(
                 provider: profile.provider,
                 size: 14,
-                fallbackTint: isSelected ? .white : (profile.status == .connected ? Color.green : Color.accentColor)
+                fallbackTint: isSelected ? .white : (profile.status == .connected ? Color.green : profile.status.color)
             )
             .frame(width: 18)
 
@@ -327,6 +327,10 @@ struct SidebarProfileRow: View {
             if profile.status == .connected {
                 Circle()
                     .fill(Color.green)
+                    .frame(width: 6, height: 6)
+            } else if profile.status.isBusy {
+                Circle()
+                    .fill(profile.status.color)
                     .frame(width: 6, height: 6)
             } else if profile.status == .needsLogin {
                 Circle()

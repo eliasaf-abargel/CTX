@@ -71,8 +71,66 @@ Other modes:
 
 ### Run Verification Tests
 ```bash
+swift build
+swift run CTXCoreTests
 swift run CTXCheck
+./script/build_and_run.sh verify
 ```
+
+### Kubernetes Workspace
+
+The Kubernetes foundation keeps cluster context data in dedicated domain models
+instead of overloading generic cloud profile fields. See
+[docs/kubernetes-foundation.md](docs/kubernetes-foundation.md) for the original
+service boundaries. The current Cluster Workspace is documented in
+[KUBERNETES_WORKSPACE.md](KUBERNETES_WORKSPACE.md).
+
+The workspace uses real Kubernetes inspection data through explicit
+`kubectl --context` commands while keeping startup lightweight. Opening the
+workspace loads cluster identity, namespaces, API reachability, and RBAC
+`can-i` summaries (checked concurrently, not one at a time). Resource screens
+lazy-load namespaces, nodes, workloads, pods, services, ingress, configmaps
+metadata, secrets metadata, and events, with an in-memory cache scoped to the
+open cluster window — nothing is written to disk. Logs (bounded, inspection pod
+tail), inspection YAML (as a sheet from the resource inspector), Exports
+(JSON/CSV via the native save panel), and Diff (cached-vs-live comparison) are
+also live. Namespace selection is local to CTX and never changes global
+kubectl config. Mutation actions remain absent, and secret values are never
+read or displayed.
+
+### Cluster Workspace Diagnostics
+
+When the Overview reports an error, compare CTX with the same inspection command
+in Terminal:
+
+```bash
+KUBECONFIG=/path/from/ctx kubectl --context <context-from-ctx> get namespaces -o json
+kubectl --context <context-from-ctx> get nodes -o json
+kubectl --context <context-from-ctx> auth can-i list pods -A
+```
+
+If CTX reports a local proxy or tunnel refusal, start the VPN, SDM/Teleport
+proxy, Rancher Desktop tunnel, or other access tool backing that kubeconfig
+context, then refresh the Overview.
+
+The workspace uses 15 second default reads and 22 second heavy reads for
+all-namespaces pods/events — tuned to fail fast with a clear per-resource
+error rather than leave a screen spinning. If kubectl returns valid JSON after
+a slow response,
+CTX parses the data instead of showing raw command output. Normal UI errors show
+a short reason, retry, copy diagnostics, and optional details; raw stdout is not
+rendered in the main panel. Selecting a resource opens an inspection detail
+dashboard. YAML viewing is for inspection and disabled for resources that can expose
+secret or configuration values.
+
+### Project Guidance
+
+- [AGENTS.md](AGENTS.md): rules for AI coding agents.
+- [SECURITY.md](SECURITY.md): security, diagnostics, and Kubernetes safety.
+- [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md): native macOS design direction.
+- [KUBERNETES_WORKSPACE.md](KUBERNETES_WORKSPACE.md): workspace behavior.
+- [ROADMAP.md](ROADMAP.md): future product direction.
+- [CONTRIBUTING.md](CONTRIBUTING.md): contributor expectations.
 
 ---
 

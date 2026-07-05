@@ -19,6 +19,12 @@ struct CTXApp: App {
         }
         .defaultSize(width: 980, height: 620)
 
+        WindowGroup("Cluster Workspace", id: "cluster-workspace", for: String.self) { $contextID in
+            ClusterWorkspaceScene(store: store, contextID: contextID ?? "")
+                .frame(minWidth: 980, minHeight: 660)
+        }
+        .defaultSize(width: 1120, height: 740)
+
         MenuBarExtra {
             MenuBarView(store: store)
         } label: {

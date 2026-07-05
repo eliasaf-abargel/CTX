@@ -22,7 +22,9 @@ public enum CloudProvider: String, Codable, CaseIterable, Sendable {
 
 public enum ProfileStatus: String, Codable, Sendable {
     case unknown = "Unknown"
+    case connecting = "Connecting"
     case connected = "Connected"
+    case disconnecting = "Disconnecting"
     case needsLogin = "Needs login"
     case missingCli = "Missing CLI"
 }

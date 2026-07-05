@@ -232,84 +232,81 @@ struct FolderDetailView: View {
 
     var body: some View {
         ScrollView {
-            HStack {
-                Spacer()
-                VStack(alignment: .leading, spacing: 28) {
-                    // Header Hero
-                    HStack(alignment: .center, spacing: 16) {
-                        Image(systemName: folder.icon.systemImage)
-                            .font(.system(size: 32))
-                            .foregroundStyle(Color.accentColor)
-                            .padding(12)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(.separator.opacity(0.3), lineWidth: 1)
-                            }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 8) {
-                                Text("\(folder.provider.rawValue) · \(folder.name)")
-                                    .font(.title2.weight(.semibold))
-                                
-                                Button {
-                                    sheet = .editFolder(folder)
-                                } label: {
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Rename Folder")
-                            }
-                            Text("Environment folder containing profiles")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 28) {
+                // Header Hero
+                HStack(alignment: .center, spacing: 16) {
+                    Image(systemName: folder.icon.systemImage)
+                        .font(.system(size: 32))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(12)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.separator.opacity(0.3), lineWidth: 1)
                         }
-                        
-                        Spacer()
-                        
-                        Button {
-                            switch folder.provider {
-                            case .aws: sheet = .addAWSProfile
-                            case .gcp: sheet = .addGCPProfile
-                            case .azure: sheet = .addAzureProfile
-                            case .kubernetes: sheet = .addKubeContext
-                            }
-                        } label: {
-                            Label(folder.provider == .kubernetes ? "Add Context" : "Add Profile", systemImage: "plus")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
-                    }
                     
-                    Divider()
-                    
-                    let profiles = store.profiles.filter {
-                        $0.provider == folder.provider && store.folder(for: $0).id == folder.id
-                    }
-                    
-                    if profiles.isEmpty {
-                        ContentUnavailableView("No Profiles in Folder", systemImage: "cloud.slash", description: Text("Click the + button in the sidebar to add a profile to this folder."))
-                            .padding(.vertical, 40)
-                    } else {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Profiles (\(profiles.count))")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("\(folder.provider.rawValue) · \(folder.name)")
+                                .font(.title2.weight(.semibold))
                             
-                            VStack(spacing: 12) {
-                                ForEach(profiles) { profile in
-                                    FolderProfileRow(profile: profile, store: store, sheet: $sheet)
-                                }
+                            Button {
+                                sheet = .editFolder(folder)
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Rename Folder")
+                        }
+                        Text("Environment folder containing profiles")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Button {
+                        switch folder.provider {
+                        case .aws: sheet = .addAWSProfile
+                        case .gcp: sheet = .addGCPProfile
+                        case .azure: sheet = .addAzureProfile
+                        case .kubernetes: sheet = .addKubeContext
+                        }
+                    } label: {
+                        Label(folder.provider == .kubernetes ? "Add Context" : "Add Profile", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                }
+                
+                Divider()
+                
+                let profiles = store.profiles.filter {
+                    $0.provider == folder.provider && store.folder(for: $0).id == folder.id
+                }
+                
+                if profiles.isEmpty {
+                    ContentUnavailableView("No Profiles in Folder", systemImage: "cloud.slash", description: Text("Click the + button in the sidebar to add a profile to this folder."))
+                        .padding(.vertical, 40)
+                } else {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Profiles (\(profiles.count))")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        
+                        VStack(spacing: 12) {
+                            ForEach(profiles) { profile in
+                                FolderProfileRow(profile: profile, store: store, sheet: $sheet)
                             }
                         }
                     }
                 }
-                .padding(32)
-                .frame(maxWidth: 640)
-                Spacer()
             }
+            .frame(maxWidth: 640)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(32)
         }
     }
 }
@@ -366,6 +363,17 @@ struct FolderProfileRow: View {
                                     .stroke(Color.green.opacity(0.2), lineWidth: 0.5)
                             }
                         }
+                    } else if profile.status.isBusy {
+                        HStack(spacing: 3) {
+                            Image(systemName: profile.status.systemImage)
+                                .font(.system(size: 7, weight: .bold))
+                            Text(profile.status.rawValue)
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundStyle(profile.status.color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background(profile.status.color.opacity(0.12), in: Capsule())
                     }
                 }
 
@@ -391,7 +399,12 @@ struct FolderProfileRow: View {
             Spacer()
 
             HStack(spacing: 8) {
-                if profile.status == .connected {
+                if profile.status.isBusy {
+                    Button(profile.status.rawValue) {}
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(true)
+                } else if profile.status == .connected {
                     Button("Disconnect") {
                         store.logout(profile)
                     }
