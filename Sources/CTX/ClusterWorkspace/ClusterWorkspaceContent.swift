@@ -4,31 +4,36 @@ import SwiftUI
 struct ClusterWorkspaceContent: View {
     @ObservedObject var viewModel: ClusterWorkspaceViewModel
 
+    private static let topAnchorID = "ClusterWorkspaceContent.top"
+
     var body: some View {
         GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    switch viewModel.selectedSection {
-                    case .overview:
-                        ClusterOverviewView(viewModel: viewModel)
-                    case .secrets:
-                        resourceList
-                    case .namespaces, .nodes, .workloads, .pods, .services, .ingress, .configMaps, .events:
-                        resourceList
-                    case .logs:
-                        ClusterLogsView(viewModel: viewModel)
-                    case .topology:
-                        ClusterTopologyView(viewModel: viewModel)
-                    case .exports:
-                        ClusterExportsView(viewModel: viewModel)
-                    case .diff:
-                        ClusterDiffView(viewModel: viewModel)
-                    case .portForward:
-                        ClusterPortForwardView(viewModel: viewModel)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        switch viewModel.selectedSection {
+                        case .overview:
+                            ClusterOverviewView(viewModel: viewModel)
+                        case .secrets:
+                            resourceList
+                        case .namespaces, .nodes, .workloads, .pods, .services, .ingress, .configMaps, .events:
+                            resourceList
+                        case .logs:
+                            ClusterLogsView(viewModel: viewModel)
+                        case .topology:
+                            ClusterTopologyView(viewModel: viewModel)
+                        case .exports:
+                            ClusterExportsView(viewModel: viewModel)
+                        case .diff:
+                            ClusterDiffView(viewModel: viewModel)
+                        case .portForward:
+                            ClusterPortForwardView(viewModel: viewModel)
+                        }
                     }
+                    .padding(22)
+                    .frame(width: min(geometry.size.width, contentMaxWidth), alignment: .leading)
+                    .id(Self.topAnchorID)
                 }
-                .padding(22)
-                .frame(width: min(geometry.size.width, contentMaxWidth), alignment: .leading)
                 // The whole switch shares ONE ScrollView, so its scroll offset was
                 // never reset on its own when the section changed. Scrolling down in
                 // a tall section (a long resource list, the topology map, ...) and
@@ -38,10 +43,16 @@ struct ClusterWorkspaceContent: View {
                 // (the header, the first row of cards, the top of the sidebar list)
                 // renders above the visible viewport, colliding with the window's
                 // own title bar. Only `resourceList` had a per-section `.id` before,
-                // so this only misfired when leaving *other* sections. Tying the
-                // identity to the section itself here forces SwiftUI to treat every
-                // switch as fresh content and reset scroll position to the top.
-                .id(viewModel.selectedSection)
+                // so this only misfired when leaving *other* sections. Explicitly
+                // scrolling to a fixed anchor on every switch (same pattern as the
+                // Logs auto-scroll-to-bottom below) resets position without also
+                // resetting each section's own view identity/state — an earlier
+                // version of this fix used `.id(selectedSection)` on the whole
+                // switch, which incidentally wiped Exports' in-progress bulk-export
+                // selection every time you left and came back to it.
+                .onChange(of: viewModel.selectedSection) { _, _ in
+                    proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                }
             }
         }
         .sheet(item: $viewModel.presentation) { presentation in
