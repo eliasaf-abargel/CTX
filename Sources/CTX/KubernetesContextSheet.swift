@@ -35,14 +35,14 @@ struct KubernetesContextSheet: View {
                 Button("Reload from kubeconfig") {
                     store.refresh()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(CTXSecondaryButton())
 
                 Spacer()
 
                 Button("Done") {
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CTXPrimaryButton())
                 .keyboardShortcut(.defaultAction)
             }
         }

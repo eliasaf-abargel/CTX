@@ -163,9 +163,18 @@ enum KubernetesResourceParser {
         let spec = dict(item["spec"])
         let rules = spec["rules"] as? [[String: Any]] ?? []
         let hosts = rules.map { string($0["host"]) }.filter { !$0.isEmpty }.joined(separator: ", ")
+        let services = rules.flatMap { rule -> [String] in
+            let paths = dict(rule["http"])["paths"] as? [[String: Any]] ?? []
+            return paths.compactMap { path in
+                let backend = dict(path["backend"])
+                let service = dict(backend["service"])
+                let name = string(service["name"])
+                return name.isEmpty ? nil : name
+            }
+        }.sorted().joined(separator: ", ")
         let tls = ((spec["tls"] as? [[String: Any]])?.isEmpty == false) ? "Yes" : "No"
         let ingress = (dict(dict(item["status"])["loadBalancer"])["ingress"] as? [[String: Any]] ?? []).map { string($0["ip"]).isEmpty ? string($0["hostname"]) : string($0["ip"]) }.joined(separator: ", ")
-        return row(key(metadata), ["Namespace": namespace(metadata), "Name": string(metadata["name"]), "Class": string(spec["ingressClassName"]), "Hosts": hosts, "TLS": tls, "Address": ingress, "Age": age(metadata)])
+        return row(key(metadata), ["Namespace": namespace(metadata), "Name": string(metadata["name"]), "Class": string(spec["ingressClassName"]), "Hosts": hosts, "TLS": tls, "Address": ingress, "Age": age(metadata), "Services": services])
     }
 
     private static func configMapRow(_ item: [String: Any]) -> KubernetesResourceRow {

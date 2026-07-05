@@ -6,6 +6,8 @@ public enum AuditEventType: String, Codable, Sendable {
     case healthCheckRequested
     case kubectlCommandFailed
     case exportCreated
+    case portForwardStarted
+    case portForwardStopped
 }
 
 public struct AuditEvent: Codable, Equatable, Sendable {

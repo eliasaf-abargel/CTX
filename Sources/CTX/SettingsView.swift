@@ -156,7 +156,7 @@ struct SettingsView: View {
                 Section("Application Info") {
                     LabeledContent("Name", value: "CTX")
                     LabeledContent("Version", value: appVersion)
-                    LabeledContent("Created by", value: "Eliasaf Abargel")
+                    LabeledContent("Runtime", value: "Native macOS")
                     LabeledContent("Signed in as", value: store.activeIdentityLabel)
                     
                     if store.updateAvailable {
@@ -172,8 +172,7 @@ struct SettingsView: View {
                                 Button("Update to \(store.latestVersionString)") {
                                     store.installUpdate()
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
+                                .buttonStyle(CTXPrimaryButton())
                             }
                         }
                     } else {
@@ -193,8 +192,7 @@ struct SettingsView: View {
                                     Button("Check for Updates") {
                                         store.checkForUpdates(manual: true)
                                     }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
+                                    .buttonStyle(CTXSecondaryButton())
                                 }
                             }
                         }

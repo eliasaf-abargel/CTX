@@ -36,9 +36,12 @@ Keep it fast, local, safe, and Apple-native.
 
 ## Kubernetes Safety
 
-- Cluster Workspace is inspection-focused until a future safety model exists.
-- Do not add apply, patch, delete, drain, cordon, exec, shell, port-forward, or
-  YAML editing.
+- Cluster Workspace is inspection-focused unless a feature has an explicit
+  safety model.
+- Do not add apply, patch, delete, drain, cordon, exec, shell, or YAML editing.
+- Port Forward must stay inside the dedicated Service workflow: explicit local
+  ports, `127.0.0.1` binding, visible sessions, Stop controls, and sanitized
+  diagnostics.
 - Do not display or log secret values.
 - Always pass explicit `--context`.
 - Preserve discovered kubeconfig paths with `--kubeconfig` and `KUBECONFIG`.

@@ -151,14 +151,14 @@ struct MenuBarView: View {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "main")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(CTXSecondaryButton())
 
                 if let context = activeKubernetesContext {
                     Button("Workspace") {
                         NSApp.activate(ignoringOtherApps: true)
                         openWindow(id: "cluster-workspace", value: context.id)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(CTXPrimaryButton())
                 }
 
                 Spacer()
@@ -166,9 +166,8 @@ struct MenuBarView: View {
                 Button("Quit") {
                     NSApp.terminate(nil)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(CTXSecondaryButton())
             }
-            .controlSize(.small)
         }
         .padding(14)
         .frame(width: 300, height: 500)

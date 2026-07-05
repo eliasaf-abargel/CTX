@@ -24,22 +24,24 @@ struct ClusterWorkspaceSidebar: View {
                     }
                 }
 
-                Section("Future") {
-                    ForEach(futureSections) { section in
-                        HStack(spacing: 7) {
-                            Label(section.rawValue, systemImage: section.systemImage)
-                                .lineLimit(1)
-                            Spacer()
-                            Text("Future")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.tertiary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(.tertiary.opacity(0.12), in: Capsule())
+                if !futureSections.isEmpty {
+                    Section("Future") {
+                        ForEach(futureSections) { section in
+                            HStack(spacing: 7) {
+                                Label(section.rawValue, systemImage: section.systemImage)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("Future")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(.tertiary.opacity(0.12), in: Capsule())
+                            }
+                            .foregroundStyle(.tertiary)
+                            .help("\(section.rawValue) is reserved for a later safety-reviewed workflow")
+                            .accessibilityLabel("\(section.rawValue), future disabled")
                         }
-                        .foregroundStyle(.tertiary)
-                        .help("\(section.rawValue) is reserved for a later safety-reviewed workflow")
-                        .accessibilityLabel("\(section.rawValue), future disabled")
                     }
                 }
             }

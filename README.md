@@ -31,6 +31,7 @@ to CTX, and does not mutate the cluster.
   services, ingress, configmaps metadata, secrets metadata, and events.
 - Resource tables with local filtering, detail inspector, safe YAML inspection,
   bounded logs, JSON/CSV export, and cached-vs-live diff.
+- Service topology map, clickable ingress hosts, and local Service Port Forward.
 - Clear diagnostics for common local issues such as missing credential plugins,
   local proxy refusal, RBAC denial, and timeouts.
 - Local-first behavior: no CTX backend, no telemetry, and no secret value
@@ -80,9 +81,10 @@ Useful build script modes:
 
 ## Kubernetes Safety Model
 
-Current Kubernetes behavior is read-only. CTX does not run `apply`, `patch`,
-`delete`, `scale`, `drain`, `cordon`, `exec`, shell, port-forward, or YAML edit
-operations.
+Current Kubernetes behavior avoids cluster mutation. CTX does not run `apply`,
+`patch`, `delete`, `scale`, `drain`, `cordon`, `exec`, shell, or YAML edit
+operations. Port Forward is limited to explicit local Service tunnels with
+visible Stop controls.
 
 Secret resources are metadata-only. ConfigMap values and Secret values are not
 displayed, logged, exported, or cached as raw values.

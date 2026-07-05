@@ -106,12 +106,13 @@ struct AddAzureProfileView: View {
                 Button("Cancel") {
                     dismiss()
                 }
+                .buttonStyle(CTXSecondaryButton())
                 .keyboardShortcut(.cancelAction)
 
                 Button(mode.actionTitle) {
                     save()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CTXPrimaryButton())
                 .keyboardShortcut(.defaultAction)
             }
         }

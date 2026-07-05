@@ -69,7 +69,6 @@ struct ProfileDetailView: View {
                                         .padding(.horizontal, 13)
                                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                                .buttonStyle(.plain)
                                 .ctxHeaderButton(tint: .indigo, isProminent: true)
                                 .help("Open Cluster Workspace")
                             }
@@ -84,7 +83,6 @@ struct ProfileDetailView: View {
                                     .padding(.horizontal, 13)
                                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
-                            .buttonStyle(.plain)
                             .ctxHeaderButton()
                             
                             if profile.status.isBusy {
@@ -106,7 +104,6 @@ struct ProfileDetailView: View {
                                         .padding(.horizontal, 14)
                                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                                .buttonStyle(.plain)
                                 .ctxHeaderButton(tint: .red, isProminent: false)
                             } else {
                                 Button {
@@ -119,7 +116,6 @@ struct ProfileDetailView: View {
                                         .padding(.horizontal, 18)
                                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                                .buttonStyle(.plain)
                                 .ctxHeaderButton(tint: .blue, isProminent: true)
                             }
                             
@@ -181,7 +177,6 @@ struct ProfileDetailView: View {
                             }
                             .menuStyle(.button)
                             .menuIndicator(.hidden)
-                            .buttonStyle(.plain)
                             .ctxHeaderButton()
                             .accessibilityLabel("More actions")
                         }
@@ -509,7 +504,7 @@ struct ProfileDetailView: View {
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CTXCopyButtonStyle())
         .help("Copy to clipboard")
         .accessibilityLabel("Copy \(fieldName)")
     }
@@ -540,18 +535,53 @@ private extension View {
     }
 
     func ctxHeaderButton(tint: Color = .primary, isProminent: Bool = false) -> some View {
-        foregroundStyle(isProminent ? Color.white : tint)
+        buttonStyle(CTXHeaderButtonStyle(tint: tint, isProminent: isProminent))
+    }
+}
+
+struct CTXHeaderButtonStyle: ButtonStyle {
+    let tint: Color
+    let isProminent: Bool
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isProminent ? Color.white : tint)
             .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isProminent ? tint : Color.secondary.opacity(0.12))
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if isProminent {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(LinearGradient(colors: [tint, tint.opacity(0.85)], startPoint: .top, endPoint: .bottom))
+                } else {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.11))
+                }
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isProminent ? Color.white.opacity(0.20) : Color.white.opacity(0.16), lineWidth: 0.75)
+                    .stroke(isProminent ? Color.white.opacity(isHovered ? 0.25 : 0.12) : Color.secondary.opacity(isHovered ? 0.35 : 0.2), lineWidth: 0.75)
             }
-            .shadow(color: isProminent ? .clear : .black.opacity(0.10), radius: isProminent ? 0 : 8, y: isProminent ? 0 : 4)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: isProminent ? tint.opacity(isHovered ? 0.35 : 0.15) : .clear, radius: isHovered ? 6 : 3, x: 0, y: isHovered ? 2 : 1)
+            .scaleEffect(configuration.isPressed ? 0.96 : (isHovered ? 1.025 : 1.0))
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
+            }
+            .focusEffectDisabled()
+    }
+}
+
+struct CTXCopyButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : (isHovered ? 1.08 : 1.0))
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
+            }
     }
 }
 

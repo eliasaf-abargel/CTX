@@ -17,8 +17,9 @@ Kubernetes secret values.
 
 - Inspection only.
 - No mutation commands without a future explicit safety design.
-- No apply, patch, delete, drain, cordon, exec, shell, port-forward, or YAML
-  editing.
+- No apply, patch, delete, drain, cordon, exec, shell, or YAML editing.
+- Port Forward is allowed only through the dedicated Service workflow with
+  explicit local ports, `127.0.0.1` binding, visible sessions, and Stop controls.
 - Secret screens may show metadata only: namespace, name, type, key count, age.
 - ConfigMap values are not displayed in the current workspace.
 - Diagnostics must be sanitized and hidden behind explicit user action.

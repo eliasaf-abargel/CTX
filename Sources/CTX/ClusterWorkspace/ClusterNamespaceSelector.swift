@@ -7,8 +7,9 @@ struct ClusterNamespaceSelector: View {
     @State private var filter = ""
 
     private var filteredNamespaces: [String] {
-        guard !filter.isEmpty else { return viewModel.namespaceOptions }
-        return viewModel.namespaceOptions.filter { $0.localizedCaseInsensitiveContains(filter) }
+        let options = viewModel.availableNamespaces.filter { $0 != "default" }
+        guard !filter.isEmpty else { return options }
+        return options.filter { $0.localizedCaseInsensitiveContains(filter) }
     }
 
     var body: some View {

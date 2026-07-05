@@ -53,9 +53,11 @@ Implemented screens use real read-only cluster data:
 - ConfigMaps metadata
 - Secrets metadata
 - Events
+- Map
 - Logs
 - Exports
 - Diff
+- Port Forward
 
 Resource tables share one table implementation and support local filtering on
 loaded rows. Filtering never runs kubectl.
@@ -112,6 +114,17 @@ requests.
 
 No logs path uses `exec`, shell, or an unbounded follow stream.
 
+## Map
+
+Map shows Service-centered relationships from loaded cluster data:
+
+- Service to Pods through `spec.selector`.
+- Service to Workloads by matching Pods that each Workload selector owns.
+- Ingress hosts to Services through ingress backend service names.
+
+Host buttons open the routed HTTP/HTTPS URL with the system browser. CTX does
+not embed a web view in the app.
+
 ## Exports
 
 Exports write already-loaded resource rows to JSON or CSV through the native
@@ -129,6 +142,16 @@ removed, or changed.
 Diff uses the same read path as the resource screens; there is no separate
 command surface.
 
+## Port Forward
+
+Port Forward starts an explicit local tunnel to a selected Service. It is
+limited to `127.0.0.1`, requires local and remote ports, and always shows active
+sessions with a Stop action.
+
+The command uses the same kubectl boundary as the rest of the workspace:
+explicit `--context`, preserved kubeconfig path, safe argument arrays, sanitized
+diagnostics, and no shell interpolation.
+
 ## Diagnostics
 
 Diagnostics include command kind, context, safe kubeconfig path, exit code,
@@ -145,6 +168,6 @@ Common categories include:
 
 ## Boundaries
 
-Port-forward, YAML editing, exec/shell, and cluster mutations remain future
-surfaces. They require safety design, audit, confirmation, and privacy review
-before implementation.
+YAML editing, exec/shell, and cluster mutations remain future surfaces. They
+require safety design, audit, confirmation, and privacy review before
+implementation.

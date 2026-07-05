@@ -115,13 +115,14 @@ struct AddKubeContextView: View {
                 Button("Cancel") {
                     dismiss()
                 }
+                .buttonStyle(CTXSecondaryButton())
                 .keyboardShortcut(.cancelAction)
                 .disabled(isSaving)
 
                 Button(mode.actionTitle) {
                     save()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CTXPrimaryButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty || server.trimmingCharacters(in: .whitespaces).isEmpty)
             }

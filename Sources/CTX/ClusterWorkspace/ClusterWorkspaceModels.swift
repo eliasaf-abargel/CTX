@@ -12,6 +12,7 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case configMaps = "ConfigMaps"
     case secrets = "Secrets"
     case events = "Events"
+    case topology = "Map"
     case logs = "Logs"
     case exports = "Exports"
     case diff = "Diff"
@@ -31,6 +32,7 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .configMaps: "doc.text"
         case .secrets: "lock.doc"
         case .events: "waveform.path.ecg"
+        case .topology: "point.topleft.down.to.point.bottomright.curvepath"
         case .logs: "text.alignleft"
         case .exports: "square.and.arrow.down"
         case .diff: "arrow.left.arrow.right"
@@ -39,7 +41,7 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     }
 
     var isFuture: Bool {
-        self == .portForward
+        false
     }
 
     var resourceKind: KubernetesResourceKind? {
@@ -157,3 +159,19 @@ enum ClusterWorkspaceLayoutMode: Equatable {
         }
     }
 }
+
+public struct TopologyServiceRelation: Identifiable, Equatable, Sendable {
+    public var id: String { service.id }
+    public let service: KubernetesResourceRow
+    public let workloads: [KubernetesResourceRow]
+    public let pods: [KubernetesResourceRow]
+    public let ingress: [KubernetesResourceRow]
+
+    public init(service: KubernetesResourceRow, workloads: [KubernetesResourceRow], pods: [KubernetesResourceRow], ingress: [KubernetesResourceRow]) {
+        self.service = service
+        self.workloads = workloads
+        self.pods = pods
+        self.ingress = ingress
+    }
+}
+

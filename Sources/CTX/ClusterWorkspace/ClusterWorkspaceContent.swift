@@ -17,19 +17,20 @@ struct ClusterWorkspaceContent: View {
                         resourceList
                     case .logs:
                         ClusterLogsView(viewModel: viewModel)
+                    case .topology:
+                        ClusterTopologyView(viewModel: viewModel)
                     case .exports:
                         ClusterExportsView(viewModel: viewModel)
                     case .diff:
                         ClusterDiffView(viewModel: viewModel)
                     case .portForward:
-                        FuturePlaceholder(section: viewModel.selectedSection)
+                        ClusterPortForwardView(viewModel: viewModel)
                     }
                 }
                 .padding(22)
                 .frame(width: min(geometry.size.width, contentMaxWidth), alignment: .leading)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: viewModel.selectedSection)
         .sheet(item: $viewModel.presentation) { presentation in
             CTXResourceInspector(viewModel: viewModel, selection: presentation.selection, activeTab: presentation.tab)
         }
@@ -49,7 +50,6 @@ struct ClusterWorkspaceContent: View {
             selectRow: { viewModel.selectResource($0, in: viewModel.selectedSection) }
         )
         .id(viewModel.selectedSection.id)
-        .transition(.opacity.combined(with: .move(edge: .trailing)))
     }
 
     private var scopeTitle: String {
@@ -76,18 +76,3 @@ struct ClusterWorkspaceContent: View {
         viewModel.selectedSection.resourceKind == nil ? 1600 : .infinity
     }
 }
-
-private struct FuturePlaceholder: View {
-    let section: ClusterWorkspaceSection
-
-    var body: some View {
-        CTXGlassPanel {
-                    CTXEmptyStateView(
-                        title: "\(section.rawValue) later",
-                        message: "Reserved for a safety-reviewed workflow.",
-                        systemImage: section.systemImage
-                    )
-        }
-    }
-}
-

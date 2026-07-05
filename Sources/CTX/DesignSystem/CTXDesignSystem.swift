@@ -55,17 +55,23 @@ struct CTXIconActionButton: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 28)
-                .background(Color.secondary.opacity(0.13), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(Color.secondary.opacity(isHovering ? 0.22 : 0.13), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.24), lineWidth: 0.75)
+                        .stroke(Color.secondary.opacity(isHovering ? 0.35 : 0.24), lineWidth: 0.75)
                 }
         }
         .buttonStyle(.plain)
+        .scaleEffect(isHovering ? 1.06 : 1.0)
         .focusable(false)
         .accessibilityLabel(title)
         .help(title)
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.75)) {
+                isHovering = hovering
+            }
+            if hovering { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+        }
         .overlay(alignment: .topTrailing) {
             if isHovering {
                 Text(title)
@@ -360,6 +366,8 @@ struct CTXResourceCard: View {
     var systemImage: String = "square.grid.2x2"
     var tint: Color = .accentColor
 
+    @State private var isHovered = false
+
     var body: some View {
         CTXGlassPanel(padding: 13) {
             HStack(alignment: .top, spacing: 11) {
@@ -392,21 +400,47 @@ struct CTXResourceCard: View {
             }
         }
         .frame(minHeight: 88)
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(tint.opacity(isHovered ? 0.35 : 0.0), lineWidth: 1)
+        }
+        .scaleEffect(isHovered ? 1.025 : 1.0)
+        .shadow(color: tint.opacity(isHovered ? 0.15 : 0.0), radius: isHovered ? 8 : 0, x: 0, y: isHovered ? 3 : 0)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
         .help([title, value, subtitle].filter { !$0.isEmpty }.joined(separator: " · "))
     }
 }
 
 /// Filled, high-emphasis action — one per screen/panel at most (Done, primary CTA).
 struct CTXPrimaryButton: ButtonStyle {
+    @State private var isHovered = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 11, weight: .bold))
             .foregroundStyle(.white)
             .lineLimit(1)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .frame(minHeight: 26)
-            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .background(
+                LinearGradient(colors: [.accentColor, .accentColor.opacity(0.85)], startPoint: .top, endPoint: .bottom),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(isHovered ? 0.25 : 0.12), lineWidth: 1)
+            }
+            .shadow(color: Color.accentColor.opacity(isHovered ? 0.35 : 0.15), radius: isHovered ? 6 : 3, x: 0, y: isHovered ? 2 : 1)
+            .scaleEffect(configuration.isPressed ? 0.96 : (isHovered ? 1.025 : 1.0))
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
+            }
             .focusEffectDisabled()
     }
 }
@@ -416,17 +450,28 @@ struct CTXPrimaryButton: ButtonStyle {
 /// flat/dark depending on the surrounding material — this stays visually consistent
 /// everywhere it's used.
 struct CTXSecondaryButton: ButtonStyle {
+    @State private var isHovered = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 11, weight: .bold))
             .foregroundStyle(.primary)
             .lineLimit(1)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .frame(minHeight: 26)
-            .background(Color.secondary.opacity(configuration.isPressed ? 0.20 : 0.13), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(
+                Color.secondary.opacity(configuration.isPressed ? 0.22 : (isHovered ? 0.18 : 0.11)),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.24), lineWidth: 0.75)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.secondary.opacity(isHovered ? 0.35 : 0.2), lineWidth: 0.75)
+            }
+            .scaleEffect(configuration.isPressed ? 0.96 : (isHovered ? 1.025 : 1.0))
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
             }
             .focusEffectDisabled()
     }

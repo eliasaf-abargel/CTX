@@ -132,17 +132,15 @@ struct FolderEditorView: View {
                 Button("Cancel") {
                     dismiss()
                 }
+                .buttonStyle(CTXSecondaryButton())
                 .keyboardShortcut(.cancelAction)
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
                 
                 Button(folder == nil ? "Create" : "Save") {
                     save()
                 }
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CTXPrimaryButton())
                 .keyboardShortcut(.defaultAction)
-                .controlSize(.regular)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 24)

@@ -14,8 +14,11 @@ product remains local-first, generic, and open-source safe.
 - Shared resource tables with local filtering and responsive columns.
 - Resource inspector with Overview, safe YAML, and bounded Logs where supported.
 - Standalone bounded Logs screen.
+- Service-centered Map with selector-based Pods/Workloads and clickable Ingress
+  hosts.
 - JSON/CSV export for loaded resource data.
 - Cached-vs-live Diff per resource kind.
+- Service Port Forward with explicit local lifetime and Stop controls.
 - Request deduplication, stale-while-revalidate cache behavior, cancellation,
   and debug-only performance logging.
 - Sanitized diagnostics for auth plugin failures, local proxy refusal, RBAC
@@ -34,6 +37,7 @@ product remains local-first, generic, and open-source safe.
 - Command palette or quick navigation for resource screens and contexts.
 - Better events timeline and resource correlation.
 - Richer resource inspector sections, such as owner references and conditions.
+- Richer topology layout once the selector-based map has enough runtime proof.
 - More useful diff presentation for changed fields.
 - Optional watch-backed live refresh with fallback to current polling.
 - Multi-cluster organization and comparison without changing the read-only
@@ -48,7 +52,6 @@ confirmation, and privacy review:
 
 - YAML editing.
 - Apply, patch, delete, scale, drain, or cordon.
-- Port-forward.
 - Exec or shell.
 - AI-assisted troubleshooting that uses cluster data.
 

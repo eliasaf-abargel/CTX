@@ -87,6 +87,8 @@ instead of presenting a second sheet.
   diff, with tooltip/help and accessibility labels.
 - Use menus for compact option sets such as log tail length.
 - Use native save panels for local file export.
+- Use system browser opening for external URLs; do not embed web content inside
+  the app without a separate product and security decision.
 - Avoid visible instructional text where a standard control communicates the
   action cleanly.
 

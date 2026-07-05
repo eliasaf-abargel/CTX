@@ -277,8 +277,7 @@ struct FolderDetailView: View {
                     } label: {
                         Label(folder.provider == .kubernetes ? "Add Context" : "Add Profile", systemImage: "plus")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
+                    .buttonStyle(CTXPrimaryButton())
                 }
                 
                 Divider()
@@ -401,29 +400,25 @@ struct FolderProfileRow: View {
             HStack(spacing: 8) {
                 if profile.status.isBusy {
                     Button(profile.status.rawValue) {}
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(CTXSecondaryButton())
                         .disabled(true)
                 } else if profile.status == .connected {
                     Button("Disconnect") {
                         store.logout(profile)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .buttonStyle(CTXSecondaryButton())
                 } else {
                     Button("Connect") {
                         store.login(profile)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .buttonStyle(CTXPrimaryButton())
                 }
 
                 if !store.isActive(profile) {
                     Button("Activate") {
                         store.setActive(profile)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .buttonStyle(CTXSecondaryButton())
                 }
 
                 Button {
@@ -432,8 +427,7 @@ struct FolderProfileRow: View {
                     Image(systemName: "pencil")
                         .font(.system(size: 11))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(CTXSecondaryButton())
                 .help("Edit Profile")
             }
         }

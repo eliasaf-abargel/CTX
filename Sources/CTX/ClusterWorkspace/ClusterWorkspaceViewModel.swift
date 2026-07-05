@@ -15,6 +15,19 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         }
     }
     @Published private(set) var namespaceOptions: [String] = []
+    var availableNamespaces: [String] {
+        var set = Set<String>()
+        set.formUnion(namespaceOptions)
+        for list in resourceLists.values {
+            for row in list.rows {
+                if let ns = row.namespace, !ns.isEmpty, ns != "-" {
+                    set.insert(ns)
+                }
+            }
+        }
+        set.insert("default")
+        return Array(set).sorted()
+    }
     @Published private(set) var resourceLists: [String: KubernetesResourceList] = [:]
     /// Set only when a background refresh fails *and* good cached data already exists
     /// for that key — the good data stays in `resourceLists` and this surfaces the
@@ -24,28 +37,38 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published private(set) var loadingResourceKinds: Set<KubernetesResourceKind> = []
     @Published private(set) var selectedResources: [String: KubernetesResourceRow] = [:]
     @Published var presentation: ClusterWorkspacePresentation?
-    @Published private(set) var yamlResult: KubernetesYAMLResult?
-    @Published private(set) var isLoadingYAML = false
-    @Published private(set) var diffResults: [String: ResourceDiffResult] = [:]
-    @Published private(set) var diffingKinds: Set<KubernetesResourceKind> = []
+    @Published var yamlResult: KubernetesYAMLResult?
+    @Published var isLoadingYAML = false
+    @Published var diffResults: [String: ResourceDiffResult] = [:]
+    @Published var diffingKinds: Set<KubernetesResourceKind> = []
     @Published var selectedLogPodID: String?
-    @Published private(set) var logContainers: [String] = []
+    @Published var logContainers: [String] = []
     @Published var selectedLogContainer: String?
-    @Published private(set) var logsResult: KubernetesLogsResult?
-    @Published private(set) var isLoadingLogs = false
-    @Published private(set) var logTailLines = 100
+    @Published var logsResult: KubernetesLogsResult?
+    @Published var isLoadingLogs = false
+    @Published var logTailLines = 100
+    @Published var selectedPortForwardServiceID: String?
+    @Published var portForwardLocalPort = "8080"
+    @Published var portForwardRemotePort = "80"
+    @Published var portForwardSessions: [KubernetesPortForwardSession] = []
+    @Published var portForwardIssue: KubernetesCommandDiagnostic?
+    @Published var isStartingPortForward = false
+    @Published var topologyRelations: [TopologyServiceRelation] = []
+    @Published var selectedTopologyRelation: TopologyServiceRelation?
 
     let context: KubernetesContextProfile
     private let healthService: any ClusterHealthChecking
     private let resourceReader: any KubernetesResourceReading
-    private let yamlReader: any KubernetesYAMLReading
-    private let logsReader: any KubernetesLogsReading
+    let yamlReader: any KubernetesYAMLReading
+    let logsReader: any KubernetesLogsReading
+    let portForwardService: any KubernetesPortForwarding
+    let auditLog: any AuditLogging
     private let coordinator: ResourceRefreshCoordinator
     private var refreshTask: Task<Void, Never>?
     private var resourceTasks: [KubernetesResourceKind: Task<Void, Never>] = [:]
-    private var yamlTask: Task<Void, Never>?
+    var yamlTask: Task<Void, Never>?
     private var diffTasks: [KubernetesResourceKind: Task<Void, Never>] = [:]
-    private var logsTask: Task<Void, Never>?
+    var logsTask: Task<Void, Never>?
     /// How long cached data is shown without a background revalidation. Below this,
     /// switching back to a screen is instant and silent. Above it, the stale entry is
     /// still shown immediately (nothing clears or blanks), but a fresh load kicks off
@@ -58,13 +81,17 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         healthService: any ClusterHealthChecking = ClusterHealthService(),
         resourceReader: any KubernetesResourceReading = KubernetesResourceReader(),
         yamlReader: any KubernetesYAMLReading = KubernetesYAMLReader(),
-        logsReader: any KubernetesLogsReading = KubernetesLogsReader()
+        logsReader: any KubernetesLogsReading = KubernetesLogsReader(),
+        portForwardService: any KubernetesPortForwarding = KubernetesPortForwardService(),
+        auditLog: any AuditLogging = LocalAuditLogService()
     ) {
         self.context = context
         self.healthService = healthService
         self.resourceReader = resourceReader
         self.yamlReader = yamlReader
         self.logsReader = logsReader
+        self.portForwardService = portForwardService
+        self.auditLog = auditLog
         // The disk cache is opt-in on the coordinator (nil unless passed) so tests
         // stay fully in-memory; the real app wires a real one here so the very
         // first render after launch shows the last-known data instead of a
@@ -89,6 +116,9 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         yamlTask?.cancel()
         diffTasks.values.forEach { $0.cancel() }
         logsTask?.cancel()
+        Task { [portForwardService] in
+            await portForwardService.stopAll()
+        }
     }
 
     var title: String {
@@ -182,59 +212,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         isLoadingLogs = false
     }
 
-    var selectedLogPodRow: KubernetesResourceRow? {
-        guard let selectedLogPodID else { return nil }
-        return resourceList(for: .pods)?.rows.first { $0.id == selectedLogPodID }
-    }
 
-    func selectLogPod(_ row: KubernetesResourceRow) {
-        let ref = row.reference(kind: .pods, context: context)
-        guard let namespace = ref.namespace else { return }
-        selectedLogPodID = row.id
-        selectedLogContainer = nil
-        logContainers = []
-        logsResult = nil
-        logsTask?.cancel()
-        logsTask = Task { [weak self] in
-            guard let self else { return }
-            let containers = await logsReader.containers(namespace: namespace, pod: ref.name, context: context)
-            guard !Task.isCancelled else { return }
-            logContainers = containers
-            selectedLogContainer = containers.first
-            await loadLogs(namespace: namespace, pod: ref.name, container: containers.first)
-        }
-    }
-
-    func selectLogContainer(_ container: String) {
-        selectedLogContainer = container
-        reloadLogs()
-    }
-
-    func setLogTailLines(_ lines: Int) {
-        guard logTailLines != lines else { return }
-        logTailLines = lines
-        reloadLogs()
-    }
-
-    func reloadLogs() {
-        guard let row = selectedLogPodRow else { return }
-        let ref = row.reference(kind: .pods, context: context)
-        guard let namespace = ref.namespace else { return }
-        logsTask?.cancel()
-        let container = selectedLogContainer
-        logsTask = Task { [weak self] in
-            guard let self else { return }
-            await loadLogs(namespace: namespace, pod: ref.name, container: container)
-        }
-    }
-
-    private func loadLogs(namespace: String, pod: String, container: String?) async {
-        isLoadingLogs = true
-        let result = await logsReader.logs(namespace: namespace, pod: pod, container: container, tailLines: logTailLines, context: context)
-        guard !Task.isCancelled else { return }
-        logsResult = result
-        isLoadingLogs = false
-    }
 
     func runDiff(kind: KubernetesResourceKind) {
         let namespace = scope(for: kind)
@@ -395,7 +373,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         loadYAML(for: selection)
     }
 
-    private func loadResource(kind: KubernetesResourceKind, bypassCache: Bool, priority: FetchPriority = .active, completion: ((KubernetesResourceList) -> Void)? = nil) {
+    func loadResource(kind: KubernetesResourceKind, bypassCache: Bool, priority: FetchPriority = .active, completion: ((KubernetesResourceList) -> Void)? = nil) {
         let namespace = scope(for: kind)
         let key = resourceKey(kind: kind, namespace: namespace)
         let cached = resourceLists[key]
@@ -452,6 +430,9 @@ final class ClusterWorkspaceViewModel: ObservableObject {
             loadingResourceKinds.remove(kind)
             resourceTasks[kind] = nil
             logScreenLoad(kind: kind, namespace: namespace, cacheState: outcome.cacheStateBeforeFetch, list: list, started: started)
+            if kind == .services || kind == .workloads || kind == .pods || kind == .ingress {
+                self.recalculateTopology()
+            }
             completion?(list)
         }
     }
@@ -613,6 +594,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         }
 
         CTXPerfLog.log(step: "namespace_switch", contextID: context.id, namespace: selectedNamespace.storageValue, kind: "workspace", cache: .none, durationMs: max(0, Int(Date().timeIntervalSince(started) * 1000)), outcome: .success)
+        recalculateTopology()
     }
 
     private func hydrateOverviewFromCachedNamespace() {
@@ -635,24 +617,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         }
     }
 
-    private func loadYAML(for selection: ClusterWorkspaceResourceSelection) {
-        yamlTask?.cancel()
-        yamlResult = nil
-        guard selection.kind.supportsInspectionYAML else {
-            yamlResult = KubernetesYAMLResult(yaml: nil, status: .permissionDenied)
-            isLoadingYAML = false
-            return
-        }
-        isLoadingYAML = true
-        yamlTask = Task { [weak self] in
-            guard let self else { return }
-            let result = await yamlReader.yaml(kind: selection.kind, row: selection.row, context: context)
-            guard !Task.isCancelled else { return }
-            yamlResult = result
-            isLoadingYAML = false
-            yamlTask = nil
-        }
-    }
+
 
     private func persistNamespaceSelection() {
         UserDefaults.standard.set(selectedNamespace.storageValue, forKey: namespaceSelectionKey)
@@ -671,5 +636,28 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         if value == "__all__" { return .allNamespaces }
         if value == "default" { return .defaultNamespace }
         return .namespace(value)
+    }
+
+    private var terminatedSessionIDs = Set<UUID>()
+
+    func handlePortForwardTerminated(sessionID: UUID) {
+        if let index = portForwardSessions.firstIndex(where: { $0.id == sessionID }) {
+            let session = portForwardSessions[index]
+            portForwardSessions.remove(at: index)
+            try? auditLog.record(AuditEvent(type: .portForwardStopped, contextName: context.contextName, message: "service/\(session.targetName) \(session.localPort):\(session.remotePort)"))
+        } else {
+            terminatedSessionIDs.insert(sessionID)
+        }
+    }
+
+    func checkAndInsertPortForwardSession(_ session: KubernetesPortForwardSession, refName: String) -> Bool {
+        if terminatedSessionIDs.contains(session.id) {
+            terminatedSessionIDs.remove(session.id)
+            return false
+        } else {
+            portForwardSessions.insert(session, at: 0)
+            try? auditLog.record(AuditEvent(type: .portForwardStarted, contextName: context.contextName, message: "service/\(refName) \(session.localPort):\(session.remotePort)"))
+            return true
+        }
     }
 }

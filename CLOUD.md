@@ -34,13 +34,16 @@ Allowed Kubernetes command families today:
 - `kubectl get`
 - `kubectl describe`
 - `kubectl logs` with a bounded `--tail`
+- `kubectl port-forward` only through the dedicated local Service workflow
 
 No mutation command families are used.
 
 ## Safety Boundaries
 
-- Inspection only: no apply, patch, delete, scale, drain, cordon, exec, shell,
-  port-forward, or YAML editing.
+- Inspection first: no apply, patch, delete, scale, drain, cordon, exec, shell,
+  or YAML editing.
+- Port Forward is a dedicated local workflow: `127.0.0.1` only, explicit
+  local/remote ports, visible lifetime, and Stop controls.
 - Logs are bounded snapshots. CTX does not start indefinite `--follow` streams.
 - Secrets are metadata-only: name, namespace, type, key count, and age.
 - ConfigMaps are metadata-oriented until a redaction model exists.

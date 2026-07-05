@@ -252,6 +252,54 @@ func testKubectlRunnerAddsCliSearchPathToChildEnvironment() async throws {
     assert(result.stdout.contains("/usr/local/bin"))
 }
 
+func testPortForwardBuildsSafeServiceCommand() async {
+    let kubectl = ScriptedKubectl()
+    let service = KubernetesPortForwardService(kubectl: kubectl)
+    let request = KubernetesPortForwardRequest(namespace: "app", targetKind: .service, targetName: "api", localPort: 18080, remotePort: 80)
+
+    let session = await service.start(context: testKubernetesContext(), request: request)
+
+    assert(session.status == .running)
+    assert(session.localURL == "http://127.0.0.1:18080")
+    assert(kubectl.startedCommands.count == 1)
+    let command = kubectl.startedCommands[0]
+    assert(Array(command.arguments.prefix(2)) == ["--context", "prod-context"])
+    assert(command.arguments.contains("--kubeconfig"))
+    assert(command.arguments.contains("/tmp/kubeconfig"))
+    assert(command.arguments.contains("port-forward"))
+    assert(command.arguments.contains("service/api"))
+    assert(command.arguments.contains("--namespace"))
+    assert(command.arguments.contains("app"))
+    assert(command.arguments.contains("18080:80"))
+    assert(command.arguments.contains("--address"))
+    assert(command.arguments.contains("127.0.0.1"))
+    assert(command.environmentOverrides["KUBECONFIG"] == "/tmp/kubeconfig")
+}
+
+func testPortForwardRejectsInvalidPortsBeforeStartingProcess() async {
+    let kubectl = ScriptedKubectl()
+    let service = KubernetesPortForwardService(kubectl: kubectl)
+    let request = KubernetesPortForwardRequest(namespace: "app", targetKind: .service, targetName: "api", localPort: 0, remotePort: 80)
+
+    let session = await service.start(context: testKubernetesContext(), request: request)
+
+    assert(session.status == .failed)
+    assert(kubectl.startedCommands.isEmpty)
+}
+
+func testPortForwardStopTerminatesProcess() async {
+    let kubectl = ScriptedKubectl()
+    let handle = FakeKubectlProcess()
+    kubectl.processToStart = handle
+    let service = KubernetesPortForwardService(kubectl: kubectl)
+    let request = KubernetesPortForwardRequest(namespace: "app", targetKind: .service, targetName: "api", localPort: 18080, remotePort: 80)
+    let session = await service.start(context: testKubernetesContext(), request: request)
+
+    await service.stop(sessionID: session.id)
+
+    assert(handle.terminated)
+}
+
 func testClusterOverviewMapsInspectionSummaries() async {
     let kubectl = ScriptedKubectl()
     kubectl.outputs["version --request-timeout=1s --output=json"] = .success("{}")
@@ -332,6 +380,32 @@ func testServiceAndIngressSummariesCaptureEndpointVisibility() {
     assert(ingress.total == 2)
     assert(ingress.routed == 1)
     assert(ingress.tls == 1)
+}
+
+func testIngressRowsCaptureBackendServicesForTopology() async {
+    let kubectl = ScriptedKubectl()
+    kubectl.defaultOutput = .success(items([
+        [
+            "metadata": ["namespace": "app", "name": "web", "creationTimestamp": "2026-01-01T00:00:00Z"],
+            "spec": [
+                "rules": [[
+                    "host": "web.example.test",
+                    "http": ["paths": [[
+                        "backend": ["service": ["name": "web-service"]]
+                    ]]]
+                ]],
+                "tls": [["hosts": ["web.example.test"]]]
+            ],
+            "status": ["loadBalancer": ["ingress": [["hostname": "lb.example.test"]]]]
+        ]
+    ]))
+    let reader = KubernetesResourceReader(kubectl: kubectl, defaultTimeout: 20, heavyTimeout: 30)
+
+    let result = await reader.list(kind: .ingress, context: testKubernetesContext(), namespace: .namespace("app"))
+
+    assert(result.rows.first?.cells["Hosts"] == "web.example.test")
+    assert(result.rows.first?.cells["Services"] == "web-service")
+    assert(result.rows.first?.cells["TLS"] == "Yes")
 }
 
 func testEventsSummaryCapturesLatestWarningTimelineSignal() {
@@ -1558,7 +1632,7 @@ actor RecordingCloudRunner: CloudCommandRunning {
     }
 }
 
-final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, @unchecked Sendable {
+final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, KubectlProcessStarting, @unchecked Sendable {
     enum Output {
         case success(String)
         case failure(stderr: String)
@@ -1567,9 +1641,11 @@ final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, @unchecked 
     }
 
     var commands: [KubectlCommand] = []
+    var startedCommands: [KubectlCommand] = []
     var outputs: [String: Output] = [:]
     var defaultOutput: Output = .success(emptyItems())
     var error: Error?
+    var processToStart: FakeKubectlProcess = FakeKubectlProcess()
     /// Simulates a real subprocess taking measurable time — needed to create a
     /// window in which a caller can be cancelled mid-flight, or to prove a
     /// genuinely-fast command isn't held up by anything on CTX's side.
@@ -1600,6 +1676,42 @@ final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, @unchecked 
             return KubectlResult(exitCode: 1, stdout: "", stderr: "timed out", timedOut: true)
         case .timeoutWithStdout(let stdout):
             return KubectlResult(exitCode: 1, stdout: stdout, stderr: "timed out", timedOut: true)
+        }
+    }
+
+    func start(_ command: KubectlCommand) throws -> any KubectlProcessHandling {
+        if let error { throw error }
+        queue.sync {
+            startedCommands.append(command)
+        }
+        return processToStart
+    }
+}
+
+final class FakeKubectlProcess: KubectlProcessHandling, @unchecked Sendable {
+    var running = true
+    var terminated = false
+    var output = ""
+
+    private var terminationHandler: (@Sendable () -> Void)?
+
+    var isRunning: Bool {
+        running && !terminated
+    }
+
+    func terminate() {
+        terminated = true
+        terminationHandler?()
+    }
+
+    func outputIfExited() -> String {
+        output
+    }
+
+    func setTerminationHandler(_ handler: @Sendable @escaping () -> Void) {
+        terminationHandler = handler
+        if !isRunning {
+            handler()
         }
     }
 }
@@ -1687,11 +1799,15 @@ try testKubeConfigDiscoveryHandlesInvalidFiles()
 try testLocalProfileDiscoveryLoadsAWSAndKubernetesProfiles()
 try testKubectlCommandConstruction()
 try await testKubectlRunnerAddsCliSearchPathToChildEnvironment()
+await testPortForwardBuildsSafeServiceCommand()
+await testPortForwardRejectsInvalidPortsBeforeStartingProcess()
+await testPortForwardStopTerminatesProcess()
 await testClusterOverviewMapsInspectionSummaries()
 await testClusterOverviewMapsRBACDeniedAndPermissionDenied()
 testWorkloadsSummaryCountsWarningsAsUnhealthy()
 testPodsSummaryCountsStatusBuckets()
 testServiceAndIngressSummariesCaptureEndpointVisibility()
+await testIngressRowsCaptureBackendServicesForTopology()
 testEventsSummaryCapturesLatestWarningTimelineSignal()
 testEventObjectTargetParsesKnownResourceKinds()
 await testClusterOverviewMapsTimeoutUnauthorizedAndMissingKubectl()
