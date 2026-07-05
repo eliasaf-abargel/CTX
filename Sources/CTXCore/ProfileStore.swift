@@ -523,12 +523,14 @@ public final class ProfileStore: ObservableObject {
         // launch, before the first background verify pass), the real switch never
         // ran, yet the UI already showed the context as "Active".
         if profile.provider == .kubernetes {
-            // Already the active, verified context — just re-verify instead of
-            // re-running the switch and fanning out a full verifyAllProfiles().
-            if isActive(profile), profiles.first(where: { $0.id == profile.id })?.status == .connected {
-                Task { await verify(profile) }
-                return
-            }
+            // Always go through the real switch rather than short-circuiting on
+            // cached "already active" state — `isActive`/`.status` are only the
+            // app's last-known bookkeeping (refreshed on a debounced file-watcher
+            // pass), not a live read of the kubeconfig. If the real current-context
+            // changed outside the app (a terminal, another tool) since the last
+            // refresh, trusting that cache here would silently skip the switch back.
+            // The cost of an always-correct redundant `use-context` on a manual
+            // button click is negligible.
             setActive(profile)
             return
         }
