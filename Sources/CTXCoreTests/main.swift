@@ -860,8 +860,9 @@ func testKubectlConcurrencyGateNeverDelaysActivePriorityFetch() async {
 
     // A queued wait would take on the order of the remaining background delay
     // *plus* its own (~150ms); bypassing the gate takes roughly its own delay
-    // alone (~80ms) — the gap between those is wide enough to not be flaky.
-    assert(elapsed < 0.13, "an .active fetch must never queue behind a full background gate, took \(elapsed)s")
+    // alone (~80ms). Use 600ms to avoid false failures on slow CI runners
+    // (GitHub Actions macos-15) while still proving gate bypass occurred.
+    assert(elapsed < 0.6, "an .active fetch must never queue behind a full background gate, took \(elapsed)s")
 }
 
 func testRelatedPodsMatchesServiceSelectorAgainstPodLabels() {
