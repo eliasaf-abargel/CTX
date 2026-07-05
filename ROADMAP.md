@@ -1,93 +1,60 @@
 # CTX Roadmap
 
-CTX is moving toward a polished, Apple-native context and Kubernetes inspection
-workspace. The product remains local-first, generic, and open-source friendly.
+CTX is a native macOS context switcher and Kubernetes inspection workspace. The
+product remains local-first, generic, and open-source safe.
 
 ## Shipped
 
-- Stable cloud and Kubernetes context discovery (AWS, GCP, Azure, kubeconfig).
-- Inspection Cluster Workspace: LED-style health indicator, namespace scoping,
-  resource tables (`CTXResourceTable`, shared across all 9 kinds), row
-  selection.
-- **`CTXResourceInspector`**: one tabbed sheet (Overview / YAML / Logs-for-Pods)
-  at every window width, driven by a single struct —
-  `ClusterWorkspacePresentation { selection, tab }` — instead of independent
-  presentation flags per feature. Switching tabs mutates that one value in
-  place; there is no second sheet to fight over state (see `DESIGN_SYSTEM.md`
-  § Inspector Tabs for what this replaced and why).
-- Inspection YAML inside the inspector's YAML tab for supported kinds, with a
-  visible disabled reason (not a broken tab) for unsupported ones.
-- Inspection Logs inside the inspector's Logs tab (Pods only) and the
-  standalone Logs sidebar screen, both sharing one fetch implementation:
-  container picker, tail-length picker (100/500/1000), reload, copy — no
-  exec, no unbounded/following stream.
-- Exports: loaded resource data to local JSON/CSV via the native save panel.
-- Diff: cached-vs-live comparison per resource kind (added/removed/changed).
-- In-memory, per-window caching via `ResourceRefreshCoordinator` (see
-  `CLOUD.md`) — the single cache/dedup authority, unit tested in `CTXCore` —
-  with cancellable per-resource-kind async loads, structured `[CTX perf]`
-  timing instrumentation, and real stale-while-revalidate (30s threshold —
-  cached data shows immediately, a background reload replaces it silently
-  once it's actually stale, including Overview's health/RBAC check, which
-  previously only ever ran once per window). A failed background refresh
-  never blanks a screen that already had good data — it stays visible with a
-  small "Refresh failed" indicator instead.
-- Native macOS layout: `ViewThatFits`-based responsive breakpoints, subtle
-  transitions, no custom search chrome where a native `List` suffices.
+- AWS, GCP, Azure, and Kubernetes context discovery.
+- Native menu bar and workspace app experience.
+- Read-only Kubernetes Cluster Workspace.
+- Overview diagnostics for API reachability, RBAC, namespaces, nodes, pods,
+  workloads, services, ingress, events, configmaps metadata, and secrets
+  metadata.
+- Shared resource tables with local filtering and responsive columns.
+- Resource inspector with Overview, safe YAML, and bounded Logs where supported.
+- Standalone bounded Logs screen.
+- JSON/CSV export for loaded resource data.
+- Cached-vs-live Diff per resource kind.
+- Request deduplication, stale-while-revalidate cache behavior, cancellation,
+  and debug-only performance logging.
+- Sanitized diagnostics for auth plugin failures, local proxy refusal, RBAC
+  denial, API errors, and timeouts.
 
-## Phase 3 — Resource Inspector and Safe YAML
+## Next Stabilization
 
-The tabbed inspector itself has shipped (see "Shipped" above). What remains:
+- Polish release packaging, signing, and notarization for public distribution.
+- Keep diagnostics clear for Finder/Dock-launched sessions with reduced `PATH`.
+- Add focused regression coverage for recent auth-plugin, tooltip, logs menu,
+  export, and diff flows.
+- Continue trimming stale docs, fixtures, and screenshots before each tag.
 
-- Broaden inspection YAML to more kinds once redaction rules exist for
-  workload templates (env vars, volume mounts that may reference secrets).
-- Richer Overview-tab sections (owner references, condition history) without
-  ever pulling values that require Secret access.
-- A Logs tab experience for Workloads (list/pick related pods) — deliberately
-  not built yet: it needs real pod↔workload correlation via label selectors,
-  which is new logic, not a polish pass on what already exists.
+## Product Direction
 
-## Phase 4 — Live Refresh and Watch API
+- Command palette or quick navigation for resource screens and contexts.
+- Better events timeline and resource correlation.
+- Richer resource inspector sections, such as owner references and conditions.
+- More useful diff presentation for changed fields.
+- Optional watch-backed live refresh with fallback to current polling.
+- Multi-cluster organization and comparison without changing the read-only
+  safety model.
+- Deeper RBAC, quota, policy, and utilization inspection where the cluster
+  exposes safe read-only data.
 
-`ResourceRefreshCoordinator` itself has shipped (see "Shipped" above) as the
-cache/dedup/stale-while-revalidate authority. What remains: extend it (see
-`CLOUD.md`) to move from polling (manual or stale-triggered) to a
-`kubectl get --watch` / informer-backed stream per active resource kind, with
-automatic fallback to polling. This phase is specifically about push-based
-updates instead of polling on a timer/threshold.
+## Requires Dedicated Safety Design
 
-## Phase 5 — Events Timeline
+These remain out of scope until CTX has explicit safety controls, audit,
+confirmation, and privacy review:
 
-- Events as a real timeline view (not just a table), correlated to the
-  selected resource where possible. (Inspection log tailing itself has
-  shipped — see "Shipped" above.)
+- YAML editing.
+- Apply, patch, delete, scale, drain, or cordon.
+- Port-forward.
+- Exec or shell.
+- AI-assisted troubleshooting that uses cluster data.
 
-## Phase 6 — Multi-cluster Workspace
+## Non-Goals
 
-- Multiple open Cluster Workspace windows/tabs with independent caches
-  (already possible per-window today; formalize switching/organizing them).
-- Side-by-side or quick-switch comparison of the same resource kind across
-  contexts, still gated by the safety model.
-
-## Phase 7 — Policy / RBAC / Cost / Enterprise Insights
-
-- Deeper RBAC visualization beyond the current allow/deny summary.
-- Inspection policy and quota insight (ResourceQuota, LimitRange, PDBs).
-- Cost/utilization overlays where a cluster exposes inspectable data
-  (e.g. metrics-server, existing cost-exporter CRDs) — CTX never becomes a
-  billing system of record.
-
-## Later / Requires Dedicated Safety Design
-
-- GitOps awareness for Argo CD and Flux without taking ownership of writes.
-- Safe YAML editing only after diff, audit, RBAC preflight, and confirmation.
-- Port-forward manager with explicit lifetime, local port visibility, and audit.
-- Exec/shell only with strict safety controls, session warnings, and audit.
-- AI-assisted troubleshooting with privacy boundaries and local diagnostics.
-
-## Non-Goals Until Safety Exists
-
-- No cluster mutations.
-- No global kubectl context or namespace mutation.
-- No secret value display.
 - No web UI stack.
+- No CTX backend or telemetry.
+- No mutation features in the current workspace.
+- No secret value display.

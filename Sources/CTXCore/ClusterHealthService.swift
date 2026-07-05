@@ -14,10 +14,20 @@ public final class ClusterHealthService: ClusterHealthChecking {
     }
 
     public func overview(for context: KubernetesContextProfile) async -> KubernetesOverviewSummary {
-        async let api = runRead(step: "verify_kubectl", kind: "API", context: context, arguments: ["version", "--request-timeout=\(Int(timeout))s", "--output=json"])
-        async let rbac = loadRBAC(context: context)
-        let apiResult = await api
-        let rbacResult = await rbac
+        let apiResult = await runRead(step: "verify_kubectl", kind: "API", context: context, arguments: ["version", "--request-timeout=\(Int(timeout))s", "--output=json"])
+        guard apiResult.status == .reachable else {
+            return KubernetesOverviewSummary(
+                apiStatus: apiResult.status,
+                rbac: blockedRBAC(status: apiResult.status),
+                namespaces: KubernetesNamespacesSummary(count: nil, activeNamespace: namespace(from: context), status: .notChecked),
+                nodes: KubernetesNodesSummary(total: nil, ready: nil, notReady: nil, status: .notChecked),
+                pods: KubernetesPodsSummary(total: nil, running: 0, pending: 0, failed: 0, crashLoopBackOff: 0, failing: 0, status: .notChecked),
+                events: KubernetesEventsSummary(warningCount: nil, status: .notChecked),
+                diagnostics: [apiResult.diagnostic]
+            )
+        }
+
+        let rbacResult = await loadRBAC(context: context)
 
         return KubernetesOverviewSummary(
             apiStatus: apiResult.status,
@@ -28,6 +38,12 @@ public final class ClusterHealthService: ClusterHealthChecking {
             events: KubernetesEventsSummary(warningCount: nil, status: .notChecked),
             diagnostics: [apiResult.diagnostic] + rbacResult.diagnostics
         )
+    }
+
+    private func blockedRBAC(status: KubernetesCheckStatus) -> [KubernetesPermissionSummary] {
+        KubernetesRBACResource.allCases.map {
+            KubernetesPermissionSummary(resource: $0.label, allowed: nil, status: status)
+        }
     }
 
     private struct ReadResult {

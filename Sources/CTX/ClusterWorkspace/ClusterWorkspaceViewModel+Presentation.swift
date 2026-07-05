@@ -12,7 +12,10 @@ extension ClusterWorkspaceViewModel {
 
     var rbacStatusTitle: String {
         let known = overviewSummary.rbac.filter { $0.allowed != nil }
-        guard !known.isEmpty else { return "RBAC unknown" }
+        guard !known.isEmpty else {
+            let status = overviewSummary.rbac.first?.status ?? .notChecked
+            return status == .notChecked ? "RBAC unknown" : "RBAC blocked"
+        }
         let allowed = known.filter { $0.allowed == true }.count
         return "RBAC \(allowed)/\(overviewSummary.rbac.count)"
     }
@@ -36,7 +39,7 @@ extension ClusterWorkspaceViewModel {
             ClusterWorkspaceMetric(title: "Services", value: countText(overviewSummary.services.total, status: overviewSummary.services.status), subtitle: servicesSubtitle, systemImage: "network", tint: overviewSummary.services.status.tint, targetSection: .services),
             ClusterWorkspaceMetric(title: "Ingress", value: countText(overviewSummary.ingress.total, status: overviewSummary.ingress.status), subtitle: ingressSubtitle, systemImage: "point.3.connected.trianglepath.dotted", tint: overviewSummary.ingress.status.tint, targetSection: .ingress),
             ClusterWorkspaceMetric(title: "Events", value: eventsValue, subtitle: eventsSubtitle, systemImage: "waveform.path.ecg", tint: overviewSummary.events.status.tint, targetSection: .events),
-            ClusterWorkspaceMetric(title: "RBAC", value: rbacValue, subtitle: "Read permissions", systemImage: "lock.shield", tint: rbacStatusTint)
+            ClusterWorkspaceMetric(title: "RBAC", value: rbacValue, subtitle: rbacSubtitle, systemImage: "lock.shield", tint: rbacStatusTint)
         ]
     }
 
@@ -163,11 +166,20 @@ extension ClusterWorkspaceViewModel {
 
     private var rbacValue: String {
         let known = overviewSummary.rbac.filter { $0.allowed != nil }
-        guard !known.isEmpty else { return "Unknown" }
+        guard !known.isEmpty else {
+            return overviewSummary.rbac.first?.status == .notChecked ? "Unknown" : "Blocked"
+        }
         let allowed = known.filter { $0.allowed == true }.count
         if allowed == overviewSummary.rbac.count { return "OK" }
         if allowed == 0 { return "Denied" }
         return "Limited"
+    }
+
+    private var rbacSubtitle: String {
+        let known = overviewSummary.rbac.filter { $0.allowed != nil }
+        guard known.isEmpty else { return "Read permissions" }
+        let status = overviewSummary.rbac.first?.status ?? .notChecked
+        return status == .notChecked ? "Read permissions" : status.cardSubtitle
     }
 
     private func countText(_ count: Int?, status: KubernetesCheckStatus) -> String {

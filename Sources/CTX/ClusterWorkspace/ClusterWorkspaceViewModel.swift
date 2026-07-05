@@ -120,8 +120,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         if let lastRefreshed, Date().timeIntervalSince(lastRefreshed) <= staleThreshold {
             return
         }
-        refreshOverview()
-        loadNamespaces(bypassCache: false)
+        await refreshOverviewNow(loadNamespacesOnSuccess: true, namespaceBypassCache: false)
     }
 
     /// Called once when the workspace window first opens (not on every return to
@@ -134,6 +133,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     /// dedup, so this can never produce a duplicate request against a kind the
     /// user has already triggered some other way.
     func prefetchWorkspaceResources() {
+        guard overviewSummary.apiStatus == .reachable else { return }
         // Prefetch only the resource kinds needed for the Overview screen or common navigation
         let prefetchKinds: [KubernetesResourceKind] = [.nodes, .pods, .services, .workloads, .ingress, .events]
         for kind in prefetchKinds {
@@ -141,23 +141,30 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         }
     }
 
-    func refreshOverview() {
+    func refreshOverview(loadNamespacesOnSuccess: Bool = false, namespaceBypassCache: Bool = false) {
         refreshTask?.cancel()
-        isRefreshingOverview = true
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            let summary = await healthService.overview(for: context)
-            guard !Task.isCancelled else { return }
-            lastRefreshIssue = summary.primaryFailure
-            if summary.hasLoadedData || lastRefreshed == nil {
-                overviewSummary.apiStatus = summary.apiStatus
-                overviewSummary.rbac = summary.rbac
-                overviewSummary.diagnostics = summary.diagnostics
-            }
-            if summary.hasLoadedData {
-                lastRefreshed = Date()
-            }
-            isRefreshingOverview = false
+            await refreshOverviewNow(loadNamespacesOnSuccess: loadNamespacesOnSuccess, namespaceBypassCache: namespaceBypassCache)
+        }
+    }
+
+    private func refreshOverviewNow(loadNamespacesOnSuccess: Bool, namespaceBypassCache: Bool) async {
+        isRefreshingOverview = true
+        defer { isRefreshingOverview = false }
+        let summary = await healthService.overview(for: context)
+        guard !Task.isCancelled else { return }
+        lastRefreshIssue = summary.primaryFailure
+        if summary.hasLoadedData || lastRefreshed == nil {
+            overviewSummary.apiStatus = summary.apiStatus
+            overviewSummary.rbac = summary.rbac
+            overviewSummary.diagnostics = summary.diagnostics
+        }
+        if summary.hasLoadedData {
+            lastRefreshed = Date()
+        }
+        if loadNamespacesOnSuccess, summary.apiStatus == .reachable {
+            loadNamespaces(bypassCache: namespaceBypassCache)
         }
     }
 
@@ -260,8 +267,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         } else if presentation?.tab == .logs {
             reloadLogs()
         } else if selectedSection == .overview {
-            refreshOverview()
-            loadNamespaces(bypassCache: true)
+            refreshOverview(loadNamespacesOnSuccess: true, namespaceBypassCache: true)
         } else if selectedSection == .logs {
             if selectedLogPodID != nil {
                 reloadLogs()

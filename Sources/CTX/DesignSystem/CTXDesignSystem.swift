@@ -38,6 +38,60 @@ struct CTXCopyIconButton: View {
     }
 }
 
+struct CTXIconActionButton: View {
+    let title: String
+    let systemImage: String
+    var tint: Color = .primary
+    let action: () -> Void
+    @State private var isHovering = false
+
+    private var tooltipWidth: CGFloat {
+        min(max(CGFloat(title.count) * 7 + 24, 96), 150)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 28)
+                .background(Color.secondary.opacity(0.13), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.24), lineWidth: 0.75)
+                }
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .accessibilityLabel(title)
+        .help(title)
+        .onHover { isHovering = $0 }
+        .overlay(alignment: .topTrailing) {
+            if isHovering {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+                    .frame(width: tooltipWidth)
+                    .frame(minHeight: 24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 0.75)
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+                    .offset(y: -31)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(1)
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+    }
+}
+
 struct CTXGlassPanel<Content: View>: View {
     var padding: CGFloat = 18
     @ViewBuilder var content: Content

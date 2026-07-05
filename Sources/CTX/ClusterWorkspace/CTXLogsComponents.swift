@@ -177,30 +177,42 @@ struct CTXPodPicker: View {
     }
 }
 
-/// Tail-length selector as CTX chip buttons — not a native `Picker`, which on
-/// macOS defaults to a dark dropdown menu that reads as a raw system control
-/// dropped into an otherwise custom-styled toolbar. Same capsule/opacity language
-/// as `CTXStatusBadge` and the rest of the design system.
+/// Compact tail-length selector shared by every Logs surface. Keeping this as one
+/// menu instead of three always-visible chips leaves the toolbar scannable when the
+/// pod name or container list is long.
 struct CTXLogsTailSelector: View {
     let options: [Int]
     @Binding var selection: Int
 
     var body: some View {
-        HStack(spacing: 4) {
+        Menu {
             ForEach(options, id: \.self) { option in
                 Button {
                     selection = option
                 } label: {
-                    Text("Last \(option)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(selection == option ? Color.accentColor : Color.secondary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(selection == option ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.08), in: Capsule())
+                    if selection == option {
+                        Label("Last \(option)", systemImage: "checkmark")
+                    } else {
+                        Text("Last \(option)")
+                    }
                 }
-                .buttonStyle(.plain)
             }
+        } label: {
+            Label("Last \(selection)", systemImage: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.24), lineWidth: 0.75)
+                }
         }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Choose log tail length")
     }
 }
 

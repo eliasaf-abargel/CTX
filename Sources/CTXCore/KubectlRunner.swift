@@ -74,7 +74,7 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding {
     }
 
     public func run(_ command: KubectlCommand, timeout: TimeInterval) async throws -> KubectlResult {
-        let environment = environment()
+        let environment = environmentWithSearchPath(environment())
         let processBox = ProcessBox()
         return try await withTaskCancellationHandler {
             try await Task.detached {
@@ -127,7 +127,7 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding {
     }
 
     public func resolveKubectlPath() throws -> String {
-        let paths = searchPaths()
+        let paths = searchPaths(in: environment())
         for dir in paths {
             let path = (dir as NSString).appendingPathComponent("kubectl")
             if FileManager.default.isExecutableFile(atPath: path) {
@@ -137,8 +137,8 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding {
         throw KubectlRunnerError.kubectlNotFound
     }
 
-    private func searchPaths() -> [String] {
-        let pathDirs = (environment()["PATH"] ?? "")
+    private func searchPaths(in environment: [String: String]) -> [String] {
+        let pathDirs = (environment["PATH"] ?? "")
             .split(separator: ":")
             .map(String.init)
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -151,6 +151,12 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding {
             "/usr/sbin",
             "/sbin"
         ]
+    }
+
+    private func environmentWithSearchPath(_ environment: [String: String]) -> [String: String] {
+        var merged = environment
+        merged["PATH"] = searchPaths(in: environment).joined(separator: ":")
+        return merged
     }
 }
 

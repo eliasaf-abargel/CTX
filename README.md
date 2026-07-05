@@ -5,7 +5,7 @@
 <h1 align="center">CTX</h1>
 
 <p align="center">
-  <strong>A lightweight, native macOS Cloud Context Switcher</strong>
+  <strong>A native macOS context switcher and Kubernetes inspection workspace.</strong>
 </p>
 
 <p align="center">
@@ -14,62 +14,55 @@
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
 </p>
 
-CTX resides directly in your macOS Menu Bar, providing a native, lightweight, and fast experience to authenticate, verify, and switch between multiple cloud profiles. Fully supports **AWS SSO**, **Google Cloud Platform (GCP)**, and **Kubernetes (K8s)**.
+CTX is a lightweight local app for developers who switch between cloud and
+Kubernetes contexts. It discovers existing AWS, GCP, Azure, and kubeconfig
+state on your Mac, keeps the UI native, and uses your installed command-line
+tools instead of a hosted backend.
 
-Designed for developers and DevOps engineers who manage complex multi-account environments and need a seamless, keyboard-friendly way to swap contexts.
+The Kubernetes Cluster Workspace is inspection-focused: it reads cluster state
+through explicit `kubectl --context` commands, keeps namespace selection local
+to CTX, and does not mutate the cluster.
 
----
+## Features
 
-## Key Features 🚀
+- Native SwiftUI macOS app with menu bar and workspace windows.
+- AWS, GCP, Azure, and Kubernetes context discovery.
+- Kubernetes Overview with API, RBAC, namespaces, nodes, pods, workloads,
+  services, ingress, configmaps metadata, secrets metadata, and events.
+- Resource tables with local filtering, detail inspector, safe YAML inspection,
+  bounded logs, JSON/CSV export, and cached-vs-live diff.
+- Clear diagnostics for common local issues such as missing credential plugins,
+  local proxy refusal, RBAC denial, and timeouts.
+- Local-first behavior: no CTX backend, no telemetry, and no secret value
+  display.
 
-- **Native macOS Experience:** Built using Swift and SwiftUI, styled with clean layouts and smooth transitions that align with macOS system design.
-- **Multi-Cloud & Kubernetes Support:** Switch between AWS profiles, GCP configurations, and Kubernetes (K8s) contexts concurrently.
-- **Menu Bar & Sidebar Interface:** Access all profiles via a compact dropdown in the system status bar, or open the detailed sidebar interface.
-- **Robust Path & CLI Resolution:** Directly locates Homebrew-installed binaries (`aws`, `gcloud`) and operates correctly even when launched through macOS LaunchServices.
-- **Single-Instance Reopening:** Correctly reactivates the active window when double-clicking the Dock/desktop icon instead of creating duplicate processes.
-- **Dynamic Folders:** Group profiles into environments (e.g. *Production*, *Staging*, *Admin*). Toggle folder expansion by clicking anywhere on the folder row.
-- **Complete Folder Control:** Delete built-in or custom folders easily from the UI to keep your workspace decluttered.
-- **Secure Credentials Handling:** Exports and writes temporary AWS STS credentials and switches active gcloud configurations safely without storing static secrets.
-- **Session Expiration Alerts:** Monitors local AWS token caches and pops up system alerts or banners when your active session is about to expire.
-- **Seamless Auto-Updates:** Automatically monitors for new releases from GitHub in the background, posts system notifications when an update is available, and installs updates in a single click—downloading, extracting, replacing the app bundle, and restarting the app natively without manual steps.
+## Install
 
----
+Download the latest signed release from the repository's Releases page and move
+`CTX.app` to `/Applications`.
 
-## Installation 🛠️
+For a local development build:
 
-To install CTX to your `/Applications` folder using a single terminal command:
-
-### Option 1: Homebrew Cask (Recommended)
-Add the tap and install the Cask:
-```bash
-brew install --cask eliasaf-abargel/tap/ctx
-```
-
-### Option 2: Standard Installation Script
-```bash
-curl -fsSL https://raw.githubusercontent.com/eliasaf-abargel/CTX/main/script/install.sh | bash
-```
-
----
-
-## Development 💻
-
-### Prerequisites
-- macOS 14.0+
-- Xcode 15.0+ or Swift 6.0+
-- AWS CLI (`aws`) and Google Cloud SDK (`gcloud`) installed (e.g. via Homebrew)
-
-### Run in Development
-To build, sign, and launch the application in development:
 ```bash
 ./script/build_and_run.sh run
 ```
 
-Other modes:
-- `./script/build_and_run.sh logs` — Opens the app and starts streaming system logs.
-- `./script/build_and_run.sh verify` — Verifies the app is running.
+## Requirements
 
-### Run Verification Tests
+- macOS 14.0 or newer.
+- Xcode 15 or newer, or a compatible Swift 6 toolchain for development.
+- `kubectl` for Kubernetes inspection.
+- Provider CLIs only for contexts that need them, for example `aws` for EKS
+  exec credential plugins or `gcloud` for GKE auth.
+
+When CTX is opened from Finder or the Dock, macOS may provide a smaller `PATH`
+than an interactive terminal. CTX resolves common Homebrew and system paths, but
+credential plugins still need to be installed on the machine.
+
+## Development
+
+Run the full local verification stack before shipping changes:
+
 ```bash
 swift build
 swift run CTXCoreTests
@@ -77,73 +70,37 @@ swift run CTXCheck
 ./script/build_and_run.sh verify
 ```
 
-### Kubernetes Workspace
-
-The Kubernetes foundation keeps cluster context data in dedicated domain models
-instead of overloading generic cloud profile fields. See
-[docs/kubernetes-foundation.md](docs/kubernetes-foundation.md) for the original
-service boundaries. The current Cluster Workspace is documented in
-[KUBERNETES_WORKSPACE.md](KUBERNETES_WORKSPACE.md).
-
-The workspace uses real Kubernetes inspection data through explicit
-`kubectl --context` commands while keeping startup lightweight. Opening the
-workspace loads cluster identity, namespaces, API reachability, and RBAC
-`can-i` summaries (checked concurrently, not one at a time). Resource screens
-lazy-load namespaces, nodes, workloads, pods, services, ingress, configmaps
-metadata, secrets metadata, and events, with an in-memory cache scoped to the
-open cluster window — nothing is written to disk. Logs (bounded, inspection pod
-tail), inspection YAML (as a sheet from the resource inspector), Exports
-(JSON/CSV via the native save panel), and Diff (cached-vs-live comparison) are
-also live. Namespace selection is local to CTX and never changes global
-kubectl config. Mutation actions remain absent, and secret values are never
-read or displayed.
-
-### Cluster Workspace Diagnostics
-
-When the Overview reports an error, compare CTX with the same inspection command
-in Terminal:
+Useful build script modes:
 
 ```bash
-KUBECONFIG=/path/from/ctx kubectl --context <context-from-ctx> get namespaces -o json
-kubectl --context <context-from-ctx> get nodes -o json
-kubectl --context <context-from-ctx> auth can-i list pods -A
+./script/build_and_run.sh run
+./script/build_and_run.sh logs
+./script/build_and_run.sh verify
 ```
 
-If CTX reports a local proxy or tunnel refusal, start the VPN, SDM/Teleport
-proxy, Rancher Desktop tunnel, or other access tool backing that kubeconfig
-context, then refresh the Overview.
+## Kubernetes Safety Model
 
-The workspace uses 15 second default reads and 22 second heavy reads for
-all-namespaces pods/events — tuned to fail fast with a clear per-resource
-error rather than leave a screen spinning. If kubectl returns valid JSON after
-a slow response,
-CTX parses the data instead of showing raw command output. Normal UI errors show
-a short reason, retry, copy diagnostics, and optional details; raw stdout is not
-rendered in the main panel. Selecting a resource opens an inspection detail
-dashboard. YAML viewing is for inspection and disabled for resources that can expose
-secret or configuration values.
+Current Kubernetes behavior is read-only. CTX does not run `apply`, `patch`,
+`delete`, `scale`, `drain`, `cordon`, `exec`, shell, port-forward, or YAML edit
+operations.
 
-### Project Guidance
+Secret resources are metadata-only. ConfigMap values and Secret values are not
+displayed, logged, exported, or cached as raw values.
 
-- [AGENTS.md](AGENTS.md): rules for AI coding agents.
-- [SECURITY.md](SECURITY.md): security, diagnostics, and Kubernetes safety.
-- [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md): native macOS design direction.
+See [SECURITY.md](SECURITY.md), [CLOUD.md](CLOUD.md), and
+[KUBERNETES_WORKSPACE.md](KUBERNETES_WORKSPACE.md) for the implementation
+boundaries.
+
+## Documentation
+
+- [CLOUD.md](CLOUD.md): cloud and Kubernetes architecture.
 - [KUBERNETES_WORKSPACE.md](KUBERNETES_WORKSPACE.md): workspace behavior.
-- [ROADMAP.md](ROADMAP.md): future product direction.
-- [CONTRIBUTING.md](CONTRIBUTING.md): contributor expectations.
+- [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md): native macOS UI rules.
+- [SECURITY.md](SECURITY.md): safety and privacy boundaries.
+- [ROADMAP.md](ROADMAP.md): planned product direction.
+- [CONTRIBUTING.md](CONTRIBUTING.md): contribution rules.
+- [AGENTS.md](AGENTS.md): coding-agent instructions for this repository.
 
----
+## License
 
-## Security & Privacy 🔒
-
-- **Local & Private:** CTX does not store, transmit, or share your credentials or profiles. All operations happen entirely offline on your local machine.
-- **No Secrets Committed:** Configs, token caches, and active credentials remain safe within your home directory (`~/.aws/` and `~/.config/gcloud/`) and are excluded from Git.
-- **Automatic Backups:** Backup files are created locally during changes and are excluded from Git.
-- **Ad-hoc Signing:** The local build script signs the application bundle ad-hoc. For distribution outside your Mac, compile with a valid Developer ID certificate.
-
----
-
-## Contact & Support 📬
-
-Developed by **Eliasaf Abargel**  
-Email: [eliasafabargel@gmail.com](mailto:eliasafabargel@gmail.com)
+CTX is released under the MIT License.

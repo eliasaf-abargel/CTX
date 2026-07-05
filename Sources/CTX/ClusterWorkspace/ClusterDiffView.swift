@@ -93,11 +93,9 @@ struct ClusterDiffView: View {
                         if isDiffing {
                             ProgressView().controlSize(.small)
                         } else {
-                            Button("Compare cached vs. live") {
+                            CTXIconActionButton(title: "Compare with live", systemImage: "arrow.triangle.2.circlepath", tint: .orange) {
                                 viewModel.runDiff(kind: kind)
                             }
-                            .buttonStyle(CTXSecondaryButton())
-                            .controlSize(.small)
                         }
                     }
 

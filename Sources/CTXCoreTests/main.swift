@@ -239,6 +239,19 @@ func testKubectlCommandConstruction() throws {
     assert(command.arguments == ["--context", "dev-context", "get", "pods", "--all-namespaces"])
 }
 
+func testKubectlRunnerAddsCliSearchPathToChildEnvironment() async throws {
+    let runner = KubectlRunner(environment: { ["PATH": "/tmp/ctx-minimal-path"] })
+    let command = KubectlCommand(
+        executablePath: "/bin/sh",
+        arguments: ["-c", "printf '%s' \"$PATH\""]
+    )
+
+    let result = try await runner.run(command, timeout: 1)
+
+    assert(result.stdout.contains("/opt/homebrew/bin"))
+    assert(result.stdout.contains("/usr/local/bin"))
+}
+
 func testClusterOverviewMapsInspectionSummaries() async {
     let kubectl = ScriptedKubectl()
     kubectl.outputs["version --request-timeout=1s --output=json"] = .success("{}")
@@ -364,6 +377,8 @@ func testClusterOverviewMapsTimeoutUnauthorizedAndMissingKubectl() async {
     unauthorizedKubectl.defaultOutput = .failure(stderr: "You must be logged in to the server")
     let unauthorizedSummary = await ClusterHealthService(kubectl: unauthorizedKubectl, timeout: 1).overview(for: testKubernetesContext())
     assert(unauthorizedSummary.apiStatus == .unauthorized)
+    assert(unauthorizedSummary.rbac.allSatisfy { $0.allowed == nil && $0.status == .unauthorized })
+    assert(!unauthorizedKubectl.commands.contains { $0.arguments.contains("auth") }, "RBAC must not run after API/auth fails")
 
     let missingKubectl = ScriptedKubectl()
     missingKubectl.error = KubectlRunnerError.kubectlNotFound
@@ -1049,6 +1064,17 @@ func testKubernetesTimeoutBucketCandidatesCoverAllFourCases() {
     assert(KubernetesTimeoutBucket.candidates(category: .success, hasExecPlugin: false) == [.success])
 }
 
+func testCredentialPluginExecutableNotFoundIsAuthFailure() async {
+    let kubectl = ScriptedKubectl()
+    kubectl.defaultOutput = .failure(stderr: "Unable to connect to the server: getting credentials: exec: executable aws not found")
+
+    let summary = await ClusterHealthService(kubectl: kubectl, timeout: 1).overview(for: testKubernetesContext())
+
+    assert(summary.apiStatus == .authPluginFailed)
+    assert(summary.diagnostics.first?.category == .authPluginFailed)
+    assert(!kubectl.commands.contains { $0.arguments.contains("auth") }, "RBAC must not run when the exec credential plugin cannot start")
+}
+
 func testNodesTimeoutStillReportsTimeoutCategoryForLiveDiagnosis() async {
     let kubectl = ScriptedKubectl()
     kubectl.defaultOutput = .timeout
@@ -1660,6 +1686,7 @@ try testKubeConfigDiscoveryDeduplicatesContextNames()
 try testKubeConfigDiscoveryHandlesInvalidFiles()
 try testLocalProfileDiscoveryLoadsAWSAndKubernetesProfiles()
 try testKubectlCommandConstruction()
+try await testKubectlRunnerAddsCliSearchPathToChildEnvironment()
 await testClusterOverviewMapsInspectionSummaries()
 await testClusterOverviewMapsRBACDeniedAndPermissionDenied()
 testWorkloadsSummaryCountsWarningsAsUnhealthy()
@@ -1705,6 +1732,7 @@ await testKubernetesResourceReaderSecretMetadataDoesNotRequestSecretJSON()
 await testKubernetesResourceReaderUsesParseableStdoutAfterTimeout()
 testKubeConfigAuthPluginDetectorFindsExecCommandForNamedUser()
 testKubernetesTimeoutBucketCandidatesCoverAllFourCases()
+await testCredentialPluginExecutableNotFoundIsAuthFailure()
 await testNodesTimeoutStillReportsTimeoutCategoryForLiveDiagnosis()
 await testNodesSucceedsWellUnderTimeoutWhenSubprocessIsFast()
 await testSuccessfulExitWithUnparseableStdoutIsNotClassifiedAsTimeout()

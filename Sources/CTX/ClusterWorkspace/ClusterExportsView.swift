@@ -62,12 +62,14 @@ struct ClusterExportsView: View {
 
                 Spacer()
 
-                Button("Export JSON") { export(section, list, format: .json) }
-                    .buttonStyle(CTXSecondaryButton())
-                    .controlSize(.small)
-                Button("Export CSV") { export(section, list, format: .csv) }
-                    .buttonStyle(CTXSecondaryButton())
-                    .controlSize(.small)
+                HStack(spacing: 8) {
+                    CTXIconActionButton(title: "Export JSON", systemImage: "doc.text", tint: .blue) {
+                        export(section, list, format: .json)
+                    }
+                    CTXIconActionButton(title: "Export CSV", systemImage: "tablecells", tint: .green) {
+                        export(section, list, format: .csv)
+                    }
+                }
             }
         }
     }

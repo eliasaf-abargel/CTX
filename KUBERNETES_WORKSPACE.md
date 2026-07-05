@@ -1,15 +1,15 @@
 # Kubernetes Workspace
 
-The Cluster Workspace is a native Kubernetes inspection surface.
+The Cluster Workspace is a native macOS inspection surface for Kubernetes
+contexts discovered on the user's machine.
 
 ## Scope Model
 
-The selected namespace is workspace-local and persisted per Kubernetes context.
-It never mutates global kubectl config.
+Namespace selection is local to CTX and persisted per Kubernetes context. It
+does not change global kubectl config.
 
 - `All namespaces` uses `--all-namespaces`.
-- `default` uses `--namespace default`.
-- A specific namespace uses `--namespace <name>`.
+- A single namespace uses `--namespace <name>`.
 - Cluster-scoped resources ignore namespace flags.
 
 Cluster-scoped resources:
@@ -23,49 +23,26 @@ Namespace-scoped resources:
 - Pods
 - Services
 - Ingress
-- ConfigMaps
+- ConfigMaps metadata
 - Secrets metadata
-- Events where supported by kubectl
+- Events, where supported by the cluster
 
-## Loading, Cache, and Refresh
+## Loading and Refresh
 
 - Workspace open loads identity, API health, RBAC, and namespaces.
 - Resource screens lazy-load on first open.
-- The header refresh button refreshes the current inspection screen only.
-- Retry buttons appear only inside error panels.
-- Cache keys include context identity, resource kind, and effective namespace,
-  owned by `ResourceRefreshCoordinator` (see `CLOUD.md`).
-- Timeouts: `kubectl version`/verify 12s; ordinary lists, Nodes, Events, YAML,
-  and Logs 12s (a soft "still loading" message appears after 3s, since a real auth-plugin round trip can outlast a plain list call); heavy all-namespace Pods/Events reads 20s. Kept short on
-  purpose — a resource kind failing fast with a clear per-kind error and a
-  working Retry beats the whole screen sitting on a spinner, since each kind
-  is already an independent cancellable task and never blocks the others.
-- Full caching/invalidation model, task-cancellation rules, and the future
-  watch-API path live in `CLOUD.md` — this doc stays focused on the
-  workspace's resource/namespace scope model.
+- Background prefetch warms common screens without blocking the active view.
+- Header refresh reloads the current inspection screen.
+- Retry buttons appear inside error panels.
+- Cache and in-flight deduplication are owned by `ResourceRefreshCoordinator`
+  in `CTXCore`; see [CLOUD.md](CLOUD.md).
 
-## Resource Model: Specialized Today, Not Yet Generic
-
-`KubernetesResourceKind` is a closed, `CaseIterable` enum (one case per
-supported kind), each wired individually into columns, kubectl resource
-name, and detail-section rendering (`KubernetesResourceModels.swift`,
-`KubernetesResourceReader.swift`). Rows themselves (`cells: [String:
-String]`) are already shape-agnostic, but adding a new kind — including a
-future CRD — still means adding an enum case and touching ~5 switch
-statements.
-
-This is intentional for now: every supported kind has real, curated
-detail-section fields, and a premature "generic apiVersion/kind/labels/
-annotations" model would either duplicate that curation or produce a flatter,
-less useful detail view. If/when CRD support becomes a real ask, the fix is
-additive — a `.generic(gvk: GroupVersionKind)` case that falls back to
-name/namespace/age/labels/annotations/status only, without disturbing the
-specialized cases already curated above. No speculative generic layer is
-being introduced ahead of that need.
+Each resource kind has its own cancellable task. A timeout or RBAC error in one
+kind does not block other kinds from loading.
 
 ## Resource Screens
 
-Implemented screens load real cluster inspection data:
+Implemented screens use real read-only cluster data:
 
 - Namespaces
 - Nodes
@@ -76,41 +53,33 @@ Implemented screens load real cluster inspection data:
 - ConfigMaps metadata
 - Secrets metadata
 - Events
+- Logs
+- Exports
+- Diff
 
-Each screen supports local filtering on loaded rows. Filtering never runs
-kubectl and displays `x of y items` when active.
+Resource tables share one table implementation and support local filtering on
+loaded rows. Filtering never runs kubectl.
 
-## Selection and Detail: the Resource Inspector
+## Inspector
 
-Selecting a resource row opens `CTXResourceInspector` — one tabbed sheet, at
-every window width, so it never clips and never requires scrolling down to
-see it. Tabs:
+Selecting a resource opens a single tabbed inspector sheet. The inspector owns
+the detail experience at every window width, which keeps selection and tab state
+consistent.
 
-- **Overview** (always) — kind, name, namespace when relevant, age, status,
-  curated per-kind fields, and a copy-reference row.
-- **YAML** (always present; disabled with a reason when unsupported — see
-  below) — the resource's YAML for inspection.
-- **Logs** (Pods, Services, Workloads) — a Pod's log tail directly;
-  for Services/Workloads, a generic related-Pods picker first (see below).
+Tabs:
 
-The header (resource icon, title, subtitle, status) stays visible above the
-tab bar regardless of which tab is active. Closing the inspector (Done or
-Escape) routes through `dismissPresentation()`, which always clears the
-underlying row selection at the same time — the previously-selected row's
-highlight doesn't linger after the sheet is gone. Selecting a new row or
-changing namespace/resource-kind replace or clear `presentation` directly.
+- Overview: curated fields, status, scope, and copyable references.
+- YAML: lazy inspection YAML where safe.
+- Logs: available for Pods, Services, and Workloads through the same bounded
+  log reader used by the standalone Logs screen.
 
-Switching tabs is a mutation of the *same* presentation value
-(`presentation?.tab = newTab`), not a dismiss-and-present-a-different-sheet.
-See `DESIGN_SYSTEM.md` § Layout Breakpoints and § Inspector Tabs for why this
-replaced three earlier designs that each broke in a different way — the
-last one specifically was YAML as a *second* sheet, where presenting it
-forced the inspector sheet to auto-dismiss, tearing out the very selection
-state YAML needed to load.
+Unsupported tabs show a clear disabled reason rather than an empty or broken
+view.
 
-## Inspection YAML
+## YAML
 
-The YAML tab loads lazily the first time it's shown for a given resource.
+YAML is inspection-only. There is no edit, apply, patch, or save-to-cluster
+action.
 
 Supported today:
 
@@ -121,89 +90,61 @@ Supported today:
 - Ingress
 - Event
 
-Disabled, with a visible reason inside the tab (not a broken/empty view):
+Disabled today:
 
 - Secret, because it can contain encoded secret data.
 - ConfigMap, because it can contain configuration values.
-- Workload, until template redaction rules are designed (env vars and
-  volumes can reference secrets).
-
-YAML is for inspection. There is no edit, apply, patch, or save-to-cluster action.
+- Workload, until template redaction rules exist for env vars, volumes, and
+  secret references.
 
 ## Logs
 
-Inspection pod log tailing (`KubernetesLogsReader`), reachable two ways that
-share the exact same fetch path and the exact same visual components — no
-duplicated logs implementation:
+Logs use `KubernetesLogsReader` and always run bounded `kubectl logs --tail`
+requests.
 
-- The standalone **Logs** sidebar screen: pick any pod from a list (loaded
-  from the same cached Pods list as the Pods screen, so opening it doesn't
-  trigger a second `get pods` call). Exactly one pod auto-selects; more than
-  one shows `CTXPodPicker` — never a guess.
-- The inspector's **Logs tab**, for a Pod already selected — auto-selects
-  that pod instead of asking you to pick one.
-- The inspector's **Logs tab** for a **Service** or **Workload** — discovers
-  related Pods generically via `KubernetesRelatedPods` (`CTXCore`): a
-  Service's `spec.selector`, or a Deployment/StatefulSet/DaemonSet's
-  `spec.selector.matchLabels`, matched against each already-loaded Pod's own
-  labels — the same mechanism `kubectl get pods -l <selector>` uses, no app
-  name or label convention assumed. No selector → "Service has no selector" /
-  "No selector found"; selector but no matching Pods → "No related Pods
-  found"; otherwise a sorted picker, then the exact same logs flow as picking
-  a Pod directly. A "Related Pods" back button returns to the picker without
-  leaving the inspector.
+- The standalone Logs screen lets the user pick a pod from loaded pod data.
+- A Pod inspector auto-selects that pod.
+- Service and Workload inspectors discover related pods from selectors and then
+  use the same log flow.
+- Container selection appears only for multi-container pods.
+- Tail length is chosen from a compact menu.
+- Reload re-runs the same bounded read.
 
-Shared components (`CTXLogsComponents.swift`):
-
-- `CTXPodPicker` — a popover of pod rows (name, workload/app label if known,
-  status, ready, restarts, age), sorted Running/Ready first, then
-  Warning/CrashLoop/Error, then Pending, then Completed/Terminated
-  (`PodLogSelection` in `CTXCore`, unit tested).
-- `CTXLogsControls` — pod picker, container picker (only shown when there's
-  more than one), tail-length picker (100/500/1000), Reload, Copy.
-- `CTXLogsViewer` — monospaced, independently vertical/horizontal scrolling,
-  a line-wrap toggle, an ANSI-escape-stripping toggle (on by default),
-  subtle dimming of each line's leading timestamp (display only — Copy
-  always copies the untouched raw text), a line count, and auto-scroll to
-  the newest line whenever the text changes.
-- `CTXLogsIssuePanel` — the shared "fetch failed" state (Retry, Show/Hide
-  details, Copy diagnostics).
-
-Either way: the reader looks up the pod's container names via a single
-`get pod -o jsonpath`, and a container picker appears only if there's more
-than one. Fetching logs always uses a bounded `--tail` — never an unbounded
-or indefinitely-following stream, so there's no long-running local process to
-manage or clean up. Reload re-runs the same bounded tail; there is no
-`exec`, no shell, no write path. The fetch task is cancelled on pod/
-container/tail/namespace change, and when the inspector closes.
+No logs path uses `exec`, shell, or an unbounded follow stream.
 
 ## Exports
 
-Exports writes the rows already loaded for a resource screen to a local file
-(JSON or CSV) via the native `NSSavePanel` — no network call, no new kubectl
-command, just serializing data CTX already fetched. Only screens with
-successfully loaded data appear as export candidates.
+Exports write already-loaded resource rows to JSON or CSV through the native
+save panel. Exporting does not run a new kubectl command and does not send data
+anywhere.
+
+Only resource kinds with successfully loaded data appear as export candidates.
 
 ## Diff
 
-Diff (`ClusterDiffView` / `ResourceDiffResult`) compares the currently cached
-resource list for a kind against one fresh `bypassCache: true` re-fetch,
-matching rows by their existing `id` to report added / removed / changed
-counts and names. It reuses the same `KubernetesResourceReader.list` path as
-every other read (no separate command surface), and the live re-fetch also
-refreshes that kind's cache entry as a side effect — consistent with a normal
-refresh.
+Diff compares the cached list for a resource kind against one fresh
+`bypassCache` read. Rows are matched by stable row id and summarized as added,
+removed, or changed.
+
+Diff uses the same read path as the resource screens; there is no separate
+command surface.
 
 ## Diagnostics
 
 Diagnostics include command kind, context, safe kubeconfig path, exit code,
-duration, category, and sanitized stderr summary. Raw stdout is not shown in
-normal UI. Every kubectl call additionally emits one `DEBUG`-only timing line
-(see `CLOUD.md` § Instrumentation) — kind, scope, cache vs. live, duration,
-outcome; never command output, tokens, or kubeconfig contents.
+duration, category, and sanitized stderr summary. Raw stdout is not displayed in
+normal UI.
 
-## Roadmap Boundaries
+Common categories include:
 
-Port-forward, YAML editing, exec/shell, and mutations remain future surfaces.
-They require safety design, audit, confirmation, and privacy review before
-implementation — see `ROADMAP.md`.
+- Missing or failing credential plugin.
+- Local proxy or tunnel refusal.
+- RBAC denial.
+- Timeout.
+- Kubernetes API unavailable.
+
+## Boundaries
+
+Port-forward, YAML editing, exec/shell, and cluster mutations remain future
+surfaces. They require safety design, audit, confirmation, and privacy review
+before implementation.

@@ -29,7 +29,7 @@ enum KubernetesDiagnosticClassifier {
         if message.contains("unauthorized") || message.contains("must be logged in") { return .unauthorized }
         if message.contains("sso") && (message.contains("expired") || message.contains("login") || message.contains("token")) { return .awsSSOExpired }
         if message.contains("gcloud") || message.contains("invalid_grant") { return .gcpAuthExpired }
-        if message.contains("exec plugin") || (message.contains("executable") && message.contains("failed")) { return .authPluginFailed }
+        if message.contains("exec plugin") || message.contains("credential plugin") || (message.contains("executable") && (message.contains("failed") || message.contains("not found"))) { return .authPluginFailed }
         if message.contains("certificate") || message.contains("tls") || message.contains("x509") { return .tlsCertificate }
         if message.contains("kubeconfig") || message.contains("no such file") || message.contains("permission denied") { return .kubeconfig }
         if message.contains("timeout") || message.contains("timed out") || message.contains("deadline exceeded") || message.contains("i/o timeout") { return .timeout }
