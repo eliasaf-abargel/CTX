@@ -31,10 +31,17 @@ struct ClusterOverviewView: View {
                 rbacDetailPanel
             }
 
+            // Neither branch had a `.transition`, so swapping the loading panel
+            // for the (usually taller) diagnostic card — e.g. the moment an SSO
+            // check finishes and fails — snapped instantly instead of animating,
+            // which reads as the whole screen suddenly jumping. Only clusters
+            // that actually hit a notice ever show this swap, matching reports
+            // that it "doesn't happen on every cluster".
             if viewModel.isRefreshingOverview {
                 CTXGlassPanel(padding: 14) {
                     CTXLoadingStateView(title: "Refreshing", message: "Running inspection checks.")
                 }
+                .transition(.opacity)
             } else if let notice = viewModel.overviewNotice {
                 CTXDiagnosticCard(
                     systemImage: notice.systemImage,
@@ -44,9 +51,12 @@ struct ClusterOverviewView: View {
                     diagnosticSummary: "\(notice.commandHint)\n\(notice.diagnostics)",
                     retry: { viewModel.refreshOverview() }
                 )
+                .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.16), value: expandedCard)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isRefreshingOverview)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.overviewNotice != nil)
     }
 
     /// Namespaces/Nodes/Pods/Events navigate straight to their screen. API and
