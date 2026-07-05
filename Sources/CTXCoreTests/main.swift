@@ -113,6 +113,62 @@ func testKubeConfigDiscoverySingleFile() throws {
     assert(result.contexts[0].isCurrent)
 }
 
+func testKubeConfigDiscoveryHandlesNameAfterNestedClusterOrContextKey() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-name-after-nested-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // `aws eks update-kubeconfig` and merged kubeconfigs (Rancher Desktop, etc.)
+    // write list items as "- cluster:" / "- context:" first, with `name:` as a
+    // later sibling key — not "- name:" as the item's opening line. A parser
+    // that only treats "- name:" as a new-item boundary silently drops every
+    // item after the first and corrupts the one it does keep by mixing the
+    // first item's name with the last item's fields.
+    let path = dir.appendingPathComponent("config")
+    let raw = """
+    apiVersion: v1
+    clusters:
+    - cluster:
+        server: https://alpha.example.com
+      name: alpha-cluster
+    - cluster:
+        server: https://beta.example.com
+      name: beta-cluster
+    contexts:
+    - context:
+        cluster: alpha-cluster
+        user: alpha-user
+      name: alpha
+    - context:
+        cluster: beta-cluster
+        user: beta-user
+        namespace: apps
+      name: beta
+    current-context: beta
+    """
+    try raw.write(to: path, atomically: true, encoding: .utf8)
+
+    let service = KubeConfigDiscoveryService(environment: { [:] }, customPath: { nil })
+    let result = service.discover(paths: [path])
+
+    assert(result.errors.isEmpty)
+    assert(result.currentContext == "beta")
+    assert(result.contexts.count == 2, "both contexts must be discovered, not just the first or a merged one")
+
+    let alpha = result.contexts.first { $0.contextName == "alpha" }
+    assert(alpha?.clusterName == "alpha-cluster")
+    assert(alpha?.userName == "alpha-user")
+    assert(alpha?.clusterMetadata.serverURL == "https://alpha.example.com", "alpha's own cluster server must not leak from beta's")
+    assert(alpha?.isCurrent == false)
+
+    let beta = result.contexts.first { $0.contextName == "beta" }
+    assert(beta?.clusterName == "beta-cluster")
+    assert(beta?.userName == "beta-user")
+    assert(beta?.namespace == "apps")
+    assert(beta?.clusterMetadata.serverURL == "https://beta.example.com")
+    assert(beta?.isCurrent == true)
+}
+
 func testKubeConfigDiscoveryUsesKubeconfigMultipath() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-multipath-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2217,6 +2273,7 @@ testKubernetesContextProfileMapsToCloudProfile()
 testEnvironmentDetection()
 testKubernetesProviderDetection()
 try testKubeConfigDiscoverySingleFile()
+try testKubeConfigDiscoveryHandlesNameAfterNestedClusterOrContextKey()
 try testKubeConfigDiscoveryUsesKubeconfigMultipath()
 try testKubeConfigDiscoveryCustomPathOverridesKubeconfig()
 try testKubeConfigDiscoveryDeduplicatesContextNames()

@@ -162,14 +162,25 @@ public final class KubeConfigDiscoveryService: Sendable {
                     section = ""
                     continue
                 }
+                // A top-level "- " line always starts a new list item under
+                // contexts:/clusters:, whichever key leads it — `aws eks
+                // update-kubeconfig` and merged kubeconfigs write "- cluster:"
+                // or "- context:" first and put `name:` on a later sibling
+                // line, not "- name:" as the opening key. Flushing here (rather
+                // than only when the opener happens to be "- name:") is what
+                // makes both orderings parse correctly.
+                switch section {
+                case "contexts": commitContext()
+                case "clusters": commitCluster()
+                default: break
+                }
             }
 
             switch section {
             case "contexts":
                 if trimmed.hasPrefix("- name:") {
-                    commitContext()
                     currentContextName = value(after: "- name:", in: trimmed)
-                } else if trimmed.hasPrefix("name:"), currentContextName.isEmpty {
+                } else if trimmed.hasPrefix("name:") {
                     currentContextName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("cluster:") {
                     currentCluster = value(after: "cluster:", in: trimmed)
@@ -180,9 +191,8 @@ public final class KubeConfigDiscoveryService: Sendable {
                 }
             case "clusters":
                 if trimmed.hasPrefix("- name:") {
-                    commitCluster()
                     currentClusterName = value(after: "- name:", in: trimmed)
-                } else if trimmed.hasPrefix("name:"), currentClusterName.isEmpty {
+                } else if trimmed.hasPrefix("name:") {
                     currentClusterName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("server:") {
                     currentServer = value(after: "server:", in: trimmed)
