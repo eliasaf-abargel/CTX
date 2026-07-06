@@ -53,6 +53,11 @@ struct ClusterWorkspaceContent: View {
                 .onChange(of: viewModel.selectedSection) { _, _ in
                     proxy.scrollTo(Self.topAnchorID, anchor: .top)
                 }
+                .onAppear {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    }
+                }
             }
         }
         .sheet(item: $viewModel.presentation) { presentation in

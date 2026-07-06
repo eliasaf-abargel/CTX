@@ -162,33 +162,6 @@ struct CTXEnvironmentBadge: View {
     }
 }
 
-struct CTXProductionWarningBanner: View {
-    var contextName: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 15, weight: .bold))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Production context")
-                    .font(.system(size: 13, weight: .bold))
-                Text("\(contextName) is shown in inspection mode. Destructive controls are not available.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 12)
-        }
-        .foregroundStyle(.orange)
-        .padding(14)
-        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.orange.opacity(0.28), lineWidth: 1)
-        }
-    }
-}
-
 /// Small icon-only reload button. Shows a smooth continuous 360° spin while
 /// `isLoading`, then a brief green checkmark when the action just fired —
 /// same visual language as `CTXCopyIconButton`. Not keyboard-focusable.

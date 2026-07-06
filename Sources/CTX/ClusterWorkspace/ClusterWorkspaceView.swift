@@ -36,6 +36,7 @@ struct ClusterWorkspaceView: View {
     var body: some View {
         NavigationSplitView {
             ClusterWorkspaceSidebar(viewModel: viewModel)
+                .navigationTitle("Cluster")
                 .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 310)
         } detail: {
             VStack(spacing: 0) {
@@ -50,6 +51,7 @@ struct ClusterWorkspaceView: View {
                 ClusterWorkspaceContent(viewModel: viewModel)
             }
             .background(.background)
+            .navigationTitle(viewModel.title)
         }
         .frame(minWidth: 980, minHeight: 660)
         .task {
@@ -74,10 +76,6 @@ struct ClusterWorkspaceHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if viewModel.isProduction {
-                CTXProductionWarningBanner(contextName: viewModel.context.contextName)
-            }
-
             ViewThatFits(in: .horizontal) {
                 horizontalHeader
                 compactHeader
@@ -150,7 +148,9 @@ struct ClusterWorkspaceHeader: View {
     private var metadataBadges: some View {
         CTXStatusBadge(title: viewModel.context.providerType.label, systemImage: "cloud", tint: viewModel.context.providerType.tint)
         ClusterNamespaceSelector(viewModel: viewModel)
-        CTXStatusBadge(title: viewModel.userName, systemImage: "person.crop.circle", tint: .secondary)
+        CTXStatusBadge(title: viewModel.displayUserName, systemImage: "person.crop.circle", tint: .secondary)
+            .frame(maxWidth: 240)
+            .help(viewModel.userName)
     }
 
     private var statusBlock: some View {

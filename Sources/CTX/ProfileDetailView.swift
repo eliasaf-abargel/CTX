@@ -13,10 +13,6 @@ struct ProfileDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
-                if CloudEnvironment.infer(from: profile) == .production {
-                    CTXProductionWarningBanner(contextName: profile.name)
-                }
-
                 HStack(alignment: .center, spacing: 16) {
                         ProviderIcon(
                             provider: profile.provider,

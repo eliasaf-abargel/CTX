@@ -137,6 +137,16 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         context.userName.isEmpty ? "Unknown user" : context.userName
     }
 
+    var displayUserName: String {
+        let name = userName
+        if name.hasPrefix("arn:aws:") {
+            if let last = name.split(separator: "/").last {
+                return String(last)
+            }
+        }
+        return name
+    }
+
     var isProduction: Bool {
         context.environmentType == .production
     }

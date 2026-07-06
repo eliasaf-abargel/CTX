@@ -71,7 +71,9 @@ struct ClusterWorkspaceSidebar: View {
                     proxy.scrollTo(newValue)
                 }
                 .onAppear {
-                    proxy.scrollTo(viewModel.selectedSection)
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(viewModel.selectedSection)
+                    }
                 }
             }
 
@@ -92,7 +94,7 @@ private struct ClusterWorkspaceSidebarFooter: View {
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(viewModel.userName)
+                Text(viewModel.displayUserName)
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
