@@ -383,6 +383,11 @@ struct CTXResourceCard: View {
             withAnimation(.easeOut(duration: 0.15)) {
                 isHovered = hovering
             }
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
         }
         .help([title, value, subtitle].filter { !$0.isEmpty }.joined(separator: " · "))
     }

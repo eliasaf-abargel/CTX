@@ -55,6 +55,7 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
     public var environmentDetection: EnvironmentDetectionResult
     public var isCurrent: Bool
     public var clusterMetadata: ClusterMetadata
+    public var token: String
 
     public init(
         contextName: String,
@@ -65,7 +66,8 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         providerType: KubernetesProviderType = .unknown,
         environmentDetection: EnvironmentDetectionResult = EnvironmentDetectionResult(type: .unknown, confidence: 0, source: "none"),
         isCurrent: Bool = false,
-        clusterMetadata: ClusterMetadata? = nil
+        clusterMetadata: ClusterMetadata? = nil,
+        token: String = ""
     ) {
         self.contextName = contextName
         self.clusterName = clusterName
@@ -77,5 +79,6 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         self.environmentDetection = environmentDetection
         self.isCurrent = isCurrent
         self.clusterMetadata = clusterMetadata ?? ClusterMetadata(id: clusterName.isEmpty ? contextName : clusterName, name: clusterName, serverURL: "")
+        self.token = token
     }
 }

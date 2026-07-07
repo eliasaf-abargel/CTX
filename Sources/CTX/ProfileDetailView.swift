@@ -17,7 +17,7 @@ struct ProfileDetailView: View {
                         ProviderIcon(
                             provider: profile.provider,
                             size: 34,
-                            fallbackTint: store.isActive(profile) ? Color.accentColor : profile.status.color
+                            fallbackTint: store.isActive(profile) ? Color.accentColor : currentProfile.status.color
                         )
                         .padding(14)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -81,14 +81,18 @@ struct ProfileDetailView: View {
                             }
                             .ctxHeaderButton()
                             
-                            if profile.status.isBusy {
-                                Text(profile.status.rawValue)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .lineLimit(1)
-                                    .frame(height: 34)
-                                    .padding(.horizontal, 14)
-                                    .foregroundStyle(.secondary)
-                                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            if currentProfile.status.isBusy {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text(currentProfile.status.rawValue + "...")
+                                }
+                                .font(.system(size: 13, weight: .medium))
+                                .lineLimit(1)
+                                .frame(height: 34)
+                                .padding(.horizontal, 14)
+                                .foregroundStyle(.secondary)
+                                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             } else if canDisconnect {
                                 Button(role: .destructive) {
                                     store.logout(profile)
@@ -180,6 +184,31 @@ struct ProfileDetailView: View {
                     }
                     .padding(.bottom, 8)
 
+                    if let errorMessage = store.verificationErrors[profile.id] {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text("Connection Issue")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.primary)
+                            }
+                            Text(errorMessage)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(6)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                        }
+                    }
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("SESSION")
                             .font(.system(size: 11, weight: .bold))
@@ -195,7 +224,7 @@ struct ProfileDetailView: View {
                                 Spacer()
                                 HStack(spacing: 6) {
                                     Circle()
-                                        .fill(connectionIsActive ? Color.green : profile.status.color)
+                                        .fill(connectionIsActive ? Color.green : currentProfile.status.color)
                                         .frame(width: 6, height: 6)
                                     Text(statusText)
                                         .fontWeight(.medium)
@@ -448,28 +477,36 @@ struct ProfileDetailView: View {
     }
 }
 
+    private var currentProfile: CloudProfile {
+        store.profiles.first(where: { $0.id == profile.id }) ?? profile
+    }
+
     private var statusText: String {
         if profile.provider == .kubernetes {
-            return store.isActive(profile) ? "Connected" : "Inactive"
+            if store.isActive(profile) {
+                return currentProfile.status == .connected ? "Connected" : currentProfile.status.rawValue
+            } else {
+                return "Inactive"
+            }
         }
-        switch profile.status {
+        switch currentProfile.status {
         case .unknown:
             return "Not Checked"
         default:
-            return profile.status.rawValue
+            return currentProfile.status.rawValue
         }
     }
 
     private var connectionIsActive: Bool {
-        profile.provider == .kubernetes ? store.isActive(profile) : profile.status == .connected
+        profile.provider == .kubernetes ? (store.isActive(profile) && currentProfile.status == .connected) : currentProfile.status == .connected
     }
 
     private var canDisconnect: Bool {
-        profile.provider == .kubernetes ? store.isActive(profile) : profile.status == .connected
+        profile.provider == .kubernetes ? store.isActive(profile) : currentProfile.status == .connected
     }
 
     private var canOpenWorkspace: Bool {
-        profile.provider == .kubernetes && store.isActive(profile)
+        profile.provider == .kubernetes && store.isActive(profile) && currentProfile.status == .connected
     }
 
     private var kubernetesContext: KubernetesContextProfile? {

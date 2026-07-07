@@ -77,6 +77,7 @@ struct ClusterResourceListView: View {
         VStack(alignment: .leading, spacing: 10) {
             CTXSectionHeader(title: section.rawValue, subtitle: subtitle)
             CTXSearchField(placeholder: "Filter", text: $filter)
+                .frame(width: 230)
                 .help("Filter loaded \(section.rawValue.lowercased()). This does not run kubectl.")
         }
     }

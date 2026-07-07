@@ -15,6 +15,19 @@ public final class ClusterHealthService: ClusterHealthChecking {
 
     public func overview(for context: KubernetesContextProfile) async -> KubernetesOverviewSummary {
         let apiResult = await runRead(step: "verify_kubectl", kind: "API", context: context, arguments: ["version", "--request-timeout=\(Int(timeout))s", "--output=json"])
+        
+        guard !Task.isCancelled else {
+            return KubernetesOverviewSummary(
+                apiStatus: .notChecked,
+                rbac: blockedRBAC(status: .notChecked),
+                namespaces: KubernetesNamespacesSummary(count: nil, activeNamespace: namespace(from: context), status: .notChecked),
+                nodes: KubernetesNodesSummary(total: nil, ready: nil, notReady: nil, status: .notChecked),
+                pods: KubernetesPodsSummary(total: nil, running: 0, pending: 0, failed: 0, crashLoopBackOff: 0, failing: 0, status: .notChecked),
+                events: KubernetesEventsSummary(warningCount: nil, status: .notChecked),
+                diagnostics: [apiResult.diagnostic]
+            )
+        }
+
         guard apiResult.status == .reachable else {
             return KubernetesOverviewSummary(
                 apiStatus: apiResult.status,
@@ -59,23 +72,44 @@ public final class ClusterHealthService: ClusterHealthChecking {
 
     private func loadRBAC(context: KubernetesContextProfile) async -> SummaryResult<[KubernetesPermissionSummary]> {
         let resources = Array(KubernetesRBACResource.allCases)
+        let concurrencyLimit = 2
         let results = await withTaskGroup(of: (Int, KubernetesPermissionSummary, KubernetesCommandDiagnostic).self) { group in
-            for (index, resource) in resources.enumerated() {
-                group.addTask {
-                    var arguments = ["auth", "can-i", "list", resource.kubectlResource]
-                    if resource.allNamespaces {
-                        arguments.append("--all-namespaces")
+            var collected: [(Int, KubernetesPermissionSummary, KubernetesCommandDiagnostic)] = []
+            var iterator = resources.enumerated().makeIterator()
+            
+            for _ in 0..<concurrencyLimit {
+                if let next = iterator.next() {
+                    group.addTask {
+                        let (index, resource) = next
+                        var arguments = ["auth", "can-i", "list", resource.kubectlResource]
+                        if resource.allNamespaces {
+                            arguments.append("--all-namespaces")
+                        }
+                        let result = await self.runRead(step: "cluster_health", kind: "RBAC \(resource.label)", context: context, arguments: arguments)
+                        let answer = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        let allowed = answer == "yes" ? true : answer == "no" ? false : nil
+                        let summary = KubernetesPermissionSummary(resource: resource.label, allowed: allowed, status: allowed == nil ? result.status : allowed == true ? .reachable : .permissionDenied)
+                        return (index, summary, result.diagnostic)
                     }
-                    let result = await self.runRead(step: "cluster_health", kind: "RBAC \(resource.label)", context: context, arguments: arguments)
-                    let answer = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    let allowed = answer == "yes" ? true : answer == "no" ? false : nil
-                    let summary = KubernetesPermissionSummary(resource: resource.label, allowed: allowed, status: allowed == nil ? result.status : allowed == true ? .reachable : .permissionDenied)
-                    return (index, summary, result.diagnostic)
                 }
             }
-            var collected: [(Int, KubernetesPermissionSummary, KubernetesCommandDiagnostic)] = []
-            for await entry in group {
+            
+            while let entry = await group.next() {
                 collected.append(entry)
+                if let next = iterator.next() {
+                    group.addTask {
+                        let (index, resource) = next
+                        var arguments = ["auth", "can-i", "list", resource.kubectlResource]
+                        if resource.allNamespaces {
+                            arguments.append("--all-namespaces")
+                        }
+                        let result = await self.runRead(step: "cluster_health", kind: "RBAC \(resource.label)", context: context, arguments: arguments)
+                        let answer = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        let allowed = answer == "yes" ? true : answer == "no" ? false : nil
+                        let summary = KubernetesPermissionSummary(resource: resource.label, allowed: allowed, status: allowed == nil ? result.status : allowed == true ? .reachable : .permissionDenied)
+                        return (index, summary, result.diagnostic)
+                    }
+                }
             }
             return collected.sorted { $0.0 < $1.0 }
         }

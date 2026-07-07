@@ -31,6 +31,7 @@ public final class ProfileStore: ObservableObject {
     @Published public private(set) var hiddenFolderIDs: Set<String> = []
     @Published public var showExpirationWarning = false
     @Published public var connectionErrorMessage: String? = nil
+    @Published public var verificationErrors: [String: String] = [:]
     /// Set right after a profile/context is created outside of any folder context
     /// (e.g. via the sidebar's global "+" button) so the UI can ask which folder it
     /// belongs in, instead of silently leaving it in the generic default folder.
@@ -232,7 +233,14 @@ public final class ProfileStore: ObservableObject {
             UserDefaults.standard.set(discovered.currentKubeContext, forKey: "activeKubeContext")
         }
 
-        profiles = discovered.profiles
+        let oldProfiles = profiles
+        var mergedProfiles = discovered.profiles
+        for i in 0..<mergedProfiles.count {
+            if let old = oldProfiles.first(where: { $0.id == mergedProfiles[i].id }) {
+                mergedProfiles[i].status = old.status
+            }
+        }
+        profiles = mergedProfiles
 
         // Only auto-detect active GCP profile if the user hasn't manually disconnected.
         if !gcpManuallyClearedByUser {
@@ -277,9 +285,15 @@ public final class ProfileStore: ObservableObject {
         selectedSelection = .profile(profile.id)
         switch profile.provider {
         case .aws:
+            let wasActive = activeAWSProfile == profile.name
             activeAWSProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
             lastMessage = "Active AWS_PROFILE=\(profile.name)"
+            
+            if wasActive && profile.status == .connected {
+                checkAllSessionsExpiration()
+                return
+            }
             
             do {
                 try awsCredentials.syncDefaultProfile(from: profile.name)
@@ -289,12 +303,14 @@ public final class ProfileStore: ObservableObject {
             
             checkAllSessionsExpiration()
         case .gcp:
+            let wasActive = activeGCPProfile == profile.name
             gcpManuallyClearedByUser = false   // user is explicitly choosing a profile
             UserDefaults.standard.set(false, forKey: "gcpManuallyClearedByUser")
             activeGCPProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeGCPProfile")
             lastMessage = "Active GCP configuration=\(profile.name)"
             guard runActivation else { return }
+            if wasActive && profile.status == .connected { return }
             
             Task {
                 let startedAt = Date()
@@ -308,10 +324,12 @@ public final class ProfileStore: ObservableObject {
                 await verify(profile)
             }
         case .azure:
+            let wasActive = activeAzureProfile == profile.name
             activeAzureProfile = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeAzureProfile")
             lastMessage = "Active Azure subscription=\(profile.name)"
             guard runActivation else { return }
+            if wasActive && profile.status == .connected { return }
 
             Task {
                 let startedAt = Date()
@@ -325,10 +343,12 @@ public final class ProfileStore: ObservableObject {
                 await verify(profile)
             }
         case .kubernetes:
+            let wasActive = activeKubeContext == profile.name
             activeKubeContext = profile.name
             UserDefaults.standard.set(profile.name, forKey: "activeKubeContext")
             lastMessage = "Active kube context=\(profile.name)"
             guard runActivation else { return }
+            if wasActive && profile.status == .connected { return }
 
             Task {
                 let startedAt = Date()
@@ -532,7 +552,9 @@ public final class ProfileStore: ObservableObject {
             // The cost of an always-correct redundant `use-context` on a manual
             // button click is negligible.
             setActive(profile)
-            return
+            if profile.roleName != "sdm-" + "user" {
+                return
+            }
         }
 
         setActive(profile, runActivation: false)
@@ -545,7 +567,7 @@ public final class ProfileStore: ObservableObject {
             }
             return
         }
-        if profile.provider != .kubernetes {
+        if profile.provider != .kubernetes || profile.roleName == "sdm-" + "user" {
             updateStatus(profile, status: .connecting)
         }
         
@@ -593,7 +615,28 @@ public final class ProfileStore: ObservableObject {
                     connectionErrorMessage = result.output
                 }
             case .kubernetes:
-                lastMessage = "Kubernetes context \(profile.name) selected"
+                if profile.roleName == "sdm-" + "user" {
+                    lastMessage = "Connecting to StrongDM for \(profile.name)..."
+                    var sdmEmail = profile.token
+                    if sdmEmail.isEmpty {
+                        sdmEmail = profiles.first(where: { $0.roleName.contains("@") })?.roleName ?? ""
+                    }
+                    if sdmEmail.isEmpty && activeIdentityLabel.contains("@") {
+                        sdmEmail = activeIdentityLabel
+                    }
+                    let result = await profileCommands.login(profile, email: sdmEmail)
+                    lastCommandDuration = Date().timeIntervalSince(startedAt)
+                    logConnectCall(step: "app_connect", kind: "sdm", profileID: profile.id, started: startedAt, outcome: result.exitCode == 0 ? "success" : "failure")
+                    if result.exitCode == 0 {
+                        lastLoginAt = Date()
+                        lastMessage = "StrongDM connection successful"
+                    } else {
+                        lastMessage = result.output
+                        connectionErrorMessage = result.output
+                    }
+                } else {
+                    lastMessage = "Kubernetes context \(profile.name) selected"
+                }
             }
             await verify(profile)
         }
@@ -639,9 +682,16 @@ public final class ProfileStore: ObservableObject {
                 clearActive(for: .kubernetes)
             }
             let logoutKubeconfigPath = kubeconfigPath(for: profile.name)
+            if profile.roleName == "sdm-" + "user" {
+                updateStatus(profile, status: .disconnecting)
+            }
             Task {
                 lastMessage = "Cleared current kube context"
                 _ = await kubeConfigMutations.clearCurrentContext(kubeconfigPath: logoutKubeconfigPath)
+                if profile.roleName == "sdm-" + "user" {
+                    lastMessage = "Disconnecting StrongDM resource \(profile.name)..."
+                    _ = await profileCommands.logout(profile)
+                }
                 refresh()
             }
         }
@@ -658,6 +708,7 @@ public final class ProfileStore: ObservableObject {
         let oldStatus = profiles.first(where: { $0.id == profile.id })?.status ?? .unknown
         
         if isConnected {
+            verificationErrors[profile.id] = nil
             lastVerifiedAt = Date()
             if profile.provider == .aws {
                 if profile.name == activeAWSProfile,
@@ -698,10 +749,17 @@ public final class ProfileStore: ObservableObject {
         let newStatus: ProfileStatus
         if isConnected {
             newStatus = .connected
+            verificationErrors[profile.id] = nil
         } else if profile.provider == .kubernetes {
             newStatus = .unknown
+            if result.exitCode != 99 {
+                verificationErrors[profile.id] = result.output
+            } else {
+                verificationErrors[profile.id] = nil
+            }
         } else {
             newStatus = status(for: result)
+            verificationErrors[profile.id] = result.output
         }
         
         updateStatus(profile, status: newStatus)
@@ -998,10 +1056,23 @@ public final class ProfileStore: ObservableObject {
 
     public func verifyAllProfiles() {
         Task {
+            let concurrencyLimit = 3
             await withTaskGroup(of: Void.self) { group in
-                for profile in profiles {
-                    group.addTask {
-                        await self.verify(profile)
+                var iterator = profiles.makeIterator()
+                
+                for _ in 0..<concurrencyLimit {
+                    if let profile = iterator.next() {
+                        group.addTask {
+                            await self.verify(profile)
+                        }
+                    }
+                }
+                
+                while let _ = await group.next() {
+                    if let nextProfile = iterator.next() {
+                        group.addTask {
+                            await self.verify(nextProfile)
+                        }
                     }
                 }
             }

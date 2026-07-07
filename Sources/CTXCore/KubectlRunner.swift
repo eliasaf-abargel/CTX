@@ -93,7 +93,9 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
             let timedOut = TimeoutFlag()
-            processBox.set(process)
+            guard processBox.set(process) else {
+                throw CancellationError()
+            }
 
             process.executableURL = URL(fileURLWithPath: command.executablePath)
             process.arguments = command.arguments
@@ -288,11 +290,16 @@ private final class KubectlStartedProcess: KubectlProcessHandling, @unchecked Se
 private final class ProcessBox: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
+    private var isCancelled = false
 
-    func set(_ process: Process) {
+    func set(_ process: Process) -> Bool {
         lock.lock()
+        defer { lock.unlock() }
+        if isCancelled {
+            return false
+        }
         self.process = process
-        lock.unlock()
+        return true
     }
 
     func clear() {
@@ -303,7 +310,8 @@ private final class ProcessBox: @unchecked Sendable {
 
     func terminate() {
         lock.lock()
-        let process = process
+        isCancelled = true
+        let process = self.process
         lock.unlock()
         if process?.isRunning == true {
             process?.terminate()

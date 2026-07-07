@@ -228,6 +228,13 @@ struct SidebarView: View {
                 }
             }
         }
+        .onChange(of: store.selectedSelection) { _, newValue in
+            if case .profile(let profileID) = newValue,
+               let profile = store.profiles.first(where: { $0.id == profileID }) {
+                let folder = store.folder(for: profile)
+                expandedGroups.insert(folder.id)
+            }
+        }
     }
 
     private func openNewProfile() {
@@ -329,8 +336,9 @@ struct SidebarProfileRow: View {
                     .fill(Color.green)
                     .frame(width: 6, height: 6)
             } else if profile.status.isBusy {
-                Circle()
-                    .fill(profile.status.color)
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.6)
                     .frame(width: 6, height: 6)
             } else if profile.status == .needsLogin {
                 Circle()

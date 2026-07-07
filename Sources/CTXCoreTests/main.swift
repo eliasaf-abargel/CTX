@@ -1578,6 +1578,64 @@ func testProfileCommandServiceRedactsFailedOutput() async {
     assert(!result.output.contains("demo-token"))
 }
 
+func testProfileCommandServiceStrongDMLoginAndVerify() async {
+    actor CustomCommandRunner: CloudCommandRunning {
+        private var commands: [[String]] = []
+        private var results: [CommandResult] = []
+
+        func setResults(_ results: [CommandResult]) {
+            self.results = results
+        }
+
+        func allCommands() -> [[String]] {
+            commands
+        }
+
+        func run(_ arguments: [String]) async -> CommandResult {
+            commands.append(arguments)
+            if !results.isEmpty {
+                return results.removeFirst()
+            }
+            return CommandResult(exitCode: 0, output: "")
+        }
+    }
+
+    let runner = CustomCommandRunner()
+    await runner.setResults([
+        CommandResult(exitCode: 0, output: ""), // sdm ready for verify
+        CommandResult(exitCode: 0, output: "sdm-context"), // kubectl get-contexts
+        CommandResult(exitCode: 1, output: "not ready"), // sdm ready for login
+        CommandResult(exitCode: 0, output: "login success"), // sdm login
+        CommandResult(exitCode: 0, output: "connect success"), // sdm connect
+        CommandResult(exitCode: 0, output: "disconnect success") // sdm disconnect
+    ])
+
+    let service = ProfileCommandService(runner: runner)
+    let sdmKube = CloudProfile(provider: .kubernetes, name: "sdm-context", roleName: "sdm-" + "user")
+
+    // Test verify when ready succeeds (exit code 0)
+    let verifyResult = await service.verify(sdmKube, activeKubeContext: "sdm-context")
+    assert(verifyResult.exitCode == 0)
+
+    // Test login when ready fails (exit code 1), so login and connect run
+    let loginResult = await service.login(sdmKube)
+    assert(loginResult.exitCode == 0)
+
+    // Test logout
+    let logoutResult = await service.logout(sdmKube)
+    assert(logoutResult.exitCode == 0)
+
+    let commands = await runner.allCommands()
+    assert(commands == [
+        ["sdm", "ready"],
+        ["kubectl", "config", "get-contexts", "sdm-context", "--output", "name"],
+        ["sdm", "ready"],
+        ["sdm", "login"],
+        ["sdm", "connect", "sdm-context"],
+        ["sdm", "disconnect", "sdm-context"]
+    ])
+}
+
 func testCTXUpdateServiceParsesReleaseAndComparesVersions() throws {
     let data = try JSONSerialization.data(withJSONObject: ["tag_name": "v1.2.3"])
 
@@ -2351,6 +2409,7 @@ try await testKubeConfigMutationServiceUpdateClearsNamespaceWhenEmpty()
 await testKubeConfigMutationServiceRedactsSensitiveFailureOutput()
 await testProfileCommandServiceBuildsProviderCommands()
 await testProfileCommandServiceRedactsFailedOutput()
+await testProfileCommandServiceStrongDMLoginAndVerify()
 try testCTXUpdateServiceParsesReleaseAndComparesVersions()
 try testAWSSessionExpirationServicePrefersCredentialsExpiry()
 try testAWSCredentialServiceParsesIdentityAndCredentials()

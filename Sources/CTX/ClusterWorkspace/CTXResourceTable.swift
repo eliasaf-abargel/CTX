@@ -1,3 +1,4 @@
+import AppKit
 import CTXCore
 import SwiftUI
 
@@ -92,10 +93,15 @@ struct CTXResourceTable: View {
         .padding(.horizontal, rowHorizontalPadding)
         .padding(.vertical, 9)
         .contentShape(Rectangle())
-        .background(rowBackground(row), in: Rectangle())
+        .background(rowBackground(row, isHovered: isHovered), in: Rectangle())
         .onTapGesture { onSelect(row) }
         .onHover { hovering in
             hoveredRowID = hovering ? row.id : (hoveredRowID == row.id ? nil : hoveredRowID)
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
         }
     }
 
@@ -123,9 +129,12 @@ struct CTXResourceTable: View {
         .frame(width: width, alignment: column.alignment == .trailing ? .trailing : .leading)
     }
 
-    private func rowBackground(_ row: KubernetesResourceRow) -> Color {
+    private func rowBackground(_ row: KubernetesResourceRow, isHovered: Bool) -> Color {
         if row.id == selectedRowID {
             return Color.accentColor.opacity(0.14)
+        }
+        if isHovered {
+            return Color.primary.opacity(0.04)
         }
         if row.warning {
             return Color.orange.opacity(0.035)

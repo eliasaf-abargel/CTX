@@ -39,6 +39,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
     public var region: String
     public var ssoStartURL: String
     public var ssoRegion: String
+    public var token: String
     public var status: ProfileStatus
 
     public init(
@@ -49,6 +50,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         region: String = "",
         ssoStartURL: String = "",
         ssoRegion: String = "",
+        token: String = "",
         status: ProfileStatus = .unknown
     ) {
         self.provider = provider
@@ -58,6 +60,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         self.region = region
         self.ssoStartURL = ssoStartURL
         self.ssoRegion = ssoRegion
+        self.token = token
         self.status = status
     }
 

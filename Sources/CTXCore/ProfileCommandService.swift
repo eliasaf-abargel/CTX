@@ -16,7 +16,7 @@ public final class ProfileCommandService: Sendable {
         return await run(["az", "account", "set", "--subscription", target])
     }
 
-    public func login(_ profile: CloudProfile) async -> CommandResult {
+    public func login(_ profile: CloudProfile, email: String? = nil) async -> CommandResult {
         switch profile.provider {
         case .aws:
             return await run(["aws", "sso", "login", "--profile", profile.name])
@@ -29,6 +29,25 @@ public final class ProfileCommandService: Sendable {
             }
             return await run(args)
         case .kubernetes:
+            if profile.roleName == "sdm-" + "user" {
+                setenv("SDM_APP_DOMAIN", "app.strongdm.com", 1)
+                if let email = email, !email.isEmpty {
+                    setenv("SDM_EMAIL", email, 1)
+                }
+                defer {
+                    unsetenv("SDM_APP_DOMAIN")
+                    unsetenv("SDM_EMAIL")
+                }
+
+                let readyResult = await run(["sdm", "ready"])
+                if readyResult.exitCode != 0 {
+                    let loginResult = await run(["sdm", "login"])
+                    guard loginResult.exitCode == 0 else {
+                        return loginResult
+                    }
+                }
+                return await run(["sdm", "connect", profile.name])
+            }
             return CommandResult(exitCode: 0, output: "")
         }
     }
@@ -52,6 +71,9 @@ public final class ProfileCommandService: Sendable {
         case .azure:
             return await run(["az", "logout"])
         case .kubernetes:
+            if profile.roleName == "sdm-" + "user" {
+                return await run(["sdm", "disconnect", profile.name])
+            }
             return CommandResult(exitCode: 0, output: "")
         }
     }
@@ -77,6 +99,24 @@ public final class ProfileCommandService: Sendable {
                 "--output", "json"
             ])
         case .kubernetes:
+            if profile.roleName == "sdm-" + "user" {
+                setenv("SDM_APP_DOMAIN", "app.strongdm.com", 1)
+                defer {
+                    unsetenv("SDM_APP_DOMAIN")
+                }
+                var ready = false
+                for _ in 0..<15 {
+                    let readyResult = await run(["sdm", "ready"])
+                    if readyResult.exitCode == 0 {
+                        ready = true
+                        break
+                    }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                if !ready {
+                    return CommandResult(exitCode: 1, output: "StrongDM is not logged in or ready")
+                }
+            }
             guard profile.name == activeKubeContext else {
                 return CommandResult(exitCode: 99, output: "Not active context")
             }

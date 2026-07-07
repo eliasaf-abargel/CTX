@@ -1,3 +1,4 @@
+import AppKit
 import CTXCore
 import SwiftUI
 
@@ -380,9 +381,11 @@ struct FolderProfileRow: View {
                             }
                         }
                     } else if profile.status.isBusy {
-                        HStack(spacing: 3) {
-                            Image(systemName: profile.status.systemImage)
-                                .font(.system(size: 7, weight: .bold))
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.5)
+                                .frame(width: 8, height: 8)
                             Text(profile.status.rawValue)
                                 .font(.system(size: 9, weight: .bold))
                         }
@@ -416,9 +419,15 @@ struct FolderProfileRow: View {
 
             HStack(spacing: 8) {
                 if profile.status.isBusy {
-                    Button(profile.status.rawValue) {}
-                        .buttonStyle(CTXSecondaryButton())
-                        .disabled(true)
+                    Button {} label: {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(profile.status.rawValue + "...")
+                        }
+                    }
+                    .buttonStyle(CTXSecondaryButton())
+                    .disabled(true)
                 } else if profile.status == .connected {
                     Button("Disconnect") {
                         store.logout(profile)
@@ -520,41 +529,51 @@ private struct ActiveConnectionRow: View {
     let profile: CloudProfile
     let expiresAt: Date?
     @ObservedObject var store: ProfileStore
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(Color.green)
-                .frame(width: 6, height: 6)
-                .shadow(color: .green.opacity(0.45), radius: 3)
+            Button {
+                store.selectedSelection = .profile(profile.id)
+            } label: {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 6, height: 6)
+                        .shadow(color: .green.opacity(0.45), radius: 3)
 
-            Text(profile.provider.compactName)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(profile.provider.tint)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(profile.provider.tint.opacity(0.12), in: Capsule())
+                    Text(profile.provider.compactName)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(profile.provider.tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(profile.provider.tint.opacity(0.12), in: Capsule())
 
-            Text(profile.name)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
+                    Text(profile.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
 
-            if !profile.contextSubtitle.isEmpty {
-                Text("·")
-                    .foregroundStyle(.secondary)
-                Text(profile.contextSubtitle)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    if !profile.contextSubtitle.isEmpty {
+                        Text("·")
+                            .foregroundStyle(.secondary)
+                        Text(profile.contextSubtitle)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    if let expiresAt, expiresAt > Date() {
+                        Spacer(minLength: 8)
+                        SessionCountdownView(expiresAt: expiresAt, tintColor: profile.provider.tint, fontSize: 11)
+                    }
+                    
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
-
-            if let expiresAt, expiresAt > Date() {
-                Spacer(minLength: 8)
-                SessionCountdownView(expiresAt: expiresAt, tintColor: profile.provider.tint, fontSize: 11)
-            }
-
-            Spacer()
+            .buttonStyle(.plain)
+            .help("Navigate to profile details")
 
             Button {
                 store.logout(profile)
@@ -568,10 +587,20 @@ private struct ActiveConnectionRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.secondary.opacity(isHovering ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(.separator.opacity(0.15), lineWidth: 0.5)
+        }
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovering = hovering
+            }
+            if hovering {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
         }
     }
 }

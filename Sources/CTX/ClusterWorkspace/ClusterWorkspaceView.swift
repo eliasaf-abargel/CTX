@@ -76,10 +76,7 @@ struct ClusterWorkspaceHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ViewThatFits(in: .horizontal) {
-                horizontalHeader
-                compactHeader
-            }
+            horizontalHeader
         }
     }
 
@@ -103,17 +100,6 @@ struct ClusterWorkspaceHeader: View {
                 .layoutPriority(1)
             Spacer(minLength: 18)
             statusBlock
-        }
-    }
-
-    private var compactHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 14) {
-                clusterIcon
-                titleBlock
-                    .layoutPriority(1)
-            }
-            statusRow
         }
     }
 
@@ -149,7 +135,6 @@ struct ClusterWorkspaceHeader: View {
         CTXStatusBadge(title: viewModel.context.providerType.label, systemImage: "cloud", tint: viewModel.context.providerType.tint)
         ClusterNamespaceSelector(viewModel: viewModel)
         CTXStatusBadge(title: viewModel.displayUserName, systemImage: "person.crop.circle", tint: .secondary)
-            .frame(maxWidth: 240)
             .help(viewModel.userName)
     }
 
@@ -163,12 +148,6 @@ struct ClusterWorkspaceHeader: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
-    private var statusRow: some View {
-        HStack(spacing: 10) {
-            ClusterWorkspaceHealthMenu(viewModel: viewModel)
-            refreshButton
-        }
-    }
 
     private var refreshButton: some View {
         Button {

@@ -21,6 +21,7 @@ struct ClusterNamespaceSelector: View {
                 Text(viewModel.namespace)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .frame(maxWidth: 140)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.tertiary)
@@ -29,7 +30,6 @@ struct ClusterNamespaceSelector: View {
             .foregroundStyle(.blue)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
-            .frame(maxWidth: 190, alignment: .leading)
             .background(.blue.opacity(0.11), in: Capsule())
             .overlay {
                 Capsule().stroke(.blue.opacity(0.24), lineWidth: 0.75)

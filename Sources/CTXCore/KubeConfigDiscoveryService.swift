@@ -99,6 +99,7 @@ public final class KubeConfigDiscoveryService: Sendable {
         var currentContext = ""
         var contexts: [String: KubeContextRecord] = [:]
         var clusters: [String: String] = [:]
+        var users: [String: String] = [:]
 
         var section = ""
         var currentContextName = ""
@@ -107,6 +108,8 @@ public final class KubeConfigDiscoveryService: Sendable {
         var currentNamespace = ""
         var currentClusterName = ""
         var currentServer = ""
+        var currentUserName = ""
+        var currentUserToken = ""
 
         func commitContext() {
             guard !currentContextName.isEmpty else { return }
@@ -129,6 +132,13 @@ public final class KubeConfigDiscoveryService: Sendable {
             currentServer = ""
         }
 
+        func commitUser() {
+            guard !currentUserName.isEmpty else { return }
+            users[currentUserName] = currentUserToken
+            currentUserName = ""
+            currentUserToken = ""
+        }
+
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
             let indent = raw.prefix(while: { $0 == " " }).count
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -140,6 +150,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                 if trimmed.hasPrefix("current-context:") {
                     commitContext()
                     commitCluster()
+                    commitUser()
                     currentContext = value(after: "current-context:", in: trimmed)
                     section = ""
                     continue
@@ -147,31 +158,37 @@ public final class KubeConfigDiscoveryService: Sendable {
                 if trimmed == "contexts:" {
                     commitContext()
                     commitCluster()
+                    commitUser()
                     section = "contexts"
                     continue
                 }
                 if trimmed == "clusters:" {
                     commitContext()
                     commitCluster()
+                    commitUser()
                     section = "clusters"
+                    continue
+                }
+                if trimmed == "users:" {
+                    commitContext()
+                    commitCluster()
+                    commitUser()
+                    section = "users"
                     continue
                 }
                 if !trimmed.hasPrefix("-") {
                     commitContext()
                     commitCluster()
+                    commitUser()
                     section = ""
                     continue
                 }
                 // A top-level "- " line always starts a new list item under
-                // contexts:/clusters:, whichever key leads it — `aws eks
-                // update-kubeconfig` and merged kubeconfigs write "- cluster:"
-                // or "- context:" first and put `name:` on a later sibling
-                // line, not "- name:" as the opening key. Flushing here (rather
-                // than only when the opener happens to be "- name:") is what
-                // makes both orderings parse correctly.
+                // contexts:/clusters:, whichever key leads it
                 switch section {
                 case "contexts": commitContext()
                 case "clusters": commitCluster()
+                case "users": commitUser()
                 default: break
                 }
             }
@@ -197,6 +214,16 @@ public final class KubeConfigDiscoveryService: Sendable {
                 } else if trimmed.hasPrefix("server:") {
                     currentServer = value(after: "server:", in: trimmed)
                 }
+            case "users":
+                if trimmed.hasPrefix("- name:") {
+                    commitUser()
+                    currentUserName = value(after: "- name:", in: trimmed)
+                } else if trimmed.hasPrefix("name:") {
+                    commitUser()
+                    currentUserName = value(after: "name:", in: trimmed)
+                } else if trimmed.hasPrefix("token:") {
+                    currentUserToken = value(after: "token:", in: trimmed)
+                }
             default:
                 continue
             }
@@ -204,6 +231,7 @@ public final class KubeConfigDiscoveryService: Sendable {
 
         commitContext()
         commitCluster()
+        commitUser()
 
         let profiles = contexts.values.map { record in
             let server = clusters[record.cluster] ?? ""
@@ -222,7 +250,8 @@ public final class KubeConfigDiscoveryService: Sendable {
                 providerType: provider,
                 environmentDetection: environment,
                 isCurrent: record.name == currentContext,
-                clusterMetadata: ClusterMetadata(id: record.cluster.isEmpty ? record.name : record.cluster, name: record.cluster, serverURL: server)
+                clusterMetadata: ClusterMetadata(id: record.cluster.isEmpty ? record.name : record.cluster, name: record.cluster, serverURL: server),
+                token: users[record.user] ?? ""
             )
         }
 

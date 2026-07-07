@@ -24,7 +24,7 @@ extension EnvironmentType {
 
     var systemImage: String {
         switch self {
-        case .production: "exclamationmark.triangle.fill"
+        case .production: "lock.fill"
         case .staging: "clock.badge"
         case .development: "hammer.fill"
         case .admin: "person.badge.key.fill"

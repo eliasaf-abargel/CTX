@@ -74,7 +74,6 @@ struct AddKubeContextView: View {
                 Section("Context Settings") {
                     TextField("Context Name:", text: $name, prompt: Text("e.g. dev-k8s"))
                         .textFieldStyle(.roundedBorder)
-                        .disabled(isEditing)
                     
                     TextField("Namespace:", text: $namespace, prompt: Text("e.g. default (optional)"))
                         .textFieldStyle(.roundedBorder)
@@ -182,12 +181,6 @@ struct AddKubeContextView: View {
         }
     }
 
-    private var isEditing: Bool {
-        if case .edit = mode {
-            return true
-        }
-        return false
-    }
 
     private var awsProfiles: [CloudProfile] {
         store.profiles
