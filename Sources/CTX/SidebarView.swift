@@ -92,11 +92,7 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(.separator.opacity(0.1), lineWidth: 0.5)
-            }
+            .ctxGlassCard(cornerRadius: 6)
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .padding(.bottom, 6)
@@ -117,6 +113,7 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             
             Divider()
                 .padding(.horizontal, 12)
@@ -137,9 +134,9 @@ struct SidebarView: View {
                     Text(store.activeIdentityLabel)
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
-                    Text("Identity Connected")
+                    Text(store.activeIdentityStatusLabel)
                         .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(identityStatusColor)
                 }
                 
                 Spacer()
@@ -235,6 +232,16 @@ struct SidebarView: View {
                 expandedGroups.insert(folder.id)
             }
         }
+    }
+
+    private var identityStatusColor: Color {
+        if store.isCloudIdentityActive {
+            return .secondary
+        }
+        if !store.activeAWSProfile.isEmpty || !store.activeGCPProfile.isEmpty || !store.activeAzureProfile.isEmpty || !store.activeKubeContext.isEmpty {
+            return .orange
+        }
+        return .secondary
     }
 
     private func openNewProfile() {

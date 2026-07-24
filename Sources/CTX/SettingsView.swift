@@ -57,11 +57,7 @@ struct SettingsView: View {
                         countString: "\(store.profiles.filter { $0.provider == .kubernetes }.count) contexts"
                     )
                 }
-                .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(.separator.opacity(0.15), lineWidth: 0.5)
-                }
+                .ctxGlassCard(cornerRadius: 12)
                 .padding(.horizontal, 16)
                 
                 HStack {
@@ -146,6 +142,7 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.inset)
+            .scrollContentBackground(.hidden)
             .tabItem {
                 Label("Folders", systemImage: "folder")
             }
@@ -157,7 +154,8 @@ struct SettingsView: View {
                     LabeledContent("Name", value: "CTX")
                     LabeledContent("Version", value: appVersion)
                     LabeledContent("Runtime", value: "Native macOS")
-                    LabeledContent("Signed in as", value: store.activeIdentityLabel)
+                    LabeledContent("Active Identity", value: store.activeIdentityLabel)
+                    LabeledContent("Identity Status", value: store.activeIdentityStatusLabel)
                     
                     if store.updateAvailable {
                         LabeledContent("New Version") {
@@ -200,14 +198,21 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .tabItem {
                 Label("About", systemImage: "info.circle")
             }
             .tag(2)
         }
         .id(store.selectedSettingsTab)
-        .scenePadding()
-        .frame(width: 540, height: 380)
+        .frame(width: 580, height: 420)
+        .background(
+            ZStack {
+                Color(red: 0.12, green: 0.14, blue: 0.18)
+                VisualEffectBackground(material: .sidebar, blendingMode: .withinWindow)
+            }
+            .ignoresSafeArea()
+        )
 
         .sheet(item: $localSheet) { item in
             switch item {

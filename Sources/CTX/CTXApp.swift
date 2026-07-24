@@ -17,18 +17,20 @@ struct CTXApp: App {
                     appDelegate.store = store
                 }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 980, height: 620)
 
         WindowGroup("Cluster Workspace", id: "cluster-workspace", for: String.self) { $contextID in
             ClusterWorkspaceScene(store: store, contextID: contextID ?? "")
-                .frame(minWidth: 980, minHeight: 660)
+                .frame(minWidth: 840, minHeight: 560)
         }
-        .defaultSize(width: 1120, height: 740)
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1180, height: 780)
 
         MenuBarExtra {
             MenuBarView(store: store)
         } label: {
-            Image(systemName: (store.activeAWSProfile.isEmpty && store.activeGCPProfile.isEmpty && store.activeAzureProfile.isEmpty && store.activeKubeContext.isEmpty) ? "cloud" : "cloud.fill")
+            Image(systemName: store.hasActiveConnectedProfile ? "cloud.fill" : "cloud")
         }
         .menuBarExtraStyle(.window)
 
@@ -50,7 +52,7 @@ struct CTXApp: App {
                     .keyboardShortcut("l", modifiers: [.command, .shift])
 
                     Button("Verify Selected Profile") {
-                        Task { await store.verify(profile) }
+                        Task { await store.verify(profile, isManualAttempt: true) }
                     }
                     .keyboardShortcut("v", modifiers: [.command, .shift])
                 }
@@ -66,8 +68,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            if let window = notification.object as? NSWindow {
+                self?.configureWindow(window)
+            }
+        }
+        
+        for window in NSApp.windows {
+            configureWindow(window)
+        }
+
         if Bundle.main.bundleURL.pathExtension == "app" {
             UNUserNotificationCenter.current().delegate = self
+        }
+    }
+
+    private func configureWindow(_ window: NSWindow) {
+        guard window.styleMask.contains(.titled) else { return }
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = .clear
+        
+        if #available(macOS 11.0, *) {
+            window.titlebarSeparatorStyle = .none
         }
     }
 

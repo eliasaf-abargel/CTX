@@ -105,12 +105,7 @@ struct CTXGlassPanel<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(.separator.opacity(0.28), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.08), radius: 14, y: 7)
+            .ctxGlassCard(cornerRadius: 14)
     }
 }
 
@@ -627,5 +622,44 @@ struct CTXStateView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, minHeight: 150)
+    }
+}
+
+/// Behind-window vibrancy so the desktop background shows through the content area (blurred).
+public struct VisualEffectBackground: NSViewRepresentable {
+    public var material: NSVisualEffectView.Material = .hudWindow
+    public var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    public init(material: NSVisualEffectView.Material = .hudWindow, blendingMode: NSVisualEffectView.BlendingMode = .behindWindow) {
+        self.material = material
+        self.blendingMode = blendingMode
+    }
+
+    public func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = blendingMode
+        view.state = .active
+        view.material = material
+        return view
+    }
+
+    public func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.blendingMode = blendingMode
+        view.material = material
+    }
+}
+
+public extension View {
+    func ctxGlassCard(cornerRadius: CGFloat = 14) -> some View {
+        self.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.primary.opacity(0.015))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(.separator.opacity(0.24), lineWidth: 0.75)
+            }
+            .shadow(color: .black.opacity(0.04), radius: 10, y: 5)
     }
 }

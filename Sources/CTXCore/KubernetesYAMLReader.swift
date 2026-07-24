@@ -80,6 +80,7 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
         case .namespaces: "namespace"
         case .nodes: "node"
         case .pods: "pod"
+        case .cronJobs: "cronjob"
         case .services: "service"
         case .ingress: "ingress"
         case .events: "event"

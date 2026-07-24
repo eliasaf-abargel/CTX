@@ -16,7 +16,7 @@ struct ClusterWorkspaceContent: View {
                             ClusterOverviewView(viewModel: viewModel)
                         case .secrets:
                             resourceList
-                        case .namespaces, .nodes, .workloads, .pods, .services, .ingress, .configMaps, .events:
+                        case .namespaces, .nodes, .workloads, .pods, .cronjobs, .services, .ingress, .configMaps, .events, .gitops, .helm:
                             resourceList
                         case .logs:
                             ClusterLogsView(viewModel: viewModel)
@@ -31,7 +31,7 @@ struct ClusterWorkspaceContent: View {
                         }
                     }
                     .padding(22)
-                    .frame(width: min(geometry.size.width, contentMaxWidth), alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .id(Self.topAnchorID)
                 }
                 // The whole switch shares ONE ScrollView, so its scroll offset was
@@ -51,10 +51,12 @@ struct ClusterWorkspaceContent: View {
                 // switch, which incidentally wiped Exports' in-progress bulk-export
                 // selection every time you left and came back to it.
                 .onChange(of: viewModel.selectedSection) { _, _ in
-                    proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    withTransaction(Transaction(animation: nil)) {
+                        proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    }
                 }
                 .onAppear {
-                    DispatchQueue.main.async {
+                    withTransaction(Transaction(animation: nil)) {
                         proxy.scrollTo(Self.topAnchorID, anchor: .top)
                     }
                 }
@@ -74,6 +76,7 @@ struct ClusterWorkspaceContent: View {
             refreshError: viewModel.refreshError(for: viewModel.selectedSection),
             selectedRow: viewModel.selectedResource(for: viewModel.selectedSection),
             showsNamespaceColumn: showsNamespaceColumn,
+            showIssuesOnly: viewModel.showIssuesOnly,
             loadIfNeeded: { viewModel.loadSelectedSection(bypassCache: false) },
             refresh: { viewModel.loadSelectedSection(bypassCache: true) },
             selectRow: { viewModel.selectResource($0, in: viewModel.selectedSection) }

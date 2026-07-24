@@ -22,21 +22,11 @@ struct CTXResourceInspector: View {
     }
 
     private var widthRange: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
-        switch activeTab {
-        case .overview:
-            return (480, 560, 680)
-        case .yaml, .logs:
-            return (760, 960, 1400)
-        }
+        (800, 920, 1400)
     }
 
     private var heightRange: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
-        switch activeTab {
-        case .overview:
-            return (360, 480, 720)
-        case .yaml, .logs:
-            return (480, 560, 920)
-        }
+        (540, 680, 1000)
     }
 
     var body: some View {
@@ -103,11 +93,14 @@ struct CTXResourceInspectorHeader: View {
                 .frame(width: 28, height: 28)
                 .background((detail.warning ? Color.orange : Color.blue).opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(detail.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(detail.title)
+                HStack(spacing: 6) {
+                    Text(detail.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(detail.title)
+                    CTXCopyIconButton(value: detail.title)
+                }
                 Text(detail.subtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

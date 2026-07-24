@@ -228,7 +228,7 @@ public final class ProfileStore: ObservableObject {
 
     private func apply(_ discovered: LocalProfileDiscoveryResult, runVerification: Bool) {
         kubernetesContexts = discovered.kubernetesContexts
-        if !discovered.currentKubeContext.isEmpty {
+        if activeKubeContext != discovered.currentKubeContext {
             activeKubeContext = discovered.currentKubeContext
             UserDefaults.standard.set(discovered.currentKubeContext, forKey: "activeKubeContext")
         }
@@ -245,7 +245,7 @@ public final class ProfileStore: ObservableObject {
         // Only auto-detect active GCP profile if the user hasn't manually disconnected.
         if !gcpManuallyClearedByUser {
             let activeGCPName = discovered.activeGCPProfile
-            if !activeGCPName.isEmpty {
+            if activeGCPProfile != activeGCPName {
                 activeGCPProfile = activeGCPName
                 UserDefaults.standard.set(activeGCPName, forKey: "activeGCPProfile")
             }
@@ -437,6 +437,56 @@ public final class ProfileStore: ObservableObject {
         return String(base.prefix(2)).uppercased()
     }
 
+    public var hasActiveConnectedProfile: Bool {
+        profiles.contains { profile in
+            isActive(profile) && profile.status == .connected
+        }
+    }
+
+    public var isCloudIdentityActive: Bool {
+        if !activeAWSProfile.isEmpty,
+           let aws = profiles.first(where: { $0.provider == .aws && $0.name == activeAWSProfile }),
+           aws.status == .connected {
+            return true
+        }
+        if !activeGCPProfile.isEmpty,
+           let gcp = profiles.first(where: { $0.provider == .gcp && $0.name == activeGCPProfile }),
+           gcp.status == .connected {
+            return true
+        }
+        if !activeAzureProfile.isEmpty,
+           let azure = profiles.first(where: { $0.provider == .azure && $0.name == activeAzureProfile }),
+           azure.status == .connected {
+            return true
+        }
+        if !activeKubeContext.isEmpty,
+           let kube = profiles.first(where: { $0.provider == .kubernetes && $0.name == activeKubeContext }),
+           kube.status == .connected {
+            return true
+        }
+        return false
+    }
+
+    public var activeIdentityStatusLabel: String {
+        if !activeAWSProfile.isEmpty,
+           let aws = profiles.first(where: { $0.provider == .aws && $0.name == activeAWSProfile }) {
+            return aws.status == .connected ? "AWS Connected" : "AWS (\(aws.status.rawValue))"
+        }
+        if !activeGCPProfile.isEmpty,
+           let gcp = profiles.first(where: { $0.provider == .gcp && $0.name == activeGCPProfile }) {
+            return gcp.status == .connected ? "GCP Connected" : "GCP (\(gcp.status.rawValue))"
+        }
+        if !activeAzureProfile.isEmpty,
+           let azure = profiles.first(where: { $0.provider == .azure && $0.name == activeAzureProfile }) {
+            return azure.status == .connected ? "Azure Connected" : "Azure (\(azure.status.rawValue))"
+        }
+        if !activeKubeContext.isEmpty,
+           let kube = profiles.first(where: { $0.provider == .kubernetes && $0.name == activeKubeContext }) {
+            return kube.status == .connected ? "K8s Connected" : "K8s (\(kube.status.rawValue))"
+        }
+        return "Local User"
+    }
+
     /// The kubeconfig file a mutation for `contextName` should target: the file it
     /// was actually discovered in if it already exists (contexts can live in any of
     /// several merged `KUBECONFIG` paths), otherwise the primary configured path —
@@ -534,6 +584,7 @@ public final class ProfileStore: ObservableObject {
     }
 
     public func login(_ profile: CloudProfile) {
+        verificationErrors[profile.id] = nil
         // Kubernetes has no login step distinct from "switch to this context" — route
         // straight through setActive's real `kubectl config use-context` call instead
         // of the SSO-login machinery below. Previously this fell through to the
@@ -563,7 +614,7 @@ public final class ProfileStore: ObservableObject {
         if let freshProfile = profiles.first(where: { $0.id == profile.id }),
            freshProfile.status == .connected {
             Task {
-                await verify(freshProfile)
+                await verify(freshProfile, isManualAttempt: true)
             }
             return
         }
@@ -638,7 +689,7 @@ public final class ProfileStore: ObservableObject {
                     lastMessage = "Kubernetes context \(profile.name) selected"
                 }
             }
-            await verify(profile)
+            await verify(profile, isManualAttempt: true)
         }
     }
 
@@ -697,7 +748,7 @@ public final class ProfileStore: ObservableObject {
         }
     }
 
-    public func verify(_ profile: CloudProfile) async {
+    public func verify(_ profile: CloudProfile, isManualAttempt: Bool = false) async {
         let startedAt = Date()
         let result = await profileCommands.verify(profile, activeKubeContext: activeKubeContext)
         lastCommandDuration = Date().timeIntervalSince(startedAt)
@@ -735,7 +786,7 @@ public final class ProfileStore: ObservableObject {
                     if activeName.isEmpty || activeName == profile.name {
                         setActive(profile)
                     } else if let activeProf = profiles.first(where: { $0.provider == profile.provider && $0.name == activeName }),
-                              activeProf.status != .connected {
+                               activeProf.status != .connected {
                         if case .profile(let pId) = selectedSelection, profile.id == pId {
                             setActive(profile)
                         }
@@ -750,16 +801,26 @@ public final class ProfileStore: ObservableObject {
         if isConnected {
             newStatus = .connected
             verificationErrors[profile.id] = nil
-        } else if profile.provider == .kubernetes {
-            newStatus = .unknown
-            if result.exitCode != 99 {
-                verificationErrors[profile.id] = result.output
-            } else {
-                verificationErrors[profile.id] = nil
-            }
         } else {
-            newStatus = status(for: result)
-            verificationErrors[profile.id] = result.output
+            // isConnected is false
+            if profile.provider == .aws && profile.name == activeAWSProfile {
+                awsIdentity = ""
+            }
+            if profile.provider == .kubernetes {
+                newStatus = .unknown
+                if isManualAttempt && result.exitCode != 99 {
+                    verificationErrors[profile.id] = result.output
+                } else {
+                    verificationErrors[profile.id] = nil
+                }
+            } else {
+                newStatus = status(for: result)
+                if isManualAttempt {
+                    verificationErrors[profile.id] = result.output
+                } else {
+                    verificationErrors[profile.id] = nil
+                }
+            }
         }
         
         updateStatus(profile, status: newStatus)
@@ -1093,8 +1154,13 @@ public final class ProfileStore: ObservableObject {
             guard let expiresAt = snapshot.expiryByProfileName[profile.name] else { continue }
             let timeLeft = expiresAt.timeIntervalSince(now)
 
-            if timeLeft <= 0, profile.status == .connected {
-                updateStatus(profile, status: .needsLogin)
+            if timeLeft <= 0 {
+                if profile.status == .connected {
+                    updateStatus(profile, status: .needsLogin)
+                }
+                if profile.name == activeAWSProfile {
+                    awsIdentity = ""
+                }
             }
 
             if profile.name == activeAWSProfile {

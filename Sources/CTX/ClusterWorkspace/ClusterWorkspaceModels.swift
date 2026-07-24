@@ -7,11 +7,14 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case nodes = "Nodes"
     case workloads = "Workloads"
     case pods = "Pods"
+    case cronjobs = "CronJobs"
     case services = "Services"
     case ingress = "Ingress"
     case configMaps = "ConfigMaps"
     case secrets = "Secrets"
     case events = "Events"
+    case gitops = "GitOps"
+    case helm = "Helm"
     case topology = "Map"
     case logs = "Logs"
     case exports = "Exports"
@@ -27,11 +30,14 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .nodes: "server.rack"
         case .workloads: "shippingbox"
         case .pods: "circle.grid.3x3"
+        case .cronjobs: "clock.arrow.2.circlepath"
         case .services: "point.3.connected.trianglepath.dotted"
         case .ingress: "arrow.triangle.branch"
         case .configMaps: "doc.text"
         case .secrets: "lock.doc"
         case .events: "waveform.path.ecg"
+        case .gitops: "arrow.triangle.pull"
+        case .helm: "shippingbox.circle"
         case .topology: "point.topleft.down.to.point.bottomright.curvepath"
         case .logs: "text.alignleft"
         case .exports: "square.and.arrow.down"
@@ -50,6 +56,7 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .nodes: .nodes
         case .workloads: .workloads
         case .pods: .pods
+        case .cronjobs: .cronJobs
         case .services: .services
         case .ingress: .ingress
         case .configMaps: .configMaps

@@ -46,13 +46,43 @@ struct ClusterDiffView: View {
         ClusterWorkspaceSection.allCases.filter { $0.resourceKind != nil }
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            CTXSectionHeader(title: "Diff", subtitle: "Compare the last loaded snapshot against a fresh inspection refresh. Nothing is changed on the cluster.")
+    @State private var diffMode: DiffMode = .crossContext
 
-            VStack(spacing: 10) {
-                ForEach(sections) { section in
-                    diffRow(section)
+    enum DiffMode: String, CaseIterable, Identifiable {
+        case crossContext = "Cross-Context Drift (Multi-Cluster)"
+        case snapshot = "Snapshot Diff"
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                CTXSectionHeader(title: "Diff & Drift Engine", subtitle: "Multi-cluster configuration drift and snapshot comparison")
+                Spacer()
+                Picker("", selection: $diffMode) {
+                    ForEach(DiffMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            ResourceSummaryPanel(
+                title: "Configuration Drift Inspection",
+                detail: "Comparing live resource specifications across contexts and snapshots",
+                badgeTitle: "Drift Engine",
+                systemImage: "arrow.left.arrow.right",
+                tint: .purple
+            )
+
+            if diffMode == .crossContext {
+                MultiClusterDriftView(viewModel: viewModel)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(sections) { section in
+                        diffRow(section)
+                    }
                 }
             }
         }

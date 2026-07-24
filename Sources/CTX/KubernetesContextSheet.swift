@@ -29,6 +29,7 @@ struct KubernetesContextSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .frame(height: 160)
 
             HStack {

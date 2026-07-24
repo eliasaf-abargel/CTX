@@ -1389,6 +1389,7 @@ func testInspectionYAMLAvailabilityMatrix() {
         .namespaces: true,
         .nodes: true,
         .pods: true,
+        .cronJobs: true,
         .services: true,
         .ingress: true,
         .events: true,

@@ -68,7 +68,7 @@ struct CTXInspectorYAMLTab: View {
                     CTXReloadIconButton(action: {
                         viewModel.loadYAMLForFocusedResource()
                     }, isLoading: viewModel.isLoadingYAML)
-                    CTXCopyIconButton(value: yaml)
+                    CTXCopyIconButton(value: Self.cleanYAML(from: yaml))
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -133,5 +133,31 @@ struct CTXInspectorYAMLTab: View {
                 }
             }
         }
+    }
+
+    private static func cleanYAML(from yaml: String) -> String {
+        let lines = yaml.components(separatedBy: .newlines)
+        var inManagedFields = false
+        var cleanLines: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("managedFields:") {
+                inManagedFields = true
+                continue
+            }
+            if inManagedFields {
+                if line.prefix(while: { $0 == " " }).count <= 2 && !trimmed.hasPrefix("-") && !trimmed.isEmpty {
+                    inManagedFields = false
+                } else {
+                    continue
+                }
+            }
+            if trimmed.hasPrefix("resourceVersion:") || trimmed.hasPrefix("uid:") || trimmed.hasPrefix("generation:") || trimmed.hasPrefix("creationTimestamp:") {
+                continue
+            }
+            cleanLines.append(line)
+        }
+        return cleanLines.joined(separator: "\n")
     }
 }

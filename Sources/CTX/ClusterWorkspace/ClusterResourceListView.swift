@@ -9,6 +9,7 @@ struct ClusterResourceListView: View {
     let refreshError: KubernetesCommandDiagnostic?
     let selectedRow: KubernetesResourceRow?
     let showsNamespaceColumn: Bool
+    let showIssuesOnly: Bool
     let loadIfNeeded: () -> Void
     let refresh: () -> Void
     let selectRow: (KubernetesResourceRow) -> Void
@@ -16,8 +17,30 @@ struct ClusterResourceListView: View {
     @State private var filter = ""
 
     private var rows: [KubernetesResourceRow] {
-        guard !filter.isEmpty else { return list?.rows ?? [] }
-        return (list?.rows ?? []).filter { $0.matchesFilter(filter) }
+        let baseRows = list?.rows ?? []
+        let issueFiltered = showIssuesOnly ? baseRows.filter { row in
+            if row.warning { return true }
+            let status = (row.cells["Status"] ?? row.cells["Ready"] ?? "").lowercased()
+            return status.contains("crash") || status.contains("error") || status.contains("fail") || status.contains("pending") || status.contains("notready")
+        } : baseRows
+        guard !filter.isEmpty else { return issueFiltered }
+        return issueFiltered.filter { $0.matchesFilter(filter) }
+    }
+
+    private var visibleRows: [KubernetesResourceRow] {
+        Array(rows.prefix(500))
+    }
+
+    private var emptyTitle: String {
+        if showIssuesOnly { return "No Issues Found" }
+        return filter.isEmpty ? "No \(section.rawValue)" : "No matching \(section.rawValue.lowercased())"
+    }
+
+    private var emptyMessage: String {
+        if showIssuesOnly {
+            return "No resources with warnings or errors were found in this scope. Toggle off 'Issues Only' to view all items."
+        }
+        return filter.isEmpty ? "There are no \(section.rawValue.lowercased()) in the selected namespace scope." : "No \(section.rawValue.lowercased()) match '\(filter)'."
     }
 
     var body: some View {
@@ -46,15 +69,19 @@ struct ClusterResourceListView: View {
                     CTXGlassPanel {
                         CTXEmptyStateView(title: emptyTitle, message: emptyMessage, systemImage: section.systemImage)
                     }
-                } else if let kind = section.resourceKind {
-                    CTXResourceTable(kind: kind, rows: rows, selectedRowID: selectedRow?.id, showsNamespaceColumn: showsNamespaceColumn, onSelect: selectRow)
+                } else {
+                    if rows.count > 500 {
+                        Text("Showing top 500 of \(rows.count) \(section.rawValue.lowercased()). Use search filter to refine.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                    }
+                    CTXResourceTable(section: section, rows: visibleRows, selectedRowID: selectedRow?.id, showsNamespaceColumn: showsNamespaceColumn, onSelect: selectRow)
                 }
             }
         }
         .onAppear(perform: loadIfNeeded)
-        .animation(.easeInOut(duration: 0.16), value: isLoading)
-        .animation(.easeInOut(duration: 0.16), value: rows.count)
-        .animation(.easeInOut(duration: 0.16), value: selectedRow?.id)
+        .animation(.easeInOut(duration: 0.12), value: isLoading)
     }
 
     private var subtitle: String {
@@ -159,10 +186,40 @@ struct ClusterResourceListView: View {
                     systemImage: section.systemImage,
                     tint: .indigo
                 )
+            case .cronjobs:
+                ResourceSummaryPanel(
+                    title: "CronJobs Schedule",
+                    detail: "\(rows.count) automated scheduled jobs configured in this scope",
+                    badgeTitle: countTitle(rows.count, noun: "cronjob"),
+                    systemImage: section.systemImage,
+                    tint: .orange
+                )
+            case .gitops:
+                ResourceSummaryPanel(
+                    title: "GitOps Continuous Delivery",
+                    detail: "\(rows.count) ArgoCD & Flux CD applications synced",
+                    badgeTitle: countTitle(rows.count, noun: "app"),
+                    systemImage: section.systemImage,
+                    tint: .indigo
+                )
+            case .helm:
+                ResourceSummaryPanel(
+                    title: "Helm Releases",
+                    detail: "\(rows.count) deployed helm chart releases",
+                    badgeTitle: countTitle(rows.count, noun: "release"),
+                    systemImage: section.systemImage,
+                    tint: .cyan
+                )
             case .events:
                 EventSummaryPanel(summary: KubernetesEventsSummary.summarize(rows: rows, status: list.status), eventCount: rows.count)
             default:
-                EmptyView()
+                ResourceSummaryPanel(
+                    title: section.rawValue,
+                    detail: "\(rows.count) items loaded",
+                    badgeTitle: countTitle(rows.count, noun: "item"),
+                    systemImage: section.systemImage,
+                    tint: .blue
+                )
             }
         }
     }
@@ -170,17 +227,9 @@ struct ClusterResourceListView: View {
     private func countTitle(_ count: Int, noun: String) -> String {
         count == 1 ? "1 \(noun)" : "\(count) \(noun)s"
     }
-
-    private var emptyTitle: String {
-        filter.isEmpty ? "No resources" : "No matches"
-    }
-
-    private var emptyMessage: String {
-        filter.isEmpty ? "No \(section.rawValue.lowercased()) in \(scopeTitle)." : "No loaded rows match this filter."
-    }
 }
 
-private struct ResourceSummaryPanel: View {
+struct ResourceSummaryPanel: View {
     let title: String
     let detail: String
     let badgeTitle: String

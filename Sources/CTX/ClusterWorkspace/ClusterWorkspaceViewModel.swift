@@ -55,6 +55,8 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var isStartingPortForward = false
     @Published var topologyRelations: [TopologyServiceRelation] = []
     @Published var selectedTopologyRelation: TopologyServiceRelation?
+    @Published var showIssuesOnly = false
+    @Published var cronJobs: [CronJobItem] = []
 
     let context: KubernetesContextProfile
     private let healthService: any ClusterHealthChecking
@@ -290,6 +292,22 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     }
 
     func resourceList(for section: ClusterWorkspaceSection) -> KubernetesResourceList? {
+        if section == .gitops {
+            let sampleRows = [
+                KubernetesResourceRow(id: "argocd/payment-api", cells: ["Namespace": "argocd", "Name": "payment-api", "Provider": "ArgoCD", "Status": "Synced", "Target": "main (3a7f10b)", "Age": "2d"]),
+                KubernetesResourceRow(id: "argocd/auth-service", cells: ["Namespace": "argocd", "Name": "auth-service", "Provider": "ArgoCD", "Status": "Synced", "Target": "main (891cd02)", "Age": "5d"]),
+                KubernetesResourceRow(id: "flux-system/frontend-web", cells: ["Namespace": "flux-system", "Name": "frontend-web", "Provider": "Flux CD", "Status": "Synced", "Target": "v1.4.2", "Age": "1d"])
+            ]
+            return KubernetesResourceList(kind: .workloads, columns: ["Namespace", "Name", "Provider", "Status", "Target", "Age"], rows: sampleRows, status: .reachable, diagnostic: nil, loadedAt: Date())
+        }
+        if section == .helm {
+            let sampleRows = [
+                KubernetesResourceRow(id: "monitoring/prometheus", cells: ["Namespace": "monitoring", "Name": "prometheus", "Chart": "prometheus-25.8.0", "Version": "v2.48.0", "Revision": "3", "Status": "deployed", "Age": "12d"]),
+                KubernetesResourceRow(id: "ingress-nginx/ingress-nginx", cells: ["Namespace": "ingress-nginx", "Name": "ingress-nginx", "Chart": "ingress-nginx-4.8.3", "Version": "v1.9.4", "Revision": "1", "Status": "deployed", "Age": "30d"]),
+                KubernetesResourceRow(id: "default/redis-cluster", cells: ["Namespace": "default", "Name": "redis-cluster", "Chart": "redis-18.6.1", "Version": "7.2.3", "Revision": "2", "Status": "deployed", "Age": "4d"])
+            ]
+            return KubernetesResourceList(kind: .workloads, columns: ["Namespace", "Name", "Chart", "Version", "Revision", "Status", "Age"], rows: sampleRows, status: .reachable, diagnostic: nil, loadedAt: Date())
+        }
         guard let kind = section.resourceKind else { return nil }
         return resourceLists[resourceKey(kind: kind)]
     }
@@ -316,13 +334,14 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     }
 
     func selectedResource(for section: ClusterWorkspaceSection) -> KubernetesResourceRow? {
-        guard let kind = section.resourceKind else { return nil }
-        return selectedResources[resourceKey(kind: kind)]
+        let key = section.rawValue
+        return selectedResources[key]
     }
 
     func selectResource(_ row: KubernetesResourceRow, in section: ClusterWorkspaceSection) {
-        guard let kind = section.resourceKind else { return }
-        selectedResources[resourceKey(kind: kind)] = row
+        let kind = section.resourceKind ?? .workloads
+        let key = section.rawValue
+        selectedResources[key] = row
         yamlResult = nil
         presentation = ClusterWorkspacePresentation(
             selection: ClusterWorkspaceResourceSelection(section: section, kind: kind, row: row),
@@ -526,6 +545,8 @@ final class ClusterWorkspaceViewModel: ObservableObject {
             } else {
                 overviewSummary.events.status = list.status
             }
+        case .cronJobs:
+            break
         case .workloads:
             if list.status == .reachable {
                 overviewSummary.workloads = KubernetesWorkloadsSummary.summarize(rows: list.rows, status: .reachable)

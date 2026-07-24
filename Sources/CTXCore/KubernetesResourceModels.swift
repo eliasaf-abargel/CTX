@@ -43,6 +43,7 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
     case nodes
     case workloads
     case pods
+    case cronJobs
     case services
     case ingress
     case configMaps
@@ -53,6 +54,7 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
         switch self {
         case .configMaps: "ConfigMaps"
         case .secretMetadata: "Secrets"
+        case .cronJobs: "CronJobs"
         default: rawValue.prefix(1).uppercased() + rawValue.dropFirst()
         }
     }
@@ -67,6 +69,7 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
         case .nodes: "nodes"
         case .workloads: "deployments,statefulsets,daemonsets"
         case .pods: "pods"
+        case .cronJobs: "cronjobs"
         case .services: "services"
         case .ingress: "ingress"
         case .configMaps: "configmaps"
@@ -77,7 +80,7 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
 
     public var supportsInspectionYAML: Bool {
         switch self {
-        case .namespaces, .nodes, .pods, .services, .ingress, .events:
+        case .namespaces, .nodes, .pods, .cronJobs, .services, .ingress, .events:
             true
         case .workloads, .configMaps, .secretMetadata:
             false
@@ -90,6 +93,7 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
         case .nodes: "Node"
         case .workloads: "Workload"
         case .pods: "Pod"
+        case .cronJobs: "CronJob"
         case .services: "Service"
         case .ingress: "Ingress"
         case .configMaps: "ConfigMap"
@@ -314,6 +318,8 @@ public struct KubernetesResourceDetail: Equatable, Sendable {
             sections.append(Section(title: "Workload", fields: fields(row, ["Kind", "Ready", "Available"])))
         case .pods:
             sections.append(Section(title: "Pod", fields: fields(row, ["Status", "Ready", "Restarts", "Node"])))
+        case .cronJobs:
+            sections.append(Section(title: "CronJob", fields: fields(row, ["Schedule", "Suspend", "Active", "Last Schedule"])))
         case .services:
             sections.append(Section(title: "Service", fields: fields(row, ["Type", "Cluster IP", "External", "Ports"])))
         case .ingress:

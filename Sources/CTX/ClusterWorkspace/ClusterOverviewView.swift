@@ -13,6 +13,10 @@ struct ClusterOverviewView: View {
                 CTXLastUpdatedLabel(date: viewModel.lastRefreshed)
             }
 
+            ClusterTelemetryView(viewModel: viewModel)
+
+            healthScorePanel
+
             LazyVGrid(columns: cardColumns(minimum: 210), spacing: 12) {
                 ForEach(viewModel.overviewMetrics) { metric in
                     Button {
@@ -126,6 +130,43 @@ struct ClusterOverviewView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            }
+        }
+    }
+
+    private var healthScorePanel: some View {
+        let pods = viewModel.resourceList(for: .pods)?.rows ?? []
+        let workloads = viewModel.resourceList(for: .workloads)?.rows ?? []
+        let score = KubernetesRemediationAdvisor.calculateSecurityHealthScore(rows: pods + workloads)
+        let color: Color = score >= 85 ? .green : (score >= 60 ? .orange : .red)
+
+        return CTXGlassPanel(padding: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .stroke(color.opacity(0.2), lineWidth: 5)
+                        .frame(width: 44, height: 44)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(score) / 100.0)
+                        .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                        .frame(width: 44, height: 44)
+                        .rotationEffect(.degrees(-90))
+                    Text("\(score)%")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(color)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text("Workload Security & Reliability Score")
+                            .font(.system(size: 12, weight: .semibold))
+                        CTXStatusBadge(title: score >= 85 ? "Optimal" : "Attention Recommended", systemImage: "shield.checkered", tint: color)
+                    }
+                    Text("\(pods.count) pods & \(workloads.count) workloads analyzed for resource limits, security contexts, and container isolation.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
             }
         }
     }

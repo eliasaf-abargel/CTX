@@ -170,6 +170,7 @@ struct AddAWSProfileView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .frame(height: 380)
 
             // Error banner

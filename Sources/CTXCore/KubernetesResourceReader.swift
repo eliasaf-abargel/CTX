@@ -259,6 +259,7 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
         case .nodes: ["Name", "Ready", "Roles", "Version", "Age", "IP"]
         case .workloads: ["Namespace", "Kind", "Name", "Ready", "Available", "Age"]
         case .pods: ["Namespace", "Name", "Status", "Ready", "Restarts", "Age", "Node"]
+        case .cronJobs: ["Namespace", "Name", "Schedule", "Suspend", "Active", "Last Schedule", "Age"]
         case .services: ["Namespace", "Name", "Type", "Cluster IP", "External", "Ports", "Age"]
         case .ingress: ["Namespace", "Name", "Class", "Hosts", "TLS", "Address", "Age"]
         case .configMaps: ["Namespace", "Name", "Keys", "Age"]

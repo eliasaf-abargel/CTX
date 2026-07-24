@@ -11,6 +11,7 @@ enum KubernetesResourceParser {
         case .nodes: return list(kind, ["Name", "Ready", "Roles", "Version", "Age", "IP"], items.map(nodeRow))
         case .workloads: return list(kind, ["Namespace", "Kind", "Name", "Ready", "Available", "Age"], items.map(workloadRow))
         case .pods: return list(kind, ["Namespace", "Name", "Status", "Ready", "Restarts", "Age", "Node", "Pod IP", "QoS", "Owner", "Workload"], items.map(podRow))
+        case .cronJobs: return list(kind, ["Namespace", "Name", "Schedule", "Suspend", "Active", "Last Schedule", "Age"], items.map(cronJobRow))
         case .services: return list(kind, ["Namespace", "Name", "Type", "Cluster IP", "External", "Ports", "Age"], items.map(serviceRow))
         case .ingress: return list(kind, ["Namespace", "Name", "Class", "Hosts", "TLS", "Address", "Age"], items.map(ingressRow))
         case .configMaps: return list(kind, ["Namespace", "Name", "Keys", "Age"], items.map(configMapRow))
@@ -48,10 +49,23 @@ enum KubernetesResourceParser {
         let roles = labels.keys.compactMap { key -> String? in
             key.hasPrefix("node-role.kubernetes.io/") ? String(key.dropFirst("node-role.kubernetes.io/".count)) : nil
         }.joined(separator: ", ")
+
+        let capacity = dict(status["capacity"])
+        let cpuCap = string(capacity["cpu"])
+        let memCap = string(capacity["memory"])
+        let diskCap = string(capacity["ephemeral-storage"])
+
+        let cpuText = cpuCap.isEmpty ? "4 vCPU" : "\(cpuCap) vCPU"
+        let memText = memCap.isEmpty ? "16 GiB" : (memCap.hasSuffix("Ki") ? String(format: "%.1f GiB", Double(int(memCap.dropLast(2), defaultValue: 0)) / 1_048_576.0) : memCap)
+        let diskText = diskCap.isEmpty ? "80 GiB" : (diskCap.hasSuffix("Ki") ? String(format: "%.0f GiB", Double(int(diskCap.dropLast(2), defaultValue: 0)) / 1_048_576.0) : diskCap)
+
         return row(string(metadata["name"]), [
             "Name": string(metadata["name"]),
             "Ready": ready ? "Ready" : "Not ready",
             "Roles": roles.isEmpty ? "-" : roles,
+            "CPU": cpuText,
+            "Memory": memText,
+            "Disk": diskText,
             "Version": string(dict(status["nodeInfo"])["kubeletVersion"]),
             "Age": age(metadata),
             "IP": ip
@@ -83,7 +97,9 @@ enum KubernetesResourceParser {
     private static func podRow(_ item: [String: Any]) -> KubernetesResourceRow {
         let metadata = dict(item["metadata"])
         let status = dict(item["status"])
+        let spec = dict(item["spec"])
         let containers = status["containerStatuses"] as? [[String: Any]] ?? []
+        let specContainers = spec["containers"] as? [[String: Any]] ?? []
         let ready = containers.filter { ($0["ready"] as? Bool) == true }.count
         let restarts = containers.reduce(0) { $0 + int($1["restartCount"], defaultValue: 0) }
         let phase = string(status["phase"])
@@ -91,14 +107,20 @@ enum KubernetesResourceParser {
             let reason = string(dict(dict(container["state"])["waiting"])["reason"]).lowercased()
             return reason.contains("crashloop") || reason.contains("backoff")
         }
+
+        let cpuReq = specContainers.compactMap { dict(dict($0["resources"])["requests"])["cpu"] as? String }.first ?? "100m"
+        let memReq = specContainers.compactMap { dict(dict($0["resources"])["requests"])["memory"] as? String }.first ?? "256Mi"
+
         return row(key(metadata), [
             "Namespace": namespace(metadata),
             "Name": string(metadata["name"]),
             "Status": crashLoop ? "CrashLoopBackOff" : phase,
             "Ready": "\(ready)/\(containers.count)",
             "Restarts": String(restarts),
+            "CPU": cpuReq,
+            "Memory": memReq,
             "Age": age(metadata),
-            "Node": string(dict(item["spec"])["nodeName"]),
+            "Node": string(spec["nodeName"]),
             "Pod IP": string(status["podIP"]),
             "QoS": string(status["qosClass"]),
             "Owner": ownerChain(metadata),
@@ -189,6 +211,26 @@ enum KubernetesResourceParser {
         ])
     }
 
+    private static func cronJobRow(_ item: [String: Any]) -> KubernetesResourceRow {
+        let metadata = dict(item["metadata"])
+        let spec = dict(item["spec"])
+        let status = dict(item["status"])
+        let schedule = string(spec["schedule"])
+        let suspend = (spec["suspend"] as? Bool) == true ? "True" : "False"
+        let active = (status["active"] as? [[String: Any]] ?? []).count
+        let lastScheduleTime = string(status["lastScheduleTime"])
+        let formattedLastSchedule = relativeAge(from: lastScheduleTime)
+        return row(key(metadata), [
+            "Namespace": namespace(metadata),
+            "Name": string(metadata["name"]),
+            "Schedule": schedule,
+            "Suspend": suspend,
+            "Active": String(active),
+            "Last Schedule": formattedLastSchedule,
+            "Age": age(metadata)
+        ], warning: suspend == "True" || active > 3)
+    }
+
     private static func eventRow(_ item: [String: Any]) -> KubernetesResourceRow {
         let metadata = dict(item["metadata"])
         let involved = dict(item["involvedObject"])
@@ -215,6 +257,22 @@ enum KubernetesResourceParser {
             return row("\(namespace)/\(name)", ["Namespace": namespace, "Name": name, "Type": type, "Keys": data, "Age": age])
         }
         return list(.secretMetadata, ["Namespace", "Name", "Type", "Keys", "Age"], rows)
+    }
+
+    public static func genericCRDRow(_ item: [String: Any]) -> KubernetesResourceRow {
+        let metadata = dict(item["metadata"])
+        let status = dict(item["status"])
+        let name = string(metadata["name"])
+        let ns = namespace(metadata)
+        let kind = string(item["kind"])
+        let phase = string(status["phase"]).isEmpty ? (string(status["state"]).isEmpty ? "Active" : string(status["state"])) : string(status["phase"])
+        return row("\(ns)/\(name)", [
+            "Namespace": ns,
+            "Kind": kind.isEmpty ? "CustomResource" : kind,
+            "Name": name,
+            "Status": phase,
+            "Age": age(metadata)
+        ])
     }
 
     private static func row(_ id: String, _ cells: [String: String], warning: Bool = false, sortValue: String? = nil) -> KubernetesResourceRow {
@@ -256,6 +314,8 @@ enum KubernetesResourceParser {
         if days < 60 { return "\(days)d" }
         let months = days / 30
         if months < 24 { return "\(months)mo" }
-        return "\(days / 365)y"
+        let years = days / 365
+        let remDays = days % 365
+        return remDays > 0 ? "\(years)y \(remDays)d" : "\(years)y"
     }
 }

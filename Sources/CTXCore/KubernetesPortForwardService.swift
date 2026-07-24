@@ -41,7 +41,37 @@ public struct KubernetesPortForwardSession: Identifiable, Equatable, Sendable {
     public var remotePort: Int
     public var startedAt: Date
     public var status: KubernetesPortForwardStatus
+    public var bytesTransferred: Int
+    public var autoReconnectAttempts: Int
     public var diagnostic: KubernetesCommandDiagnostic?
+
+    public init(
+        id: UUID,
+        contextName: String,
+        namespace: String,
+        targetKind: KubernetesPortForwardTargetKind,
+        targetName: String,
+        localPort: Int,
+        remotePort: Int,
+        startedAt: Date,
+        status: KubernetesPortForwardStatus,
+        bytesTransferred: Int = 0,
+        autoReconnectAttempts: Int = 0,
+        diagnostic: KubernetesCommandDiagnostic? = nil
+    ) {
+        self.id = id
+        self.contextName = contextName
+        self.namespace = namespace
+        self.targetKind = targetKind
+        self.targetName = targetName
+        self.localPort = localPort
+        self.remotePort = remotePort
+        self.startedAt = startedAt
+        self.status = status
+        self.bytesTransferred = bytesTransferred
+        self.autoReconnectAttempts = autoReconnectAttempts
+        self.diagnostic = diagnostic
+    }
 
     public var localURL: String {
         "http://127.0.0.1:\(localPort)"

@@ -119,11 +119,7 @@ struct MenuBarView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(.separator.opacity(0.1), lineWidth: 0.5)
-            }
+            .ctxGlassCard(cornerRadius: 6)
 
             Divider()
 
@@ -171,7 +167,7 @@ struct MenuBarView: View {
         }
         .padding(14)
         .frame(width: 300, height: 500)
-        .background(.regularMaterial)
+        .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.showExpirationWarning)
         .onAppear {
             expandedGroups = []
@@ -239,7 +235,9 @@ struct MenuBarView: View {
             (.kubernetes, store.activeKubeContext)
         ].compactMap { provider, name in
             guard !name.isEmpty else { return nil }
-            return store.profiles.first { $0.provider == provider && $0.name == name }
+            guard let profile = store.profiles.first(where: { $0.provider == provider && $0.name == name }),
+                  profile.status == .connected else { return nil }
+            return profile
         }
     }
 
@@ -291,14 +289,22 @@ private struct ActiveContextPill: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(Color.green)
+                .fill(profile.status.color)
                 .frame(width: 5, height: 5)
-                .shadow(color: .green.opacity(0.4), radius: 2)
+                .shadow(color: profile.status.color.opacity(0.4), radius: 2)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(profile.provider.compactName) \(profile.name)")
-                    .font(.system(size: 11.5, weight: .bold))
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text("\(profile.provider.compactName) \(profile.name)")
+                        .font(.system(size: 11.5, weight: .bold))
+                        .lineLimit(1)
+                    
+                    if profile.status != .connected {
+                        Text("(\(profile.status.rawValue))")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 if !profile.contextSubtitle.isEmpty {
                     Text(profile.contextSubtitle)
@@ -318,11 +324,11 @@ private struct ActiveContextPill: View {
         .padding(.horizontal, 10)
         .frame(height: 34)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(profile.provider.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
-        .overlay {
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(profile.provider.tint.opacity(0.24), lineWidth: 0.5)
-        }
+        .ctxGlassCard(cornerRadius: 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(profile.provider.tint.opacity(0.08))
+        )
     }
 }
 

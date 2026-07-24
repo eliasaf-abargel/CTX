@@ -87,6 +87,7 @@ struct AddGCPProfileView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .frame(height: 220)
 
             // Error banner

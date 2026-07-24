@@ -55,6 +55,7 @@ struct ChooseFolderPromptView: View {
                         }
                     }
                 }
+                .scrollContentBackground(.hidden)
                 .frame(maxHeight: 240)
             }
 

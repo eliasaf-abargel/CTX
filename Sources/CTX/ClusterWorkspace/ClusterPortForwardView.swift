@@ -13,6 +13,14 @@ struct ClusterPortForwardView: View {
         VStack(alignment: .leading, spacing: 14) {
             CTXSectionHeader(title: "Port Forward", subtitle: "Local tunnel to a selected Service")
 
+            ResourceSummaryPanel(
+                title: "Local Port Forwarding Tunnels",
+                detail: "\(viewModel.portForwardSessions.count) active local 127.0.0.1 tunnel sessions",
+                badgeTitle: "\(viewModel.portForwardSessions.count) active",
+                systemImage: "arrowshape.turn.up.right",
+                tint: .green
+            )
+
             CTXGlassPanel {
                 VStack(alignment: .leading, spacing: 14) {
                     servicePicker

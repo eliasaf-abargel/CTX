@@ -54,43 +54,58 @@ enum CTXResourceColumns {
         switch kind {
         case .namespaces:
             [
-                .text("Name", min: 140, ideal: 220, max: 420, priority: 3, flexible: true, copyable: true),
+                .text("Name", min: 140, ideal: 320, max: 700, priority: 3, flexible: true, copyable: true),
                 .text("Status", min: 70, ideal: 90, max: 110, priority: 2),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2),
                 .numeric("Labels", min: 55, ideal: 65, max: 80, priority: 1, hideOnCompact: true)
             ]
         case .nodes:
             [
-                .text("Name", min: 140, ideal: 220, max: 420, priority: 3, flexible: true, copyable: true),
+                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
                 .text("Ready", min: 60, ideal: 70, max: 80, priority: 3),
-                .text("Roles", min: 90, ideal: 130, max: 200, priority: 2),
-                .text("Version", min: 90, ideal: 110, max: 150, priority: 1, hideOnCompact: true),
+                .text("Roles", min: 70, ideal: 90, max: 130, priority: 2),
+                .numeric("CPU", min: 75, ideal: 95, max: 120, priority: 2),
+                .numeric("Memory", min: 85, ideal: 110, max: 140, priority: 2),
+                .numeric("Disk", min: 80, ideal: 100, max: 130, priority: 2),
+                .text("Version", min: 80, ideal: 100, max: 130, priority: 1, hideOnCompact: true),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2),
                 .text("IP", min: 100, ideal: 120, max: 160, priority: 1, hideOnCompact: true, copyable: true)
             ]
         case .workloads:
             [
-                .text("Namespace", min: 100, ideal: 150, max: 260, priority: 2, copyable: true),
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
                 .text("Kind", min: 80, ideal: 100, max: 130, priority: 2),
-                .text("Name", min: 140, ideal: 220, max: 420, priority: 3, flexible: true, copyable: true),
+                .text("Name", min: 140, ideal: 320, max: 700, priority: 3, flexible: true, copyable: true),
                 .text("Ready", min: 60, ideal: 70, max: 90, priority: 3),
                 .numeric("Available", min: 70, ideal: 80, max: 100, priority: 1, hideOnCompact: true),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
             ]
         case .pods:
             [
-                .text("Namespace", min: 100, ideal: 150, max: 260, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 220, max: 420, priority: 3, flexible: true, copyable: true),
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 320, max: 700, priority: 3, flexible: true, copyable: true),
                 .text("Status", min: 80, ideal: 100, max: 130, priority: 3),
                 .text("Ready", min: 55, ideal: 65, max: 80, priority: 2),
                 .numeric("Restarts", min: 65, ideal: 80, max: 100, priority: 1, hideOnCompact: true),
+                .numeric("CPU", min: 75, ideal: 95, max: 120, priority: 2),
+                .numeric("Memory", min: 85, ideal: 110, max: 140, priority: 2),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2),
                 .text("Node", min: 100, ideal: 140, max: 220, priority: 1, hideOnCompact: true)
             ]
+        case .cronJobs:
+            [
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 320, max: 700, priority: 3, flexible: true, copyable: true),
+                .text("Schedule", min: 100, ideal: 130, max: 180, priority: 3, copyable: true),
+                .text("Suspend", min: 60, ideal: 70, max: 90, priority: 1, hideOnCompact: true),
+                .numeric("Active", min: 55, ideal: 65, max: 80, priority: 2),
+                .text("Last Schedule", min: 110, ideal: 140, max: 200, priority: 2),
+                .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
+            ]
         case .services:
             [
-                .text("Namespace", min: 100, ideal: 150, max: 260, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 210, max: 420, priority: 3, flexible: true, copyable: true),
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 320, max: 700, priority: 3, flexible: true, copyable: true),
                 .text("Type", min: 80, ideal: 100, max: 130, priority: 2),
                 .text("Cluster IP", min: 100, ideal: 130, max: 160, priority: 1, hideOnCompact: true, copyable: true),
                 .text("External", min: 90, ideal: 120, max: 200, priority: 1, hideOnCompact: true, copyable: true),
@@ -99,39 +114,70 @@ enum CTXResourceColumns {
             ]
         case .ingress:
             [
-                .text("Namespace", min: 100, ideal: 150, max: 260, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 200, max: 380, priority: 3, flexible: true, copyable: true),
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
                 .text("Class", min: 70, ideal: 90, max: 120, priority: 1, hideOnCompact: true),
-                .text("Hosts", min: 130, ideal: 200, max: 340, priority: 2, copyable: true),
+                .text("Hosts", min: 130, ideal: 240, max: 480, priority: 2, copyable: true),
                 .text("TLS", min: 50, ideal: 60, max: 80, priority: 1, hideOnCompact: true),
-                .text("Address", min: 100, ideal: 150, max: 240, priority: 1, hideOnCompact: true, copyable: true),
+                .text("Address", min: 100, ideal: 180, max: 360, priority: 1, hideOnCompact: true, copyable: true),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 1, hideOnCompact: true)
             ]
         case .configMaps:
             [
-                .text("Namespace", min: 100, ideal: 150, max: 260, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 220, max: 420, priority: 3, flexible: true, copyable: true),
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
                 .numeric("Keys", min: 55, ideal: 65, max: 80, priority: 2),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
             ]
         case .secretMetadata:
             [
-                .text("Namespace", min: 100, ideal: 150, max: 260, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 220, max: 420, priority: 3, flexible: true, copyable: true),
-                .text("Type", min: 110, ideal: 150, max: 220, priority: 1, hideOnCompact: true),
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
+                .text("Type", min: 120, ideal: 240, max: 420, priority: 1, hideOnCompact: true, copyable: true),
                 .numeric("Keys", min: 55, ideal: 65, max: 80, priority: 2),
-                .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
+                .numeric("Age", min: 65, ideal: 85, max: 110, priority: 2)
             ]
         case .events:
             [
-                .text("Namespace", min: 100, ideal: 150, max: 260, priority: 2, copyable: true),
-                .text("Object", min: 130, ideal: 200, max: 340, priority: 3, copyable: true),
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Object", min: 130, ideal: 240, max: 480, priority: 3, copyable: true),
                 .text("Type", min: 70, ideal: 90, max: 110, priority: 2),
                 .text("Reason", min: 100, ideal: 130, max: 180, priority: 2),
-                .text("Message", min: 160, ideal: 280, max: 520, priority: 3, flexible: true, copyable: true),
+                .text("Message", min: 160, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
                 .text("Last", min: 55, ideal: 65, max: 80, priority: 1, hideOnCompact: true),
                 .numeric("Count", min: 55, ideal: 65, max: 80, priority: 1, hideOnCompact: true)
             ]
+        }
+    }
+
+    static func columns(for section: ClusterWorkspaceSection) -> [CTXTableColumn] {
+        switch section {
+        case .gitops:
+            let cols: [CTXTableColumn] = [
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
+                .text("Provider", min: 80, ideal: 100, max: 130, priority: 2),
+                .text("Status", min: 80, ideal: 100, max: 130, priority: 3),
+                .text("Target", min: 100, ideal: 180, max: 360, priority: 1, hideOnCompact: true, copyable: true),
+                .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
+            ]
+            return cols
+        case .helm:
+            let cols: [CTXTableColumn] = [
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
+                .text("Chart", min: 120, ideal: 220, max: 400, priority: 2, copyable: true),
+                .text("Version", min: 80, ideal: 100, max: 130, priority: 1, hideOnCompact: true),
+                .numeric("Revision", min: 60, ideal: 75, max: 90, priority: 2),
+                .text("Status", min: 70, ideal: 90, max: 110, priority: 3),
+                .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
+            ]
+            return cols
+        default:
+            if let kind = section.resourceKind {
+                return columns(for: kind)
+            }
+            return columns(for: KubernetesResourceKind.pods)
         }
     }
 }

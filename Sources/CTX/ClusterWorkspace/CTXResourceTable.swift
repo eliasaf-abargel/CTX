@@ -6,7 +6,8 @@ import SwiftUI
 /// field gets a copy icon all come from `CTXResourceColumns` — no per-screen
 /// hand-rolled table code.
 struct CTXResourceTable: View {
-    let kind: KubernetesResourceKind
+    let targetKind: KubernetesResourceKind?
+    let targetSection: ClusterWorkspaceSection?
     let rows: [KubernetesResourceRow]
     let selectedRowID: String?
     /// Whether the workspace is currently scoped to "All namespaces." When false
@@ -15,6 +16,22 @@ struct CTXResourceTable: View {
     /// row doesn't already imply, just take up space and add a column to scan.
     let showsNamespaceColumn: Bool
     let onSelect: (KubernetesResourceRow) -> Void
+
+    init(
+        kind: KubernetesResourceKind? = nil,
+        section: ClusterWorkspaceSection? = nil,
+        rows: [KubernetesResourceRow],
+        selectedRowID: String?,
+        showsNamespaceColumn: Bool,
+        onSelect: @escaping (KubernetesResourceRow) -> Void
+    ) {
+        self.targetKind = kind
+        self.targetSection = section
+        self.rows = rows
+        self.selectedRowID = selectedRowID
+        self.showsNamespaceColumn = showsNamespaceColumn
+        self.onSelect = onSelect
+    }
 
     @State private var availableWidth: CGFloat = 900
     @State private var hoveredRowID: String?
@@ -27,23 +44,25 @@ struct CTXResourceTable: View {
     }
 
     private var allColumns: [CTXTableColumn] {
-        let columns = CTXResourceColumns.columns(for: kind)
+        let columns: [CTXTableColumn]
+        if let targetSection {
+            columns = CTXResourceColumns.columns(for: targetSection)
+        } else if let targetKind {
+            columns = CTXResourceColumns.columns(for: targetKind)
+        } else {
+            columns = CTXResourceColumns.columns(for: KubernetesResourceKind.pods)
+        }
         return showsNamespaceColumn ? columns : columns.filter { $0.key != "Namespace" }
     }
 
     var body: some View {
         let resolved = Self.resolve(allColumns, availableWidth: availableWidth, isCompact: isCompact)
-        let contentWidth = resolved.reduce(rowHorizontalPadding * 2) { $0 + $1.1 } + CGFloat(max(0, resolved.count - 1)) * columnSpacing
+        let calculatedWidth = resolved.reduce(rowHorizontalPadding * 2) { $0 + $1.1 } + CGFloat(max(0, resolved.count - 1)) * columnSpacing
+        let contentWidth = max(availableWidth, calculatedWidth)
 
         return VStack(alignment: .leading, spacing: 0) {
             CTXGlassPanel(padding: 0) {
                 ScrollView(.horizontal) {
-                    // `LazyVStack`, not `VStack` — a busy cluster's "all namespaces"
-                    // Pods/Events view can easily be hundreds to thousands of rows;
-                    // deferring construction of off-screen rows (SwiftUI defers based
-                    // on the enclosing vertical ScrollView's viewport, one level up in
-                    // `ClusterWorkspaceContent`) is what keeps that screen responsive
-                    // instead of eagerly building every row on every load/refresh.
                     LazyVStack(spacing: 0) {
                         headerRow(resolved)
                         Divider()
@@ -76,6 +95,7 @@ struct CTXResourceTable: View {
                 Text(column.title)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                     .frame(width: width, alignment: column.alignment == .trailing ? .trailing : .leading)
             }
         }
@@ -96,11 +116,10 @@ struct CTXResourceTable: View {
         .background(rowBackground(row, isHovered: isHovered), in: Rectangle())
         .onTapGesture { onSelect(row) }
         .onHover { hovering in
-            hoveredRowID = hovering ? row.id : (hoveredRowID == row.id ? nil : hoveredRowID)
             if hovering {
-                NSCursor.pointingHand.set()
-            } else {
-                NSCursor.arrow.set()
+                hoveredRowID = row.id
+            } else if hoveredRowID == row.id {
+                hoveredRowID = nil
             }
         }
     }
@@ -109,18 +128,23 @@ struct CTXResourceTable: View {
     private func cell(_ row: KubernetesResourceRow, column: CTXTableColumn, width: CGFloat, isRowHovered: Bool) -> some View {
         let value = row.cells[column.key] ?? "-"
         HStack(spacing: 4) {
-            Text(value)
-                .font(.system(size: 12, design: column.monospaced ? .monospaced : .default))
-                .foregroundStyle(row.warning && column.key == "Status" ? .orange : .primary)
-                .lineLimit(column.key == "Message" ? 2 : 1)
-                .truncationMode(.middle)
-                .help(value)
-                .multilineTextAlignment(column.alignment == .trailing ? .trailing : .leading)
+            if (column.key == "Status" || column.key == "Ready") && value != "-" {
+                statusBadge(value, warning: row.warning)
+            } else if (column.key == "CPU" || column.key == "Memory" || column.key == "Disk") && value != "-" {
+                telemetryCellBadge(key: column.key, value: value)
+            } else if column.key == "Name" && isKnownBrand(value) {
+                TechBrandIconView(name: value)
+            } else {
+                Text(value)
+                    .font(.system(size: 12, design: column.monospaced ? .monospaced : .default))
+                    .foregroundStyle(row.warning && column.key == "Status" ? .orange : .primary)
+                    .lineLimit(column.key == "Message" ? 2 : 1)
+                    .truncationMode(.middle)
+                    .help(value)
+                    .multilineTextAlignment(column.alignment == .trailing ? .trailing : .leading)
+            }
+
             if column.copyable && value != "-" {
-                // Reserved in layout at all times (so the row never reflows when the
-                // pointer enters/leaves) but only visible/hit-testable on hover — a
-                // copy icon on every copyable field, all the time, on every row,
-                // would be exactly the "visually noisy" table this is meant to avoid.
                 CTXCopyIconButton(value: value)
                     .opacity(isRowHovered ? 1 : 0)
                     .allowsHitTesting(isRowHovered)
@@ -129,15 +153,62 @@ struct CTXResourceTable: View {
         .frame(width: width, alignment: column.alignment == .trailing ? .trailing : .leading)
     }
 
+    private func isKnownBrand(_ name: String) -> Bool {
+        !name.isEmpty && name != "-"
+    }
+
+    private func telemetryCellBadge(key: String, value: String) -> some View {
+        let isCPU = key == "CPU"
+        let isMem = key == "Memory"
+        let icon = isCPU ? "cpu" : (isMem ? "memorychip" : "internaldrive")
+        let color: Color = isCPU ? .cyan : (isMem ? .purple : .indigo)
+
+        return HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(color)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2.5)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(color.opacity(0.25), lineWidth: 0.75)
+        }
+    }
+
+    private func statusBadge(_ text: String, warning: Bool) -> some View {
+        let lower = text.lowercased()
+        let isSuccess = lower == "running" || lower == "ready" || lower == "succeeded" || lower == "1/1" || lower == "2/2" || lower == "3/3"
+        let color: Color = isSuccess ? .green : (warning ? .orange : .secondary)
+
+        return HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(color.opacity(0.12), in: Capsule())
+    }
+
     private func rowBackground(_ row: KubernetesResourceRow, isHovered: Bool) -> Color {
         if row.id == selectedRowID {
-            return Color.accentColor.opacity(0.14)
+            return Color.accentColor.opacity(0.18)
         }
         if isHovered {
-            return Color.primary.opacity(0.04)
+            return Color.primary.opacity(0.06)
         }
         if row.warning {
-            return Color.orange.opacity(0.035)
+            return Color.orange.opacity(0.04)
         }
         return .clear
     }
@@ -175,12 +246,23 @@ struct CTXResourceTable: View {
         let idealSum = ordered.reduce(0, { $0 + $1.idealWidth }) + spacingAndPadding(ordered.count)
         let extra = availableWidth - idealSum
 
-        guard extra > 0, let flexibleIndex = ordered.firstIndex(where: { $0.isFlexible }) else {
+        guard extra > 0 else {
             return ordered.map { ($0, $0.idealWidth) }
         }
 
+        let flexibleIndices = ordered.enumerated().filter {
+            $0.element.isFlexible || $0.element.key == "Name" || $0.element.key == "Node" || $0.element.key == "Namespace"
+        }.map(\.offset)
+
         var widths = ordered.map { $0.idealWidth }
-        widths[flexibleIndex] += extra
+        if !flexibleIndices.isEmpty {
+            let addPerCol = extra / CGFloat(flexibleIndices.count)
+            for idx in flexibleIndices {
+                widths[idx] += addPerCol
+            }
+        } else if let flexibleIndex = ordered.firstIndex(where: { $0.isFlexible }) {
+            widths[flexibleIndex] += extra
+        }
         return zip(ordered, widths).map { ($0, $1) }
     }
 }

@@ -48,6 +48,7 @@ struct ClusterWorkspaceSidebar: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
                 // A `List(selection:)` doesn't reliably keep the selected row in
                 // view on its own — if the list had scrolled away from it (e.g.
                 // after selecting one of the last rows, like Diff/Port Forward)

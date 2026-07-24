@@ -25,6 +25,14 @@ struct ClusterLogsView: View {
         VStack(alignment: .leading, spacing: 14) {
             CTXSectionHeader(title: "Logs", subtitle: "Inspection tail of \(viewModel.scope(for: .pods).scopeTitle.lowercased()). No exec, no live shell.")
 
+            ResourceSummaryPanel(
+                title: "Pod Telemetry & Container Logs",
+                detail: "\(pods.count) pods available for log tailing in \(viewModel.selectedNamespace.scopeTitle)",
+                badgeTitle: "\(pods.count) pods",
+                systemImage: "terminal.fill",
+                tint: .cyan
+            )
+
             CTXGlassPanel(padding: 14) {
                 if pods.isEmpty {
                     podsEmptyState

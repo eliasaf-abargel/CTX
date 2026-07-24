@@ -86,6 +86,7 @@ struct AddAzureProfileView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .frame(height: 260)
 
             if !errorMessage.isEmpty {

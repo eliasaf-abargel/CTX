@@ -33,7 +33,7 @@ struct ProfileDetailView: View {
                                     .font(.system(size: 18, weight: .bold))
                                     .lineLimit(1)
                                 
-                                if store.isActive(profile) {
+                                if store.isActive(profile) && profile.status == .connected {
                                     Text("ACTIVE")
                                         .font(.system(size: 9, weight: .bold))
                                         .foregroundStyle(.white)
@@ -129,7 +129,7 @@ struct ProfileDetailView: View {
                                 }
 
                                 Button {
-                                    Task { await store.verify(profile) }
+                                    Task { await store.verify(profile, isManualAttempt: true) }
                                 } label: {
                                     Label("Verify Status", systemImage: "checkmark.shield")
                                 }
@@ -474,6 +474,7 @@ struct ProfileDetailView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
     }
 }
 
@@ -558,15 +559,6 @@ struct ProfileDetailView: View {
 }
 
 private extension View {
-    func ctxGlassCard() -> some View {
-        background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(.separator.opacity(0.30), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
-    }
-
     func ctxHeaderButton(tint: Color = .primary, isProminent: Bool = false) -> some View {
         buttonStyle(CTXHeaderButtonStyle(tint: tint, isProminent: isProminent))
     }
