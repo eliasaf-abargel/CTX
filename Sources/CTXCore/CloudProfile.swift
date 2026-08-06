@@ -18,6 +18,15 @@ public enum CloudProvider: String, Codable, CaseIterable, Sendable {
             "shippingbox"
         }
     }
+
+    public var sectionHeaderTitle: String {
+        switch self {
+        case .aws: "AWS (Amazon Web Services)"
+        case .gcp: "GCP (Google Cloud Platform)"
+        case .azure: "Azure (Microsoft Azure)"
+        case .kubernetes: "Kubernetes & Clusters"
+        }
+    }
 }
 
 public enum ProfileStatus: String, Codable, Sendable {
@@ -97,6 +106,29 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         case .gcp: "GCP Configuration"
         case .azure: "Azure Subscription"
         case .kubernetes: "Kubernetes Context"
+        }
+    }
+
+    /// Whether reaching this context goes through a connection broker rather than
+    /// straight to the API server. Both are name-based guesses — a kubeconfig
+    /// doesn't state which broker fronts a cluster — so they live here as the one
+    /// place the guess is made. They were previously inlined at eight call sites
+    /// across four files, which meant every change to the detection needed eight
+    /// identical edits to stay consistent.
+    public var usesStrongDM: Bool {
+        Self.mentionsAny(of: ["sdm"], in: [roleName, name])
+    }
+
+    public var usesTeleport: Bool {
+        Self.mentionsAny(of: ["teleport"], in: [roleName, name])
+            || Self.mentionsAny(of: ["tsh"], in: [roleName])
+    }
+
+    /// True when any of `fields` contains any of `needles`, case-insensitively.
+    private static func mentionsAny(of needles: [String], in fields: [String]) -> Bool {
+        fields.contains { field in
+            let lowered = field.lowercased()
+            return needles.contains { lowered.contains($0) }
         }
     }
 }

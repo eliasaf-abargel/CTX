@@ -3,9 +3,12 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var store: ProfileStore
+    @AppStorage("ctxAppAppearance") private var appAppearanceRaw: String = AppAppearance.dark.rawValue
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
     @State private var expandedGroups: Set<String> = []
+    @State private var expandedProviders: Set<CloudProvider> = Set(CloudProvider.allCases)
     @State private var searchQuery = ""
 
     private var filteredGroupedProfiles: [ProfileGroup] {
@@ -28,6 +31,20 @@ struct MenuBarView: View {
             } else {
                 return nil
             }
+        }
+    }
+
+    private struct ProviderGroup: Identifiable {
+        var id: CloudProvider { provider }
+        let provider: CloudProvider
+        let folderGroups: [ProfileGroup]
+    }
+
+    private var providerGroups: [ProviderGroup] {
+        CloudProvider.allCases.compactMap { provider in
+            let groups = filteredGroupedProfiles.filter { $0.folder.provider == provider && !$0.profiles.isEmpty }
+            guard !groups.isEmpty else { return nil }
+            return ProviderGroup(provider: provider, folderGroups: groups)
         }
     }
 
@@ -125,14 +142,43 @@ struct MenuBarView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(filteredGroupedProfiles) { group in
-                        if !group.profiles.isEmpty {
-                            MenuBarFolderSection(
-                                group: group,
-                                isExpanded: binding(for: group.id),
-                                activeProfileName: activeName(for: group.folder.provider),
-                                selectBinding: activeBinding(for:)
-                            )
+                    ForEach(providerGroups) { pGroup in
+                        DisclosureGroup(isExpanded: providerBinding(for: pGroup.provider)) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(pGroup.folderGroups) { group in
+                                    MenuBarFolderSection(
+                                        group: group,
+                                        isExpanded: binding(for: group.id),
+                                        activeProfileName: activeName(for: group.folder.provider),
+                                        selectBinding: activeBinding(for:)
+                                    )
+                                }
+                            }
+                            .padding(.top, 4)
+                        } label: {
+                            HStack(spacing: 6) {
+                                ProviderIcon(provider: pGroup.provider, size: 12, fallbackTint: .primary)
+                                Text(pGroup.provider.sectionHeaderTitle)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.primary)
+
+                                if pGroup.folderGroups.contains(where: { g in g.profiles.contains { $0.status == .connected } }) {
+                                    Circle()
+                                        .fill(Color.green)
+                                        .frame(width: 5, height: 5)
+                                }
+
+                                Spacer()
+
+                                let totalCount = pGroup.folderGroups.reduce(0) { $0 + $1.profiles.count }
+                                Text("\(totalCount)")
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                            }
+                            .contentShape(Rectangle())
                         }
                     }
                 }
@@ -167,7 +213,17 @@ struct MenuBarView: View {
         }
         .padding(14)
         .frame(width: 300, height: 500)
-        .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
+        .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .dark).colorScheme)
+        .background(
+            ZStack {
+                if colorScheme == .light {
+                    Color(NSColor.controlBackgroundColor)
+                } else {
+                    Color(red: 0.11, green: 0.13, blue: 0.16)
+                }
+            }
+            .ignoresSafeArea()
+        )
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.showExpirationWarning)
         .onAppear {
             expandedGroups = []
@@ -179,18 +235,7 @@ struct MenuBarView: View {
     private var header: some View {
         HStack {
             HStack(spacing: 10) {
-                if let icon = NSApp.applicationIconImage {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .frame(width: 28, height: 28)
-                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                } else {
-                    Image(systemName: "cloud.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 28, height: 28)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                }
+                CTXAppLogoView(size: 28)
 
                 Text("CTX")
                     .font(.title3.weight(.semibold))
@@ -263,6 +308,19 @@ struct MenuBarView: View {
                     store.login(profile)
                 } else if store.isActive(profile) {
                     store.logout(profile)
+                }
+            }
+        )
+    }
+
+    private func providerBinding(for provider: CloudProvider) -> Binding<Bool> {
+        Binding(
+            get: { expandedProviders.contains(provider) || !searchQuery.isEmpty },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedProviders.insert(provider)
+                } else {
+                    expandedProviders.remove(provider)
                 }
             }
         )
@@ -352,19 +410,32 @@ private struct MenuBarFolderSection: View {
             .padding(.top, 4)
         } label: {
             HStack(spacing: 6) {
-                Label("\(group.folder.provider.rawValue) · \(group.folder.name)", systemImage: group.folder.icon.systemImage)
+                Image(systemName: group.folder.icon.systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
+
+                Text(group.folder.name)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
+                if group.profiles.contains(where: { $0.status == .connected }) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 4, height: 4)
+                }
+
                 Spacer()
+
+                Text("\(group.profiles.count)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
             }
             .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
-            }
         }
     }
 }

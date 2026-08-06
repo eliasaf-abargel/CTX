@@ -20,7 +20,7 @@ struct ProfileHeaderView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(.white.opacity(0.22), lineWidth: 1)
+                    .stroke(Color.primary.opacity(0.15), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
 

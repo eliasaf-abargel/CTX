@@ -1,20 +1,6 @@
 import CTXCore
 import SwiftUI
 
-public struct EndpointTarget: Identifiable, Equatable, Sendable {
-    public var id: String { name }
-    public let name: String
-    public let namespace: String
-    public let targetPort: String
-    public let isHealthy: Bool
-
-    public init(name: String, namespace: String, targetPort: String = "8080", isHealthy: Bool = true) {
-        self.name = name
-        self.namespace = namespace
-        self.targetPort = targetPort
-        self.isHealthy = isHealthy
-    }
-}
 
 public struct CTXServiceEndpointsInspector: View {
     let targets: [EndpointTarget]
@@ -37,7 +23,7 @@ public struct CTXServiceEndpointsInspector: View {
             }
 
             if targets.isEmpty {
-                Text("No active target endpoints attached to this Service selector.")
+                Text("This Service has no ready backends. Nothing will answer traffic sent to it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -52,7 +38,19 @@ public struct CTXServiceEndpointsInspector: View {
                                 .font(.system(size: 10, weight: .semibold))
                                 .lineLimit(1)
 
+                            if !target.address.isEmpty {
+                                Text(target.address)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+
                             Spacer()
+
+                            if !target.isHealthy {
+                                Text("not ready")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.orange)
+                            }
 
                             Text("→ :\(target.targetPort)")
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))

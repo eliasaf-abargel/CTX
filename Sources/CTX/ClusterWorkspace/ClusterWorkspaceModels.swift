@@ -12,7 +12,10 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case ingress = "Ingress"
     case configMaps = "ConfigMaps"
     case secrets = "Secrets"
+    case issues = "Issues"
     case events = "Events"
+    case hpa = "HPA"
+    case storage = "Storage"
     case gitops = "GitOps"
     case helm = "Helm"
     case topology = "Map"
@@ -35,7 +38,10 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .ingress: "arrow.triangle.branch"
         case .configMaps: "doc.text"
         case .secrets: "lock.doc"
+        case .issues: "exclamationmark.triangle"
         case .events: "waveform.path.ecg"
+        case .hpa: "arrow.up.and.down.square"
+        case .storage: "cylinder.split.1x2"
         case .gitops: "arrow.triangle.pull"
         case .helm: "shippingbox.circle"
         case .topology: "point.topleft.down.to.point.bottomright.curvepath"
@@ -62,6 +68,8 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .configMaps: .configMaps
         case .secrets: .secretMetadata
         case .events: .events
+        case .hpa: .hpa
+        case .storage: .pvc
         default: nil
         }
     }

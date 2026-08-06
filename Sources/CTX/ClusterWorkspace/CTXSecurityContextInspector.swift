@@ -1,21 +1,6 @@
 import CTXCore
 import SwiftUI
 
-public struct SecurityContextAudit: Equatable, Sendable {
-    public let runAsUser: String
-    public let isRoot: Bool
-    public let isReadOnlyRootFS: Bool
-    public let isPrivileged: Bool
-    public let allowPrivilegeEscalation: Bool
-
-    public init(runAsUser: String = "1000", isRoot: Bool = false, isReadOnlyRootFS: Bool = false, isPrivileged: Bool = false, allowPrivilegeEscalation: Bool = false) {
-        self.runAsUser = runAsUser
-        self.isRoot = isRoot
-        self.isReadOnlyRootFS = isReadOnlyRootFS
-        self.isPrivileged = isPrivileged
-        self.allowPrivilegeEscalation = allowPrivilegeEscalation
-    }
-}
 
 public struct CTXSecurityContextInspector: View {
     let audit: SecurityContextAudit

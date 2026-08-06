@@ -1,18 +1,6 @@
 import CTXCore
 import SwiftUI
 
-public struct EnvVarItem: Identifiable, Equatable, Sendable {
-    public var id: String { name }
-    public let name: String
-    public let value: String
-    public let isSecret: Bool
-
-    public init(name: String, value: String, isSecret: Bool = false) {
-        self.name = name
-        self.value = value
-        self.isSecret = isSecret
-    }
-}
 
 public struct CTXEnvironmentVariablesInspector: View {
     let items: [EnvVarItem]
@@ -22,7 +10,7 @@ public struct CTXEnvironmentVariablesInspector: View {
     }
 
     private var displayedItems: [EnvVarItem] {
-        Array(items.prefix(8))
+        Array(items.prefix(12))
     }
 
     public var body: some View {
@@ -30,6 +18,16 @@ public struct CTXEnvironmentVariablesInspector: View {
             Text("ENVIRONMENT VARIABLES (\(items.count))")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.secondary)
+            if items.count > displayedItems.count {
+                Text("Showing the first \(displayedItems.count) of \(items.count).")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if items.contains(where: \.isSecret) {
+                Text("Secret-backed variables show their source only. CTX never reads Secret values.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             if items.isEmpty {
                 Text("No explicit environment variables defined.")
@@ -37,7 +35,7 @@ public struct CTXEnvironmentVariablesInspector: View {
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 4) {
-                    ForEach(displayedItems, id: \.name) { (item: EnvVarItem) in
+                    ForEach(displayedItems) { (item: EnvVarItem) in
                         HStack {
                             Text(item.name)
                                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -45,7 +43,10 @@ public struct CTXEnvironmentVariablesInspector: View {
                             Spacer()
                             Text(displayValue(for: item))
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(item.isSecret ? Color.secondary : Color.blue)
+                                .foregroundStyle(item.isSecret ? Color.orange : (item.value.isEmpty ? Color.secondary : Color.blue))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(displayValue(for: item))
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -56,15 +57,12 @@ public struct CTXEnvironmentVariablesInspector: View {
         }
     }
 
+    /// A Secret-sourced variable shows *where* it comes from and never its value —
+    /// CTX does not read the Secret at all, so there is no value here to leak. A
+    /// literal value in the pod spec is plaintext to anyone who can read the pod, so
+    /// it is shown as declared.
     private func displayValue(for item: EnvVarItem) -> String {
-        if item.isSecret || isSensitiveKey(item.name) {
-            return "••••••••"
-        }
-        return item.value
-    }
-
-    private func isSensitiveKey(_ name: String) -> Bool {
-        let upper = name.uppercased()
-        return upper.contains("KEY") || upper.contains("SECRET") || upper.contains("PASSWORD") || upper.contains("TOKEN") || upper.contains("AUTH") || upper.contains("CREDENTIAL")
+        if !item.source.isEmpty { return item.source }
+        return item.value.isEmpty ? KubernetesGitOpsService.unknownValue : item.value
     }
 }

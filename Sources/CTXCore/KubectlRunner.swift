@@ -143,13 +143,16 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
         let process = Process()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
+        let stdinPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: command.executablePath)
         process.arguments = command.arguments
+        process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         process.environment = environmentWithSearchPath(environment()).merging(command.environmentOverrides) { _, override in override }
         do {
             try process.run()
+            try? stdinPipe.fileHandleForWriting.close()
         } catch {
             throw KubectlRunnerError.launchFailed(error.localizedDescription)
         }
@@ -157,14 +160,23 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
     }
 
     public func resolveKubectlPath() throws -> String {
-        let paths = searchPaths(in: environment())
-        for dir in paths {
-            let path = (dir as NSString).appendingPathComponent("kubectl")
+        guard let path = resolve("kubectl") else {
+            throw KubectlRunnerError.kubectlNotFound
+        }
+        return path
+    }
+
+    /// Finds a CLI on the same search path kubectl is found on. `nil` rather than a
+    /// throw, because callers for optional tooling (`helm`) treat "not installed" as
+    /// a normal state to report, not an error.
+    public func resolve(_ binary: String) -> String? {
+        for dir in searchPaths(in: environment()) {
+            let path = (dir as NSString).appendingPathComponent(binary)
             if FileManager.default.isExecutableFile(atPath: path) {
                 return path
             }
         }
-        throw KubectlRunnerError.kubectlNotFound
+        return nil
     }
 
     private func searchPaths(in environment: [String: String]) -> [String] {
@@ -287,51 +299,6 @@ private final class KubectlStartedProcess: KubectlProcessHandling, @unchecked Se
     }
 }
 
-private final class ProcessBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var process: Process?
-    private var isCancelled = false
-
-    func set(_ process: Process) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if isCancelled {
-            return false
-        }
-        self.process = process
-        return true
-    }
-
-    func clear() {
-        lock.lock()
-        process = nil
-        lock.unlock()
-    }
-
-    func terminate() {
-        lock.lock()
-        isCancelled = true
-        let process = self.process
-        lock.unlock()
-        if process?.isRunning == true {
-            process?.terminate()
-        }
-    }
-}
-
-private final class TimeoutFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored = false
-
-    var value: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return stored
-    }
-
-    func mark() {
-        lock.lock()
-        stored = true
-        lock.unlock()
-    }
-}
+// `ProcessBox` and `TimeoutFlag` live in `ProcessSupport.swift` — `CloudCommandRunner`
+// needs the same cancellation and timeout plumbing, so it is shared rather than
+// copied.

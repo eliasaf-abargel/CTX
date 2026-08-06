@@ -45,6 +45,7 @@ struct AddGCPProfileView: View {
     @Environment(\.dismiss) private var dismiss
     let mode: GCPProfileEditorMode
     let targetFolder: CloudFolder?
+    @State private var selectedFolder: CloudFolder?
     @State private var draft: GCPProfileDraft
     @State private var errorMessage = ""
 
@@ -53,6 +54,8 @@ struct AddGCPProfileView: View {
         self.mode = mode
         self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.draft)
+        let gcpFolders = store.folders(for: .gcp)
+        self._selectedFolder = State(initialValue: targetFolder ?? gcpFolders.first)
     }
 
     var body: some View {
@@ -69,6 +72,15 @@ struct AddGCPProfileView: View {
             Divider()
 
             Form {
+                Section("Organization & Folder") {
+                    Picker("Folder / Environment:", selection: $selectedFolder) {
+                        ForEach(store.folders(for: .gcp)) { folder in
+                            Label(folder.name, systemImage: folder.icon.systemImage)
+                                .tag(Optional(folder))
+                        }
+                    }
+                }
+
                 Section("Configuration Identity") {
                     TextField("Config Name:", text: $draft.name, prompt: Text("e.g. dev-gcp"))
                         .textFieldStyle(.roundedBorder)
@@ -88,7 +100,7 @@ struct AddGCPProfileView: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
-            .frame(height: 220)
+            .frame(height: 260)
 
             // Error banner
             if !errorMessage.isEmpty {
@@ -137,9 +149,12 @@ struct AddGCPProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addGCPProfile(draft, targetFolder: targetFolder)
+                try store.addGCPProfile(draft, targetFolder: selectedFolder)
             case .edit(let profile):
                 try store.updateGCPProfile(profile, draft: draft)
+                if let selectedFolder {
+                    store.move(profile, to: selectedFolder)
+                }
             }
             dismiss()
         } catch {

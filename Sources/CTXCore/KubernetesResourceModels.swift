@@ -49,12 +49,16 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
     case configMaps
     case secretMetadata
     case events
+    case hpa
+    case pvc
 
     public var title: String {
         switch self {
         case .configMaps: "ConfigMaps"
         case .secretMetadata: "Secrets"
         case .cronJobs: "CronJobs"
+        case .hpa: "HPA"
+        case .pvc: "Storage (PVC)"
         default: rawValue.prefix(1).uppercased() + rawValue.dropFirst()
         }
     }
@@ -75,12 +79,14 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
         case .configMaps: "configmaps"
         case .secretMetadata: "secrets"
         case .events: "events"
+        case .hpa: "hpa"
+        case .pvc: "pvc"
         }
     }
 
     public var supportsInspectionYAML: Bool {
         switch self {
-        case .namespaces, .nodes, .pods, .cronJobs, .services, .ingress, .events:
+        case .namespaces, .nodes, .pods, .cronJobs, .services, .ingress, .events, .hpa, .pvc:
             true
         case .workloads, .configMaps, .secretMetadata:
             false
@@ -99,6 +105,8 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
         case .configMaps: "ConfigMap"
         case .secretMetadata: "Secret metadata"
         case .events: "Event"
+        case .hpa: "HPA"
+        case .pvc: "PersistentVolumeClaim"
         }
     }
 }
@@ -162,17 +170,32 @@ public struct KubernetesEventObjectTarget: Equatable, Sendable {
         case "configmap": .configMaps
         case "secret": .secretMetadata
         case "deployment", "statefulset", "daemonset": .workloads
+        case "hpa", "horizontalpodautoscaler": .hpa
+        case "pvc", "persistentvolumeclaim": .pvc
         default: nil
         }
     }
 }
 
 public struct KubernetesResourceRow: Identifiable, Codable, Equatable, Sendable {
-    public var id: String
-    public var cells: [String: String]
+    public let id: String
+    public let cells: [String: String]
     public var warning: Bool
     public var sortValue: String?
     public var ref: KubernetesResourceRef?
+
+    /// Everything searchable about this row, lowercased, built once when the row is
+    /// created. Filtering then costs one substring scan instead of rebuilding the
+    /// haystack — the search field re-filters the whole list on every keystroke, so
+    /// the work belongs on the fetch (once per row) rather than on the keystroke
+    /// (once per row per character typed).
+    ///
+    /// `id` and `cells` are `let` so this can never drift out of sync with them.
+    private let searchHaystack: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id, cells, warning, sortValue, ref
+    }
 
     public init(id: String, cells: [String: String], warning: Bool = false, sortValue: String? = nil, ref: KubernetesResourceRef? = nil) {
         self.id = id
@@ -180,14 +203,99 @@ public struct KubernetesResourceRow: Identifiable, Codable, Equatable, Sendable 
         self.warning = warning
         self.sortValue = sortValue
         self.ref = ref
+        self.searchHaystack = Self.makeHaystack(id: id, cells: cells)
     }
 
+    /// Derived, so it is rebuilt on decode rather than stored in the disk cache.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        cells = try container.decode([String: String].self, forKey: .cells)
+        warning = try container.decodeIfPresent(Bool.self, forKey: .warning) ?? false
+        sortValue = try container.decodeIfPresent(String.self, forKey: .sortValue)
+        ref = try container.decodeIfPresent(KubernetesResourceRef.self, forKey: .ref)
+        searchHaystack = Self.makeHaystack(id: id, cells: cells)
+    }
+
+    /// Keys are sorted so the haystack is canonical. `Dictionary` iteration order
+    /// depends on how the dictionary was built, not only on its contents, so a row
+    /// decoded from the disk cache would otherwise produce a differently-ordered
+    /// haystack than the identical freshly-parsed row — and compare unequal.
+    /// Derived state is excluded: two rows with the same data are the same row, and
+    /// comparing the haystacks would mean a full string comparison per row every
+    /// time SwiftUI diffs the list.
+    public static func == (lhs: KubernetesResourceRow, rhs: KubernetesResourceRow) -> Bool {
+        lhs.id == rhs.id
+            && lhs.warning == rhs.warning
+            && lhs.sortValue == rhs.sortValue
+            && lhs.ref == rhs.ref
+            && lhs.cells == rhs.cells
+    }
+
+    private static func makeHaystack(id: String, cells: [String: String]) -> String {
+        var haystack = id
+        for key in cells.keys.sorted() {
+            haystack.append(" ")
+            haystack.append(key)
+            haystack.append(" ")
+            haystack.append(cells[key] ?? "")
+        }
+        return haystack.lowercased()
+    }
+
+    /// Whether this row matches a search term.
+    ///
+    /// Scans the fields directly and stops at the first hit. The previous version
+    /// materialised the row before searching it: one interpolated string per cell,
+    /// an array around them, and a `joined` copy of the whole thing — about a dozen
+    /// allocations per row — then ran a locale-aware search over the result. Every
+    /// keystroke in the search field re-did that for every row, which measured at
+    /// roughly 9 ms over 3,000 pods.
+    ///
+    /// Prefer `filtered(_:matching:)` for a whole list: it trims the needle once
+    /// instead of once per row.
     public func matchesFilter(_ filter: String) -> Bool {
-        let needle = filter.trimmingCharacters(in: .whitespacesAndNewlines)
+        let needle = Self.preparedNeedle(from: filter)
         guard !needle.isEmpty else { return true }
-        return ([id] + cells.map { "\($0.key) \($0.value)" })
-            .joined(separator: " ")
-            .localizedCaseInsensitiveContains(needle)
+        return matches(preparedNeedle: needle)
+    }
+
+    /// Substring search over the raw UTF-8 bytes.
+    ///
+    /// `String.contains(_:)` on two `String`s bridges into Foundation's
+    /// `range(of:)`, which dominated the measurement even against a pre-built
+    /// lowercased haystack. Both sides are already lowercased here, so comparing
+    /// bytes directly is equivalent and allocates nothing.
+    func matches(preparedNeedle needle: ContiguousArray<UInt8>) -> Bool {
+        guard !needle.isEmpty else { return true }
+        let haystack = searchHaystack.utf8
+        guard haystack.count >= needle.count else { return false }
+
+        var start = haystack.startIndex
+        let last = haystack.index(haystack.startIndex, offsetBy: haystack.count - needle.count)
+        while true {
+            var cursor = start
+            var matched = 0
+            while matched < needle.count, haystack[cursor] == needle[matched] {
+                cursor = haystack.index(after: cursor)
+                matched += 1
+            }
+            if matched == needle.count { return true }
+            if start == last { return false }
+            start = haystack.index(after: start)
+        }
+    }
+
+    /// Filters a list against one search term, preparing the needle once rather
+    /// than once per row.
+    public static func filtered(_ rows: [KubernetesResourceRow], matching filter: String) -> [KubernetesResourceRow] {
+        let needle = preparedNeedle(from: filter)
+        guard !needle.isEmpty else { return rows }
+        return rows.filter { $0.matches(preparedNeedle: needle) }
+    }
+
+    static func preparedNeedle(from filter: String) -> ContiguousArray<UInt8> {
+        ContiguousArray(filter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().utf8)
     }
 
     public var name: String {
@@ -315,9 +423,9 @@ public struct KubernetesResourceDetail: Equatable, Sendable {
         case .nodes:
             sections.append(Section(title: "Node", fields: fields(row, ["Ready", "Roles", "Version", "IP"])))
         case .workloads:
-            sections.append(Section(title: "Workload", fields: fields(row, ["Kind", "Ready", "Available"])))
+            sections.append(Section(title: "Workload", fields: fields(row, ["Kind", "Ready", "Available", "Image"])))
         case .pods:
-            sections.append(Section(title: "Pod", fields: fields(row, ["Status", "Ready", "Restarts", "Node"])))
+            sections.append(Section(title: "Pod", fields: fields(row, ["Status", "Ready", "Restarts", "Node", "Image"])))
         case .cronJobs:
             sections.append(Section(title: "CronJob", fields: fields(row, ["Schedule", "Suspend", "Active", "Last Schedule"])))
         case .services:
@@ -330,6 +438,10 @@ public struct KubernetesResourceDetail: Equatable, Sendable {
             sections.append(Section(title: "Metadata", fields: fields(row, ["Type", "Keys"])))
         case .events:
             sections.append(Section(title: "Event", fields: fields(row, ["Object", "Type", "Reason", "Message", "Count", "Last"])))
+        case .hpa:
+            sections.append(Section(title: "HPA", fields: fields(row, ["Reference", "Targets", "MinPods", "MaxPods", "Replicas"])))
+        case .pvc:
+            sections.append(Section(title: "Storage (PVC)", fields: fields(row, ["Status", "Volume", "Capacity", "Access Modes", "StorageClass"])))
         }
 
         return sections.filter { !$0.fields.isEmpty }

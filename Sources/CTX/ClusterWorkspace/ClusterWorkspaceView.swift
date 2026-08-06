@@ -4,15 +4,33 @@ import SwiftUI
 struct ClusterWorkspaceScene: View {
     @ObservedObject var store: ProfileStore
     let contextID: String
+    @Environment(\.dismiss) private var dismiss
 
     private var context: KubernetesContextProfile? {
         store.kubernetesContexts.first { $0.id == contextID }
             ?? store.kubernetesContexts.first { $0.contextName == contextID }
     }
 
+    private var profile: CloudProfile? {
+        guard let context else { return nil }
+        return store.profiles.first { $0.provider == .kubernetes && $0.name == context.contextName }
+    }
+
     var body: some View {
         if let context {
-            ClusterWorkspaceView(context: context)
+            ClusterWorkspaceView(context: context, onStatusCheckFailed: { contextName, reason in
+                store.markKubernetesContextNeedsLogin(contextName: contextName, reason: reason)
+            })
+            .onChange(of: profile?.status) { _, newStatus in
+                if newStatus == .needsLogin || newStatus == .disconnecting || newStatus == .unknown {
+                    dismissWindow()
+                }
+            }
+            .onChange(of: store.activeKubeContext) { _, activeContext in
+                if activeContext != context.contextName {
+                    dismissWindow()
+                }
+            }
         } else {
             CTXGlassPanel {
                 CTXErrorStateView(
@@ -24,20 +42,40 @@ struct ClusterWorkspaceScene: View {
             .frame(minWidth: 600, minHeight: 440)
         }
     }
+
+    private func dismissWindow() {
+        dismiss()
+        DispatchQueue.main.async {
+            for window in NSApp.windows {
+                if window.title == contextID || window.title.contains(contextID) {
+                    window.close()
+                }
+            }
+        }
+    }
 }
 
 struct ClusterWorkspaceView: View {
     @StateObject private var viewModel: ClusterWorkspaceViewModel
     @State private var isSearchPresented: Bool = false
 
-    init(context: KubernetesContextProfile) {
-        _viewModel = StateObject(wrappedValue: ClusterWorkspaceViewModel(context: context))
+    init(context: KubernetesContextProfile, onStatusCheckFailed: ((String, String) -> Void)? = nil) {
+        let vm = ClusterWorkspaceViewModel(context: context)
+        vm.onStatusCheckFailed = onStatusCheckFailed
+        _viewModel = StateObject(wrappedValue: vm)
+    }
+
+    @AppStorage("ctxAppAppearance") private var appAppearanceRaw: String = AppAppearance.dark.rawValue
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var currentAppearance: AppAppearance {
+        AppAppearance(rawValue: appAppearanceRaw) ?? .dark
     }
 
     var body: some View {
         NavigationSplitView {
             ClusterWorkspaceSidebar(viewModel: viewModel)
-                .background(Color.black.opacity(0.25))
+                .background(colorScheme == .light ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color.black.opacity(0.25))
                 .navigationTitle("Cluster")
                 .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 310)
         } detail: {
@@ -52,11 +90,11 @@ struct ClusterWorkspaceView: View {
 
                 ClusterWorkspaceContent(viewModel: viewModel)
             }
-            .background(Color.clear)
-            .background(Color(white: 0.12).opacity(0.65))
+            .background(colorScheme == .light ? Color(NSColor.windowBackgroundColor) : Color(white: 0.12).opacity(0.65))
             .navigationTitle(viewModel.title)
         }
         .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
+        .preferredColorScheme(currentAppearance.colorScheme)
         .frame(minWidth: 680, minHeight: 480)
         .task {
             await viewModel.refreshOverviewIfNeeded()
@@ -175,28 +213,12 @@ struct ClusterWorkspaceHeader: View {
     private var statusBlock: some View {
         VStack(alignment: .trailing, spacing: 10) {
             HStack(spacing: 8) {
-                issuesToggle
                 ClusterWorkspaceHealthMenu(viewModel: viewModel)
                 refreshButton
             }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
-
-    private var issuesToggle: some View {
-        Toggle(isOn: $viewModel.showIssuesOnly) {
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11, weight: .bold))
-                Text("Issues Only")
-                    .font(.system(size: 11, weight: .semibold))
-            }
-        }
-        .toggleStyle(.button)
-        .tint(.orange)
-        .help("Filter workspace to display only resources with warnings or errors")
-    }
-
 
     private var refreshButton: some View {
         Button {

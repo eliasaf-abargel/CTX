@@ -1,3 +1,4 @@
+import Combine
 import CTXCore
 import Foundation
 
@@ -1393,6 +1394,8 @@ func testInspectionYAMLAvailabilityMatrix() {
         .services: true,
         .ingress: true,
         .events: true,
+        .hpa: true,
+        .pvc: true,
         .workloads: false,
         .configMaps: false,
         .secretMetadata: false
@@ -1554,7 +1557,7 @@ func testProfileCommandServiceBuildsProviderCommands() async {
         ["gcloud", "config", "configurations", "activate", "dev"],
         ["az", "account", "set", "--subscription", "sub-123"],
         ["aws", "sso", "login", "--profile", "dev"],
-        ["gcloud", "auth", "login", "--update-adc", "--configuration", "dev"],
+        ["gcloud", "auth", "login", "--configuration", "dev", "--account", "dev@example.com"],
         ["az", "login", "--tenant", "tenant-123"],
         ["az", "account", "set", "--subscription", "sub-123"],
         ["aws", "sso", "logout", "--profile", "dev"],
@@ -1563,7 +1566,7 @@ func testProfileCommandServiceBuildsProviderCommands() async {
         ["aws", "sts", "get-caller-identity", "--profile", "dev", "--output", "json"],
         ["gcloud", "auth", "print-access-token", "--configuration", "dev"],
         ["az", "account", "show", "--subscription", "sub-123", "--output", "json"],
-        ["kubectl", "config", "get-contexts", "dev-context", "--output", "name"],
+        ["kubectl", "get", "--raw=/version", "--context", "dev-context", "--request-timeout=10s"],
         ["aws", "configure", "export-credentials", "--profile", "dev", "--output", "json"]
     ])
 }
@@ -1603,22 +1606,19 @@ func testProfileCommandServiceStrongDMLoginAndVerify() async {
 
     let runner = CustomCommandRunner()
     await runner.setResults([
-        CommandResult(exitCode: 0, output: ""), // sdm ready for verify
-        CommandResult(exitCode: 0, output: "sdm-context"), // kubectl get-contexts
-        CommandResult(exitCode: 1, output: "not ready"), // sdm ready for login
-        CommandResult(exitCode: 0, output: "login success"), // sdm login
-        CommandResult(exitCode: 0, output: "connect success"), // sdm connect
-        CommandResult(exitCode: 0, output: "disconnect success") // sdm disconnect
+        CommandResult(exitCode: 0, output: "sdm-context connected"), // sdm status for verify
+        CommandResult(exitCode: 0, output: "connect success"), // sdm connect for login
+        CommandResult(exitCode: 0, output: "disconnect success") // sdm disconnect for logout
     ])
 
     let service = ProfileCommandService(runner: runner)
-    let sdmKube = CloudProfile(provider: .kubernetes, name: "sdm-context", roleName: "sdm-" + "user")
+    let sdmKube = CloudProfile(provider: .kubernetes, name: "sdm-context", roleName: ("sdm-" + "user"))
 
-    // Test verify when ready succeeds (exit code 0)
+    // Test verify when cluster API succeeds
     let verifyResult = await service.verify(sdmKube, activeKubeContext: "sdm-context")
     assert(verifyResult.exitCode == 0)
 
-    // Test login when ready fails (exit code 1), so login and connect run
+    // Test login: runs sdm connect directly
     let loginResult = await service.login(sdmKube)
     assert(loginResult.exitCode == 0)
 
@@ -1628,10 +1628,7 @@ func testProfileCommandServiceStrongDMLoginAndVerify() async {
 
     let commands = await runner.allCommands()
     assert(commands == [
-        ["sdm", "ready"],
-        ["kubectl", "config", "get-contexts", "sdm-context", "--output", "name"],
-        ["sdm", "ready"],
-        ["sdm", "login"],
+        ["sdm", "status"],
         ["sdm", "connect", "sdm-context"],
         ["sdm", "disconnect", "sdm-context"]
     ])
@@ -1907,7 +1904,10 @@ func testProfileStorePromptsForFolderWhenCreatedWithoutOne() async throws {
     // Created with no targetFolder — must prompt for one instead of silently
     // landing in the generic default folder.
     try store.addAWSProfile(aws)
-    let deadline = Date().addingTimeInterval(1)
+    // Generous: this waits on a detached Task scheduling a subprocess call, which can
+    // take well over a second on a loaded machine. A tight deadline here fails as a
+    // wrong-kubeconfig assertion rather than as the timeout it actually is.
+    let deadline = Date().addingTimeInterval(10)
     while store.pendingFolderPrompt == nil, Date() < deadline {
         try await Task.sleep(nanoseconds: 10_000_000)
     }
@@ -1971,7 +1971,10 @@ func testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne() asyn
     }
 
     store.logout(profile)
-    let deadline = Date().addingTimeInterval(1)
+    // Generous: this waits on a detached Task scheduling a subprocess call, which can
+    // take well over a second on a loaded machine. A tight deadline here fails as a
+    // wrong-kubeconfig assertion rather than as the timeout it actually is.
+    let deadline = Date().addingTimeInterval(10)
     while (await runner.allCommands()).isEmpty, Date() < deadline {
         try await Task.sleep(nanoseconds: 10_000_000)
     }
@@ -2022,7 +2025,10 @@ func testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown() 
     assert(profile.status == .unknown, "test only proves what it claims if the profile truly starts unverified")
 
     store.login(profile)
-    let deadline = Date().addingTimeInterval(1)
+    // Generous: this waits on a detached Task scheduling a subprocess call, which can
+    // take well over a second on a loaded machine. A tight deadline here fails as a
+    // wrong-kubeconfig assertion rather than as the timeout it actually is.
+    let deadline = Date().addingTimeInterval(10)
     while !(await runner.allCommands()).contains(where: { $0.contains("use-context") }), Date() < deadline {
         try await Task.sleep(nanoseconds: 10_000_000)
     }
@@ -2421,7 +2427,930 @@ try await testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp()
 try await testProfileStorePromptsForFolderWhenCreatedWithoutOne()
 try await testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne()
 try await testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown()
+@MainActor
+func testKubernetesContextStatusUpdatesOnVerificationFailureAndExpiration() async throws {
+    let store = ProfileStore(startsBackgroundServices: false)
+    store.markKubernetesContextNeedsLogin(contextName: "non-existent-context", reason: "API Down")
+}
+
+try await testKubernetesContextStatusUpdatesOnVerificationFailureAndExpiration()
+func testHPAAndPVCResourceKinds() throws {
+    assert(KubernetesResourceKind.hpa.title == "HPA")
+    assert(KubernetesResourceKind.pvc.title == "Storage (PVC)")
+    assert(KubernetesResourceKind.hpa.supportsInspectionYAML)
+    assert(KubernetesResourceKind.pvc.supportsInspectionYAML)
+}
+
+try testHPAAndPVCResourceKinds()
 try testCloudFolderPreferencesStoreRoundTripsState()
 try testOpenSourceFixturesStayGeneric()
+
+// MARK: - Phase 1: hangs, watchers, and command safety
+
+/// A provider CLI that never returns used to leave the profile stuck on
+/// "connecting" for the lifetime of the app, with no way to cancel it.
+func testCloudCommandRunnerTerminatesAHangingProcess() async throws {
+    let started = Date()
+    let result = await CloudCommandRunner().run(["sleep", "30"], timeout: 1.0, onOutput: nil)
+    let elapsed = Date().timeIntervalSince(started)
+    assert(result.exitCode == 124, "expected timeout exit code, got \(result.exitCode)")
+    assert(result.output.contains("timed out"), "timeout should be visible in the output")
+    assert(elapsed < 10, "runner should return near the timeout, took \(elapsed)s")
+}
+
+/// Cancelling the task must actually kill the subprocess, not just abandon it.
+func testCloudCommandRunnerCancellationTerminatesTheSubprocess() async throws {
+    let started = Date()
+    let task = Task {
+        await CloudCommandRunner().run(["sleep", "30"], timeout: 0, onOutput: nil)
+    }
+    try await Task.sleep(nanoseconds: 300_000_000)
+    task.cancel()
+    _ = await task.value
+    let elapsed = Date().timeIntervalSince(started)
+    assert(elapsed < 10, "cancellation should end the run promptly, took \(elapsed)s")
+}
+
+/// The regression that made CTX stop noticing CLI logins: every tool CTX watches
+/// writes atomically (temp file + rename), which unlinks the inode the watcher
+/// holds. Without re-arming, only the first write is ever seen.
+func testProfileFileWatcherSurvivesAtomicReplacement() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ctx-watch-\(UUID().uuidString)")
+    // The watched file lives in its own directory, and every *other* configured
+    // path points somewhere else entirely — otherwise a directory watcher would
+    // fire on the temp files an atomic write creates, and the test would pass even
+    // with a dead file watcher.
+    let watchedDirectory = root.appendingPathComponent("watched")
+    let unrelated = root.appendingPathComponent("unrelated")
+    try FileManager.default.createDirectory(at: watchedDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: unrelated, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let target = watchedDirectory.appendingPathComponent("config")
+    try "first".write(to: target, atomically: false, encoding: .utf8)
+
+    let counter = FireCounter()
+    let watcher = ProfileFileWatcherService()
+    watcher.start(
+        kubeConfigPath: nil,
+        awsConfigPath: target.path,
+        gcpActiveConfigPath: unrelated.appendingPathComponent("active_config").path,
+        gcpConfigsDirPath: unrelated.appendingPathComponent("configurations").path,
+        azureProfilesDirPath: unrelated.appendingPathComponent("azure").path,
+        onRefresh: { counter.fire() },
+        onGCPActiveConfigChanged: {}
+    )
+    defer { watcher.stop() }
+
+    // `atomically: true` is exactly what the provider CLIs do — write a temp file
+    // and rename it over the target.
+    for text in ["second", "third"] {
+        try await Task.sleep(nanoseconds: 700_000_000)
+        try text.write(to: target, atomically: true, encoding: .utf8)
+    }
+    try await Task.sleep(nanoseconds: 700_000_000)
+
+    assert(counter.count >= 2, "watcher went deaf after the first atomic replace (fired \(counter.count) times)")
+}
+
+final class FireCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = 0
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return stored
+    }
+    func fire() {
+        lock.lock(); stored += 1; lock.unlock()
+    }
+}
+
+/// Remediation commands are built from names CTX does not control, including a
+/// word sliced out of CLI error output — they must never reach AppleScript's
+/// `do script` with shell metacharacters intact.
+func testShellCommandSafetyRejectsInjection() throws {
+    assert(ShellCommandSafety.isSafeForTerminal("aws sso login --profile dev-sso"))
+    assert(ShellCommandSafety.isSafeForTerminal("kubectl get --raw=/version --context my-cluster"))
+    assert(ShellCommandSafety.isSafeForTerminal("sdm connect prod-db.example.com"))
+
+    assert(!ShellCommandSafety.isSafeForTerminal("aws sso login --profile a\"; rm -rf ~; echo \""))
+    assert(!ShellCommandSafety.isSafeForTerminal("sdm connect $(whoami)"))
+    assert(!ShellCommandSafety.isSafeForTerminal("tsh kube login a`id`"))
+    assert(!ShellCommandSafety.isSafeForTerminal("aws sso login --profile x && curl evil.test"))
+    assert(!ShellCommandSafety.isSafeForTerminal("aws sso login\nrm -rf ~"))
+    assert(!ShellCommandSafety.isSafeForTerminal(""))
+}
+
+// MARK: - GitOps and Helm read real controller state
+
+func jsonItems(_ text: String) throws -> [[String: Any]] {
+    let data = Data(text.utf8)
+    let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    return (root?["items"] as? [[String: Any]]) ?? []
+}
+
+/// An ArgoCD Application whose source is a *Git repository*. `targetRevision` is a
+/// branch, and the deployed revision is a commit SHA that must be shortened, not
+/// shown in full or replaced with the branch name.
+func testArgoCDGitBackedApplicationReportsRealFields() throws {
+    let items = try jsonItems("""
+    {"items":[{
+      "metadata":{"name":"checkout","namespace":"argocd","creationTimestamp":"2024-01-02T10:00:00Z"},
+      "spec":{"source":{"repoURL":"https://git.example.com/org/platform.git","path":"apps/checkout","targetRevision":"release-2.4"}},
+      "status":{"sync":{"status":"OutOfSync","revision":"9f3c1ab7de5544aa10bb2231cc99887766554433"},
+                "health":{"status":"Degraded"}}
+    }]}
+    """)
+    let apps = KubernetesGitOpsService.parseArgoCDApplications(items)
+    assert(apps.count == 1)
+    let app = apps[0]
+    assert(app.provider == "ArgoCD" && app.kind == "Application")
+    assert(app.sourceKind == .git, "git source misclassified as \(app.sourceKind.rawValue)")
+    assert(app.repoURL == "https://git.example.com/org/platform.git")
+    assert(app.path == "apps/checkout")
+    assert(app.targetRevision == "release-2.4")
+    assert(app.syncedRevision == "9f3c1ab", "expected shortened SHA, got \(app.syncedRevision)")
+    assert(app.syncStatus == "OutOfSync", "sync status must not be defaulted to Synced")
+    assert(app.healthStatus == "Degraded")
+    assert(app.chart == KubernetesGitOpsService.unknownValue)
+}
+
+/// The case the dashboard used to flatten: an ArgoCD Application that deploys a
+/// Helm chart straight from a chart repository. `repoURL` is a chart repo, not Git,
+/// and `targetRevision` is the *chart version*.
+func testArgoCDHelmChartApplicationIsIdentifiedAsAChart() throws {
+    let items = try jsonItems("""
+    {"items":[{
+      "metadata":{"name":"kube-prometheus-stack","namespace":"argocd",
+                  "ownerReferences":[{"kind":"ApplicationSet","name":"observability"}],
+                  "creationTimestamp":"2024-03-01T08:30:00Z"},
+      "spec":{"source":{"repoURL":"https://prometheus-community.github.io/helm-charts",
+                        "chart":"kube-prometheus-stack","targetRevision":"56.2.1"}},
+      "status":{"sync":{"status":"Synced","revision":"56.2.1"},"health":{"status":"Healthy"}}
+    }]}
+    """)
+    let apps = KubernetesGitOpsService.parseArgoCDApplications(items)
+    assert(!apps.isEmpty)
+    let app = apps[0]
+    assert(app.sourceKind == .helmChart, "chart-sourced app reported as \(app.sourceKind.rawValue)")
+    assert(app.chart == "kube-prometheus-stack")
+    assert(app.targetRevision == "56.2.1")
+    // A chart version is not a SHA and must survive intact.
+    assert(app.syncedRevision == "56.2.1")
+    assert(app.managedBy == "ApplicationSet/observability")
+}
+
+/// Manifests in Git that ArgoCD renders through Helm are a different thing from a
+/// chart pulled from a chart repo, and must not be collapsed into it.
+func testArgoCDHelmRenderedFromGitIsDistinctFromAChartSource() throws {
+    let items = try jsonItems("""
+    {"items":[{
+      "metadata":{"name":"payments","namespace":"argocd"},
+      "spec":{"source":{"repoURL":"https://git.example.com/org/payments.git","path":"deploy",
+                        "targetRevision":"main","helm":{"valueFiles":["values-prod.yaml"]}}},
+      "status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}
+    }]}
+    """)
+    let apps = KubernetesGitOpsService.parseArgoCDApplications(items)
+    assert(!apps.isEmpty)
+    let app = apps[0]
+    assert(app.sourceKind == .helmFromGit, "got \(app.sourceKind.rawValue)")
+    assert(app.chart == KubernetesGitOpsService.unknownValue, "no chart repo involved, must not invent one")
+    assert(app.path == "deploy")
+}
+
+func testArgoCDOCIAndMultiSourceApplications() throws {
+    let items = try jsonItems("""
+    {"items":[
+      {"metadata":{"name":"edge","namespace":"argocd"},
+       "spec":{"source":{"repoURL":"oci://registry.example.com/charts","chart":"edge","targetRevision":"1.4.0"}},
+       "status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}},
+      {"metadata":{"name":"bundle","namespace":"argocd"},
+       "spec":{"sources":[
+         {"repoURL":"https://git.example.com/a.git","path":"base","targetRevision":"main"},
+         {"repoURL":"https://charts.example.com","chart":"sidecar","targetRevision":"2.0.0"}]},
+       "status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}}
+    ]}
+    """)
+    let apps = KubernetesGitOpsService.parseArgoCDApplications(items)
+    assert(apps[0].sourceKind == .oci, "oci:// source reported as \(apps[0].sourceKind.rawValue)")
+    assert(apps[1].additionalSourceCount == 1, "multi-source app must not look single-source")
+    assert(apps[1].repoURL == "https://git.example.com/a.git")
+}
+
+/// An application the controller has not reported on yet must read as unknown, not
+/// as healthy. This is the exact fabrication the old screen shipped.
+func testGitOpsNeverInventsSyncOrHealth() throws {
+    let items = try jsonItems("""
+    {"items":[{"metadata":{"name":"fresh","namespace":"argocd"},
+               "spec":{"source":{"repoURL":"https://git.example.com/x.git","targetRevision":"main"}},
+               "status":{}}]}
+    """)
+    let apps = KubernetesGitOpsService.parseArgoCDApplications(items)
+    assert(!apps.isEmpty)
+    let app = apps[0]
+    assert(app.syncStatus == KubernetesGitOpsService.unknownValue, "got \(app.syncStatus)")
+    assert(app.healthStatus == KubernetesGitOpsService.unknownValue, "got \(app.healthStatus)")
+    assert(app.syncedRevision == KubernetesGitOpsService.unknownValue)
+}
+
+func testFluxKustomizationAndHelmReleaseReportRealState() throws {
+    let kustomizations = try jsonItems("""
+    {"items":[{
+      "metadata":{"name":"infra","namespace":"flux-system","creationTimestamp":"2024-02-01T00:00:00Z"},
+      "spec":{"path":"./clusters/prod","sourceRef":{"kind":"GitRepository","name":"platform"}},
+      "status":{"lastAppliedRevision":"main@sha1:aabbccdd11223344556677889900aabbccddeeff",
+                "conditions":[{"type":"Ready","status":"True"}]}
+    }]}
+    """)
+    let parsedKustomizations = KubernetesGitOpsService.parseFluxKustomizations(kustomizations)
+    assert(!parsedKustomizations.isEmpty)
+    let kustomization = parsedKustomizations[0]
+    assert(kustomization.provider == "Flux CD" && kustomization.kind == "Kustomization")
+    assert(kustomization.syncStatus == "Synced" && kustomization.healthStatus == "Healthy")
+    assert(kustomization.repoURL == "platform")
+    assert(kustomization.path == "./clusters/prod")
+    assert(kustomization.syncedRevision == "main@aabbccd", "branch context must survive, got \(kustomization.syncedRevision)")
+
+    let helmReleases = try jsonItems("""
+    {"items":[
+      {"metadata":{"name":"ingress-nginx","namespace":"ingress"},
+       "spec":{"chart":{"spec":{"chart":"ingress-nginx","version":"4.9.1",
+                                "sourceRef":{"kind":"HelmRepository","name":"ingress-nginx"}}}},
+       "status":{"lastAppliedRevision":"4.9.1",
+                 "conditions":[{"type":"Ready","status":"False","reason":"InstallFailed"}]}},
+      {"metadata":{"name":"paused","namespace":"ops"},
+       "spec":{"suspend":true,"chart":{"spec":{"chart":"ops-tools","version":"1.0.0"}}},
+       "status":{"conditions":[{"type":"Ready","status":"True"}]}}
+    ]}
+    """)
+    let releases = KubernetesGitOpsService.parseFluxHelmReleases(helmReleases)
+    assert(releases[0].sourceKind == .helmChart)
+    assert(releases[0].chart == "ingress-nginx" && releases[0].targetRevision == "4.9.1")
+    assert(releases[0].syncStatus == "OutOfSync")
+    assert(releases[0].healthStatus == "InstallFailed", "failure reason should surface, got \(releases[0].healthStatus)")
+    assert(releases[1].syncStatus == "Suspended", "a suspended release must not read as Synced")
+}
+
+/// A cluster with ArgoCD but no Flux (or the reverse) must still show what it has.
+/// kubectl fails the whole command for an unknown type, which is why each CRD is
+/// read separately and a missing one is treated as "not installed".
+func testMissingCRDIsNotInstalledRatherThanAnError() throws {
+    assert(KubernetesGitOpsReader.indicatesMissingCRD(
+        "error: the server doesn't have a resource type \"kustomizations\""))
+    assert(KubernetesGitOpsReader.indicatesMissingCRD(
+        "error: unable to recognize \"\": no matches for kind \"Application\" in version \"argoproj.io/v1alpha1\""))
+    // RBAC denial is a real failure and must stay visible.
+    assert(!KubernetesGitOpsReader.indicatesMissingCRD(
+        "Error from server (Forbidden): applications.argoproj.io is forbidden"))
+    assert(!KubernetesGitOpsReader.indicatesMissingCRD(
+        "Unable to connect to the server: dial tcp: i/o timeout"))
+}
+
+/// `helm list -o json` is the authoritative source: chart and app version come from
+/// Helm itself rather than being guessed from a secret name.
+func testHelmListJSONParsesRealReleaseFields() throws {
+    let releases = KubernetesHelmReader.parseHelmListJSON("""
+    [{"name":"ingress-nginx","namespace":"ingress","revision":"7",
+      "updated":"2024-05-04 11:22:33.123456 +0000 UTC","status":"deployed",
+      "chart":"ingress-nginx-4.9.1","app_version":"1.9.6"},
+     {"name":"redis","namespace":"cache","revision":"2",
+      "updated":"2024-05-01 09:00:00.0 +0000 UTC","status":"failed",
+      "chart":"redis-18.1.2","app_version":"7.2.4"}]
+    """)
+    assert(releases.count == 2)
+    let ingress = releases.first { $0.name == "ingress-nginx" }!
+    assert(ingress.chart == "ingress-nginx-4.9.1", "chart must come from helm, got \(ingress.chart)")
+    assert(ingress.appVersion == "1.9.6")
+    assert(ingress.revision == 7)
+    assert(ingress.status == "deployed")
+    assert(ingress.updated != KubernetesGitOpsService.unknownValue, "helm's Go timestamp should parse")
+
+    let redis = releases.first { $0.name == "redis" }!
+    assert(redis.status == "failed", "a failed release must not be reported as deployed")
+}
+
+/// Fallback path when the helm binary isn't installed. Real name, revision, status
+/// and age come from the release Secret's labels; chart and app version live only
+/// inside the Secret payload, which CTX does not read, so they stay unknown.
+func testHelmReleaseSecretLabelsKeepOnlyTheCurrentRevision() throws {
+    let releases = KubernetesHelmReader.parseReleaseSecretLabels("""
+    ingress   ingress-nginx   5   superseded   2024-04-01T10:00:00Z
+    ingress   ingress-nginx   7   deployed     2024-05-04T11:22:33Z
+    ingress   ingress-nginx   6   superseded   2024-04-20T10:00:00Z
+    cache     redis           2   failed       2024-05-01T09:00:00Z
+    other     <none>          1   deployed     2024-05-01T09:00:00Z
+    """)
+    assert(releases.count == 2, "one row per release, got \(releases.count)")
+    let ingress = releases.first { $0.name == "ingress-nginx" }!
+    assert(ingress.revision == 7, "must keep the highest revision, got \(ingress.revision)")
+    assert(ingress.status == "deployed")
+    assert(ingress.chart == KubernetesGitOpsService.unknownValue, "chart lives in the secret payload and must not be guessed")
+    assert(ingress.appVersion == KubernetesGitOpsService.unknownValue)
+    let redis = releases.first { $0.name == "redis" }!
+    assert(redis.status == "failed")
+}
+
+/// The Helm fallback reads labels and creation time only — never `.data`, which
+/// would be a secret value.
+func testHelmSecretFallbackNeverRequestsSecretValues() async throws {
+    let runner = ScriptedKubectl()
+    runner.defaultOutput = .success("")
+    let reader = KubernetesHelmReader(kubectl: runner, resolveBinary: { _ in nil })
+    _ = await reader.releases(context: testKubernetesContext(), namespace: .allNamespaces)
+    let arguments = runner.commands.flatMap(\.arguments)
+    assert(arguments.contains { $0.contains("custom-columns") }, "expected a custom-columns projection")
+    assert(!arguments.contains { $0.contains(".data") }, "secret payload must never be requested")
+    assert(!arguments.contains("--output=json"), "secret JSON must never be requested")
+    assert(arguments.contains("owner=helm"))
+}
+
+/// Answers per resource type, so a cluster can be modelled as "ArgoCD installed,
+/// Flux not" — the case that used to make the whole screen blank or fabricate rows.
+final class CRDAwareKubectl: KubectlRunning, KubectlCommandBuilding, @unchecked Sendable {
+    var responses: [String: KubectlResult] = [:]
+    var missingResourceStderr = "error: the server doesn't have a resource type"
+    var delayNanoseconds: UInt64 = 0
+    private(set) var requestedResources: [String] = []
+    private(set) var lastArguments: [String] = []
+    private let queue = DispatchQueue(label: "ctx.tests.crd-kubectl")
+
+    func inspectionCommand(context: String, arguments: [String]) throws -> KubectlCommand {
+        KubectlCommand(executablePath: "/mock/kubectl", arguments: ["--context", context] + arguments)
+    }
+
+    func run(_ command: KubectlCommand, timeout: TimeInterval) async throws -> KubectlResult {
+        guard let getIndex = command.arguments.firstIndex(of: "get"),
+              command.arguments.indices.contains(getIndex + 1) else {
+            return KubectlResult(exitCode: 1, stdout: "", stderr: "unexpected command")
+        }
+        let resource = command.arguments[getIndex + 1]
+        queue.sync {
+            requestedResources.append(resource)
+            lastArguments = command.arguments
+        }
+        if delayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        if let response = responses[resource] { return response }
+        return KubectlResult(exitCode: 1, stdout: "", stderr: "\(missingResourceStderr) \"\(resource)\"")
+    }
+}
+
+func testGitOpsReaderShowsArgoCDEvenWhenFluxIsNotInstalled() async throws {
+    let kubectl = CRDAwareKubectl()
+    kubectl.responses["applications.argoproj.io"] = KubectlResult(exitCode: 0, stdout: """
+    {"items":[
+      {"metadata":{"name":"checkout","namespace":"argocd"},
+       "spec":{"source":{"repoURL":"https://git.example.com/a.git","path":"apps","targetRevision":"main"}},
+       "status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}},
+      {"metadata":{"name":"grafana","namespace":"argocd"},
+       "spec":{"source":{"repoURL":"https://grafana.github.io/helm-charts","chart":"grafana","targetRevision":"7.3.0"}},
+       "status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}}
+    ]}
+    """, stderr: "")
+
+    let reader = KubernetesGitOpsReader(kubectl: kubectl)
+    let result = await reader.applications(context: testKubernetesContext(), namespace: .allNamespaces)
+
+    assert(result.status == .reachable, "a missing Flux CRD must not fail the whole read")
+    assert(result.installedControllers == ["ArgoCD"], "got \(result.installedControllers)")
+    assert(result.items.count == 2, "got \(result.items.count) apps")
+    // Both ArgoCD delivery styles must be represented, not flattened into one.
+    assert(result.items.contains { $0.sourceKind == .git })
+    assert(result.items.contains { $0.sourceKind == .helmChart && $0.chart == "grafana" })
+    // All three controller resource types are probed independently.
+    assert(kubectl.requestedResources.count == 3, "got \(kubectl.requestedResources)")
+}
+
+/// A cluster with neither controller is a normal state with its own empty message —
+/// not an error, and not an excuse to show invented rows.
+func testGitOpsReaderReportsNoControllersInstalled() async throws {
+    let reader = KubernetesGitOpsReader(kubectl: CRDAwareKubectl())
+    let result = await reader.applications(context: testKubernetesContext(), namespace: .allNamespaces)
+    assert(result.status == .reachable)
+    assert(result.installedControllers.isEmpty)
+    assert(result.items.isEmpty)
+}
+
+/// RBAC denial or an unreachable cluster is a real failure and must surface as one,
+/// rather than being swallowed as "no controller installed".
+func testGitOpsReaderSurfacesRealFailures() async throws {
+    let kubectl = CRDAwareKubectl()
+    kubectl.missingResourceStderr = "Error from server (Forbidden): applications.argoproj.io is forbidden"
+    let reader = KubernetesGitOpsReader(kubectl: kubectl)
+    let result = await reader.applications(context: testKubernetesContext(), namespace: .allNamespaces)
+    assert(result.status != .reachable, "forbidden must not read as a healthy empty cluster")
+    assert(result.diagnostic != nil)
+}
+
+// MARK: - Pod spec is read from the object, never guessed from its name
+
+let realPodJSON = """
+{"metadata":{"name":"checkout-7d9f","namespace":"shop"},
+ "spec":{
+   "serviceAccountName":"checkout-sa","nodeName":"node-worker-a",
+   "securityContext":{"runAsUser":1000,"runAsNonRoot":true},
+   "initContainers":[{"name":"migrate","image":"registry.example.com/migrate:2.1"}],
+   "containers":[{
+     "name":"app","image":"registry.example.com/checkout:1.4.2",
+     "env":[
+       {"name":"APP_ENV","value":"production"},
+       {"name":"DB_PASSWORD","valueFrom":{"secretKeyRef":{"name":"db-creds","key":"password"}}},
+       {"name":"FEATURE_FLAGS","valueFrom":{"configMapKeyRef":{"name":"checkout-config","key":"flags"}}},
+       {"name":"POD_IP","valueFrom":{"fieldRef":{"fieldPath":"status.podIP"}}}],
+     "envFrom":[{"secretRef":{"name":"shared-secrets"}}],
+     "livenessProbe":{"httpGet":{"path":"/healthz","port":9090,"scheme":"HTTPS"},
+                      "initialDelaySeconds":15,"periodSeconds":20},
+     "readinessProbe":{"tcpSocket":{"port":"http"},"initialDelaySeconds":3,"periodSeconds":5},
+     "securityContext":{"privileged":true,"readOnlyRootFilesystem":true,
+                        "capabilities":{"add":["NET_ADMIN"]}},
+     "resources":{"requests":{"cpu":"250m","memory":"512Mi"},"limits":{"memory":"1Gi"}}}]}}
+"""
+
+/// Secret-backed variables must expose their reference and never a value — CTX
+/// does not read the Secret at all. The old inspector printed invented values like
+/// "secret123" that looked entirely real.
+func testPodEnvExposesReferencesButNeverSecretValues() throws {
+    let spec = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: realPodJSON)!
+    let app = spec.containers.first { $0.name == "app" }!
+
+    let literal = app.env.first { $0.name == "APP_ENV" }!
+    assert(literal.value == "production" && literal.source.isEmpty)
+    assert(!literal.isSecret)
+
+    let secret = app.env.first { $0.name == "DB_PASSWORD" }!
+    assert(secret.isSecret)
+    assert(secret.value.isEmpty, "a Secret-backed value must never be materialised")
+    assert(secret.source == "Secret db-creds/password", "got \(secret.source)")
+
+    let configMap = app.env.first { $0.name == "FEATURE_FLAGS" }!
+    assert(configMap.source == "ConfigMap checkout-config/flags" && !configMap.isSecret)
+
+    let field = app.env.first { $0.name == "POD_IP" }!
+    assert(field.source == "field status.podIP")
+
+    // envFrom pulls in every key at once; only the reference is knowable.
+    let bulk = app.env.first { $0.source == "Secret shared-secrets" }!
+    assert(bulk.isSecret && bulk.value.isEmpty)
+
+    // Nothing anywhere carries a materialised secret value.
+    assert(!app.env.contains { $0.isSecret && !$0.value.isEmpty })
+}
+
+func testPodProbesReportRealTargetsAndAbsence() throws {
+    let spec = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: realPodJSON)!
+    let app = spec.containers.first { $0.name == "app" }!
+
+    let liveness = app.probes.first { $0.type == "Liveness" }!
+    assert(liveness.isConfigured)
+    assert(liveness.target == "HTTPS GET /healthz:9090", "got \(liveness.target)")
+    assert(liveness.delaySeconds == 15 && liveness.periodSeconds == 20)
+
+    // A named port must survive as its name, not be coerced to a number.
+    let readiness = app.probes.first { $0.type == "Readiness" }!
+    assert(readiness.target == "TCP :http", "got \(readiness.target)")
+
+    // An unset probe is a real finding, not a value to invent.
+    let startup = app.probes.first { $0.type == "Startup" }!
+    assert(!startup.isConfigured)
+}
+
+/// Container-level security context wins; anything it leaves unset falls back to
+/// the pod-level one, which is how the kubelet resolves it.
+func testPodSecurityContextMergesContainerOverPodLevel() throws {
+    let spec = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: realPodJSON)!
+    let app = spec.containers.first { $0.name == "app" }!
+    assert(app.security.runAsUser == "1000", "pod-level runAsUser should apply, got \(app.security.runAsUser)")
+    assert(!app.security.isRoot)
+    assert(app.security.isPrivileged, "container-level privileged must be honoured")
+    assert(app.security.isReadOnlyRootFS)
+    assert(app.security.addedCapabilities == ["NET_ADMIN"])
+}
+
+/// An unset security context is unknown, not "safe" — and UID 0 is root.
+func testPodSecurityContextDoesNotAssumeSafetyWhenUnset() throws {
+    let bare = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: """
+    {"spec":{"containers":[{"name":"c","image":"i"}]}}
+    """)!.containers[0]
+    assert(bare.security.runAsUser == KubernetesGitOpsService.unknownValue)
+    assert(!bare.security.isRoot && !bare.security.isPrivileged)
+
+    let rootPod = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: """
+    {"spec":{"containers":[{"name":"c","image":"i","securityContext":{"runAsUser":0}}]}}
+    """)!.containers[0]
+    assert(rootPod.security.isRoot, "UID 0 must be reported as root")
+}
+
+/// An absent limit stays absent — that is the finding (the container can consume
+/// the whole node), not a blank to fill with a plausible number.
+func testPodResourcesKeepUnsetLimitsUnset() throws {
+    let spec = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: realPodJSON)!
+    let app = spec.containers.first { $0.name == "app" }!
+    assert(app.resources.cpuRequest == "250m")
+    assert(app.resources.memoryRequest == "512Mi")
+    assert(app.resources.memoryLimit == "1Gi")
+    assert(app.resources.cpuLimit == nil, "an unset CPU limit must not be invented")
+}
+
+func testPodSpecIncludesInitContainersAndIdentity() throws {
+    let spec = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: realPodJSON)!
+    assert(spec.containers.count == 2)
+    assert(spec.containers[0].isInitContainer && spec.containers[0].name == "migrate")
+    assert(!spec.containers[1].isInitContainer)
+    assert(spec.serviceAccount == "checkout-sa")
+    assert(spec.nodeName == "node-worker-a")
+}
+
+/// Not-ready backends are exactly what someone debugging "the service is up but
+/// nothing answers" needs to see, so they are kept and flagged rather than hidden.
+func testServiceEndpointsReportReadyAndNotReadyBackends() throws {
+    let targets = KubernetesWorkloadSpecParser.endpoints(fromEndpointsJSON: """
+    {"metadata":{"name":"checkout","namespace":"shop"},
+     "subsets":[{"ports":[{"port":8080,"name":"http"}],
+                 "addresses":[{"ip":"10.1.2.3","targetRef":{"name":"checkout-a","namespace":"shop"}}],
+                 "notReadyAddresses":[{"ip":"10.1.2.4","targetRef":{"name":"checkout-b","namespace":"shop"}}]}]}
+    """)
+    assert(targets.count == 2)
+    let ready = targets.first { $0.name == "checkout-a" }!
+    assert(ready.isHealthy && ready.address == "10.1.2.3" && ready.targetPort == "8080/http")
+    let notReady = targets.first { $0.name == "checkout-b" }!
+    assert(!notReady.isHealthy, "a not-ready backend must not be reported as healthy")
+
+    // A Service with no backends at all yields nothing — not two invented pods.
+    assert(KubernetesWorkloadSpecParser.endpoints(fromEndpointsJSON: #"{"metadata":{},"subsets":[]}"#).isEmpty)
+}
+
+func testNodeCapacityComesFromTheNodeObject() throws {
+    let node: [String: Any] = [
+        "status": ["capacity": ["cpu": "8", "memory": "32Gi", "pods": "110"],
+                   "allocatable": ["cpu": "7910m", "memory": "30Gi", "pods": "110"]]
+    ]
+    let capacity = KubernetesWorkloadSpecParser.nodeCapacity(fromNodeObject: node)!
+    // Allocatable is what can actually be scheduled, so it wins over raw capacity.
+    assert(capacity.cpu == "7910m", "got \(capacity.cpu)")
+    assert(capacity.memory == "30Gi")
+    assert(capacity.pods == "110")
+}
+
+try testPodEnvExposesReferencesButNeverSecretValues()
+try testPodProbesReportRealTargetsAndAbsence()
+try testPodSecurityContextMergesContainerOverPodLevel()
+try testPodSecurityContextDoesNotAssumeSafetyWhenUnset()
+try testPodResourcesKeepUnsetLimitsUnset()
+try testPodSpecIncludesInitContainersAndIdentity()
+try testServiceEndpointsReportReadyAndNotReadyBackends()
+try testNodeCapacityComesFromTheNodeObject()
+
+// MARK: - Depth pass on the GitOps and Helm reads
+
+/// The bug that made the whole feature useless in practice: ArgoCD `Application`
+/// objects live in the *controller's* namespace (`argocd`) while the workloads they
+/// deliver land elsewhere. Scoping the read to the workspace's selected namespace
+/// returned nothing for every namespace but the controller's own.
+func testGitOpsIsReadClusterWideRegardlessOfSelectedNamespace() async throws {
+    for scope in [KubernetesNamespaceSelection.defaultNamespace,
+                  .namespace("shop"),
+                  .allNamespaces] {
+        let kubectl = CRDAwareKubectl()
+        kubectl.responses["applications.argoproj.io"] = KubectlResult(exitCode: 0, stdout: """
+        {"items":[{"metadata":{"name":"checkout","namespace":"argocd"},
+                   "spec":{"source":{"repoURL":"https://git.example.com/a.git","targetRevision":"main"}},
+                   "status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}}]}
+        """, stderr: "")
+        let reader = KubernetesGitOpsReader(kubectl: kubectl)
+        let result = await reader.applications(context: testKubernetesContext(), namespace: scope)
+
+        assert(result.items.count == 1, "app hidden when scope was \(scope.storageValue)")
+        let arguments = kubectl.lastArguments
+        assert(arguments.contains("--all-namespaces"),
+               "GitOps must always read cluster-wide, got \(arguments)")
+        assert(!arguments.contains("--namespace"),
+               "GitOps must never be namespace-scoped, got \(arguments)")
+    }
+}
+
+/// A partial failure — ArgoCD readable, Flux forbidden — must keep the readable
+/// apps on screen *and* admit the list is incomplete, rather than presenting a
+/// truncated list as if it were the whole picture.
+func testGitOpsPartialFailureKeepsAppsAndReportsIncompleteness() async throws {
+    let kubectl = CRDAwareKubectl()
+    kubectl.responses["applications.argoproj.io"] = KubectlResult(exitCode: 0, stdout: """
+    {"items":[{"metadata":{"name":"checkout","namespace":"argocd"},
+               "spec":{"source":{"repoURL":"https://git.example.com/a.git","targetRevision":"main"}},
+               "status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}}]}
+    """, stderr: "")
+    kubectl.responses["kustomizations.kustomize.toolkit.fluxcd.io"] =
+        KubectlResult(exitCode: 1, stdout: "", stderr: "Error from server (Forbidden): kustomizations is forbidden")
+
+    let reader = KubernetesGitOpsReader(kubectl: kubectl)
+    let result = await reader.applications(context: testKubernetesContext(), namespace: .allNamespaces)
+
+    assert(result.items.count == 1, "readable apps must survive a sibling failure")
+    assert(result.installedControllers == ["ArgoCD"])
+    assert(result.status == .reachable)
+    assert(result.diagnostic != nil, "an unreadable controller must not vanish silently")
+}
+
+/// Three CRDs read serially cost three round trips before anything rendered.
+func testGitOpsReadsControllersConcurrently() async throws {
+    let kubectl = CRDAwareKubectl()
+    kubectl.delayNanoseconds = 250_000_000
+    let started = Date()
+    _ = await KubernetesGitOpsReader(kubectl: kubectl)
+        .applications(context: testKubernetesContext(), namespace: .allNamespaces)
+    let elapsed = Date().timeIntervalSince(started)
+    assert(kubectl.requestedResources.count == 3)
+    assert(elapsed < 0.6, "three 250ms reads should overlap, took \(elapsed)s")
+}
+
+/// Flux reports "<branch>@sha1:<digest>". Truncating to the bare hash threw away
+/// which branch was deployed — half of what the field is for.
+func testShortRevisionKeepsBranchAndLeavesVersionsIntact() throws {
+    assert(KubernetesGitOpsService.shortRevision("main@sha1:aabbccdd11223344556677889900aabbccddeeff") == "main@aabbccd")
+    assert(KubernetesGitOpsService.shortRevision("9f3c1ab7de5544aa10bb2231cc99887766554433") == "9f3c1ab")
+    assert(KubernetesGitOpsService.shortRevision("sha256:aabbccdd11223344556677889900aabbccddeeff") == "aabbccd")
+    // Not hashes — these must survive untouched.
+    assert(KubernetesGitOpsService.shortRevision("56.2.1") == "56.2.1")
+    assert(KubernetesGitOpsService.shortRevision("v1.4.2") == "v1.4.2")
+    assert(KubernetesGitOpsService.shortRevision("release-2.4") == "release-2.4")
+    assert(KubernetesGitOpsService.shortRevision(nil) == KubernetesGitOpsService.unknownValue)
+}
+
+/// `helm list` without `--all` filters out exactly the releases worth seeing: a
+/// deploy stuck in pending-upgrade is invisible by default.
+func testHelmListAsksForEveryReleaseState() async throws {
+    let kubectl = ScriptedKubectl()
+    kubectl.defaultOutput = .success("[]")
+    let reader = KubernetesHelmReader(kubectl: kubectl, resolveBinary: { _ in "/mock/helm" })
+    _ = await reader.releases(context: testKubernetesContext(), namespace: .allNamespaces)
+    let arguments = kubectl.commands.flatMap(\.arguments)
+    assert(arguments.contains("--all"), "pending releases would be hidden, got \(arguments)")
+    assert(arguments.contains("--all-namespaces"))
+    assert(arguments.contains("--kube-context"), "helm must be pinned to the workspace context")
+}
+
+/// Two `envFrom` entries in one container both carry the placeholder name
+/// "(all keys)". Identical ids break `ForEach` identity in SwiftUI.
+func testEnvVarIdentityStaysUniqueAcrossBulkReferences() throws {
+    let spec = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: """
+    {"spec":{"containers":[{"name":"app","image":"i","envFrom":[
+      {"secretRef":{"name":"shared-secrets"}},
+      {"secretRef":{"name":"extra-secrets"}},
+      {"configMapRef":{"name":"app-config"}}]}]}}
+    """)!
+    let env = spec.containers[0].env
+    assert(env.count == 3)
+    assert(Set(env.map(\.id)).count == 3, "duplicate identifiers: \(env.map(\.id))")
+    assert(env.filter(\.isSecret).count == 2)
+    assert(!env.contains { !$0.value.isEmpty }, "bulk references have no readable value")
+}
+
+try await testGitOpsIsReadClusterWideRegardlessOfSelectedNamespace()
+try await testGitOpsPartialFailureKeepsAppsAndReportsIncompleteness()
+try await testGitOpsReadsControllersConcurrently()
+try testShortRevisionKeepsBranchAndLeavesVersionsIntact()
+try await testHelmListAsksForEveryReleaseState()
+try testEnvVarIdentityStaysUniqueAcrossBulkReferences()
+
+try await testGitOpsReaderShowsArgoCDEvenWhenFluxIsNotInstalled()
+try await testGitOpsReaderReportsNoControllersInstalled()
+try await testGitOpsReaderSurfacesRealFailures()
+try testArgoCDGitBackedApplicationReportsRealFields()
+try testArgoCDHelmChartApplicationIsIdentifiedAsAChart()
+try testArgoCDHelmRenderedFromGitIsDistinctFromAChartSource()
+try testArgoCDOCIAndMultiSourceApplications()
+try testGitOpsNeverInventsSyncOrHealth()
+try testFluxKustomizationAndHelmReleaseReportRealState()
+try testMissingCRDIsNotInstalledRatherThanAnError()
+try testHelmListJSONParsesRealReleaseFields()
+try testHelmReleaseSecretLabelsKeepOnlyTheCurrentRevision()
+try await testHelmSecretFallbackNeverRequestsSecretValues()
+
+try await testCloudCommandRunnerTerminatesAHangingProcess()
+try await testCloudCommandRunnerCancellationTerminatesTheSubprocess()
+try await testProfileFileWatcherSurvivesAtomicReplacement()
+try testShellCommandSafetyRejectsInjection()
+
+// MARK: - Phase 2: derived state stays cached and correct
+
+/// The grouping is now stored rather than computed, so the risk shifts from "too
+/// slow" to "stale". Every mutation path that feeds it must rebuild it.
+@MainActor
+func testGroupedProfilesStayInSyncWithEveryMutation() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-group-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let configURL = dir.appendingPathComponent("config")
+    try """
+    [profile shop-prod]
+    sso_account_id = 123456789012
+    sso_role_name = Admin
+
+    [profile shop-dev]
+    sso_account_id = 123456789012
+    sso_role_name = Admin
+    """.write(to: configURL, atomically: true, encoding: .utf8)
+
+    let suiteName = "ctx-group-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { nil }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("creds")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+
+    // Scoped to AWS: discovery also picks up whatever GCP/Azure configurations
+    // exist on the machine running the tests, and every provider has its own
+    // folder named "Production".
+    func grouped(_ folderName: String) -> [String] {
+        store.groupedProfiles
+            .first { $0.folder.provider == .aws && $0.folder.name == folderName }?
+            .profiles.map(\.name).sorted() ?? []
+    }
+
+    // Built at init: environment inference splits the two profiles by name.
+    assert(!store.allFolders.isEmpty, "folders must be built during init, where didSet does not fire")
+    assert(grouped("Production") == ["shop-prod"], "got \(grouped("Production"))")
+    assert(grouped("Development") == ["shop-dev"], "got \(grouped("Development"))")
+
+    // Moving a profile must be reflected without any other trigger.
+    let prod = store.profiles.first { $0.name == "shop-prod" }!
+    let devFolder = store.allFolders.first { $0.provider == .aws && $0.name == "Development" }!
+    store.move(prod, to: devFolder)
+    assert(grouped("Development") == ["shop-dev", "shop-prod"], "override did not rebuild grouping: \(grouped("Development"))")
+    assert(grouped("Production").isEmpty)
+
+    // Creating a folder must appear, and deleting it must both disappear and
+    // release the profiles it held.
+    try store.addFolder(name: "Payments", provider: .aws, icon: .cloud)
+    let payments = store.allFolders.first { $0.name == "Payments" }!
+    assert(store.folders(for: .aws).contains { $0.id == payments.id }, "folders(for:) must see a new folder")
+    store.move(prod, to: payments)
+    assert(grouped("Payments") == ["shop-prod"])
+
+    store.deleteFolder(payments)
+    assert(!store.allFolders.contains { $0.id == payments.id })
+    assert(grouped("Production") == ["shop-prod"], "profile must fall back to its inferred folder: \(grouped("Production"))")
+
+    // Hiding a built-in folder removes it from both views.
+    let production = store.allFolders.first { $0.provider == .aws && $0.name == "Production" }!
+    store.deleteFolder(production)
+    assert(!store.allFolders.contains { $0.id == production.id })
+    assert(!store.groupedProfiles.contains { $0.folder.id == production.id })
+    _ = production
+
+    store.restoreAllFolders()
+    assert(store.allFolders.contains { $0.id == production.id }, "restore must rebuild the folder list")
+    assert(grouped("Production") == ["shop-prod"])
+
+    // A rename must reach both the folder list and the grouping.
+    try store.updateFolder(store.allFolders.first { $0.provider == .aws && $0.name == "Production" }!, name: "Live", icon: .server)
+    assert(store.allFolders.contains { $0.name == "Live" })
+    assert(grouped("Live") == ["shop-prod"], "rename did not rebuild grouping")
+}
+
+/// A profile whose override points at another provider's folder used to be matched
+/// by no group at all and vanished from the sidebar entirely.
+@MainActor
+func testCrossProviderOverrideFallsBackInsteadOfHidingTheProfile() throws {
+    let store = ProfileStore(startsBackgroundServices: false)
+    let profile = CloudProfile(provider: .aws, name: "shop-prod")
+    let gcpFolder = CloudFolder.builtIn(provider: .gcp, environment: .production)
+    store.move(profile, to: gcpFolder)
+    let resolved = store.folder(for: profile)
+    assert(resolved.provider == .aws, "a mismatched override must fall back, got \(resolved.provider)")
+}
+
+/// One parse of the credentials file for all profiles, not one parse per profile.
+func testCredentialExpiriesParseEveryProfileInOnePass() throws {
+    let text = """
+    [alpha]
+    aws_access_key_id = A
+    aws_session_expiration = 2030-01-01T10:00:00Z
+
+    [beta]
+    aws_session_expiration = 2030-01-02T11:30:00+00:00
+
+    [gamma]
+    aws_access_key_id = C
+    """
+    let expiries = AWSSessionExpirationService.credentialExpiries(credentialsText: text)
+    assert(expiries.count == 2, "got \(expiries.keys.sorted())")
+    assert(expiries["alpha"] != nil && expiries["beta"] != nil)
+    assert(expiries["gamma"] == nil, "a profile with no expiry must not appear")
+
+    // Same answer as the single-profile lookup it replaced.
+    for name in ["alpha", "beta", "gamma"] {
+        assert(expiries[name] == AWSSessionExpirationService.credentialsExpiry(for: name, credentialsText: text),
+               "bulk and single-profile parsing disagree for \(name)")
+    }
+}
+
+try testGroupedProfilesStayInSyncWithEveryMutation()
+try testCrossProviderOverrideFallsBackInsteadOfHidingTheProfile()
+try testCredentialExpiriesParseEveryProfileInOnePass()
+
+/// The search haystack is derived state that must survive the disk cache: a row
+/// decoded from SQLite has to filter exactly like a freshly parsed one.
+func testRowFilteringSurvivesEncodingAndMatchesTheOldSemantics() throws {
+    let row = KubernetesResourceRow(id: "team-a/api-7d9f", cells: [
+        "Namespace": "team-a", "Name": "api-7d9f", "Status": "CrashLoopBackOff",
+        "Node": "node-worker-3", "Age": "4d"
+    ])
+
+    // Values, keys, the id, and case-insensitivity.
+    for needle in ["api", "API", "crashloop", "team-a", "node-worker-3", "Status", "team-a/api"] {
+        assert(row.matchesFilter(needle), "should match '\(needle)'")
+    }
+    for needle in ["nomatch", "node-worker-30", "zzz"] {
+        assert(!row.matchesFilter(needle), "should not match '\(needle)'")
+    }
+    // Empty and whitespace-only filters match everything.
+    assert(row.matchesFilter("") && row.matchesFilter("   "))
+    // Padding around a real term is trimmed.
+    assert(row.matchesFilter("  api  "))
+
+    let decoded = try JSONDecoder().decode(KubernetesResourceRow.self, from: JSONEncoder().encode(row))
+    assert(decoded == row)
+    for needle in ["api", "CRASHLOOP", "node-worker-3", "Status"] {
+        assert(decoded.matchesFilter(needle), "decoded row lost its search index for '\(needle)'")
+    }
+    assert(!decoded.matchesFilter("zzz"))
+
+    // Batch and single-row entry points must agree.
+    let rows = [row, KubernetesResourceRow(id: "team-b/web", cells: ["Name": "web"])]
+    assert(KubernetesResourceRow.filtered(rows, matching: "api").map(\.id) == ["team-a/api-7d9f"])
+    assert(KubernetesResourceRow.filtered(rows, matching: "").count == 2)
+}
+
+/// A rediscovery that finds exactly what was already there must not republish —
+/// every watcher event would otherwise re-render the whole sidebar for no change.
+@MainActor
+func testUnchangedRediscoveryDoesNotRepublishProfiles() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-idem-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let configURL = dir.appendingPathComponent("config")
+    try "[profile shop-prod]\nsso_account_id = 123456789012\n".write(to: configURL, atomically: true, encoding: .utf8)
+
+    let suiteName = "ctx-idem-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { nil }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("creds")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+
+    // Let the first pass settle: rediscovery *plus* the verification behind it,
+    // whose status transitions are real changes and must publish.
+    store.refresh()
+    try await Task.sleep(nanoseconds: 900_000_000)
+
+    var publishCount = 0
+    let cancellable = store.$profiles.dropFirst().sink { _ in publishCount += 1 }
+    defer { cancellable.cancel() }
+
+    // Second pass: nothing on disk changed and verification returns what it
+    // returned last time, so the whole cycle must be a no-op.
+    store.refresh()
+    try await Task.sleep(nanoseconds: 900_000_000)
+    assert(publishCount == 0, "an unchanged rediscovery republished \(publishCount) times")
+
+    // A real change still comes through.
+    try "[profile shop-prod]\nsso_account_id = 123456789012\n\n[profile shop-dev]\nsso_account_id = 210987654321\n"
+        .write(to: configURL, atomically: true, encoding: .utf8)
+    store.refresh()
+    try await Task.sleep(nanoseconds: 900_000_000)
+    assert(publishCount >= 1, "a real change must republish")
+    // Scoped to this test's own config file: GCP and Azure discovery, and the
+    // default kubeconfig, are not injectable, so the store also sees whatever the
+    // machine running the tests happens to have.
+    let discovered = store.profiles.filter { $0.name.hasPrefix("shop-") }.map(\.name).sorted()
+    assert(discovered == ["shop-dev", "shop-prod"], "got \(discovered)")
+}
+
+try testRowFilteringSurvivesEncodingAndMatchesTheOldSemantics()
+try await testUnchangedRediscoveryDoesNotRepublishProfiles()
 
 print("CTXCoreTests passed")

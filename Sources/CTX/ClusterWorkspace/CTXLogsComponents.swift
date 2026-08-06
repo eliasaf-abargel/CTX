@@ -82,7 +82,7 @@ struct CTXPodPicker: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
 
-                TextField("Filter pods...", text: $filterQuery)
+                TextField("Search pods...", text: $filterQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11))
 

@@ -265,6 +265,8 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
         case .configMaps: ["Namespace", "Name", "Keys", "Age"]
         case .secretMetadata: ["Namespace", "Name", "Type", "Keys", "Age"]
         case .events: ["Namespace", "Object", "Type", "Reason", "Message", "Last", "Count"]
+        case .hpa: ["Namespace", "Name", "Reference", "Targets", "MinPods", "MaxPods", "Replicas", "Age"]
+        case .pvc: ["Namespace", "Name", "Status", "Volume", "Capacity", "Access Modes", "StorageClass", "Age"]
         }
     }
 }

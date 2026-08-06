@@ -31,10 +31,22 @@ public final class AWSSessionExpirationService: Sendable {
         }
 
         let cache = cacheExpiries(from: files)
+        // `~/.aws/credentials` is read and parsed exactly once here. It used to be
+        // re-read from disk inside the loop — once per AWS profile — so a machine
+        // with ten profiles did ten full reads and ten full parses of the same file
+        // on every pass, on the main actor.
+        let credentialsText = (try? String(contentsOf: credentialsURL, encoding: .utf8)) ?? ""
+        let credentialExpiries = Self.credentialExpiries(credentialsText: credentialsText)
+
         var expiries: [String: Date] = [:]
         for profile in profiles where profile.provider == .aws {
+            if let expiry = credentialExpiries[profile.name] {
+                expiries[profile.name] = expiry
+                continue
+            }
             guard !profile.ssoStartURL.isEmpty else { continue }
-            if let expiry = sessionExpiry(for: profile, cacheExpiries: cache.expiryByStartURL) {
+            let normalizedStartURL = profile.ssoStartURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let expiry = cache.expiryByStartURL[normalizedStartURL] {
                 expiries[profile.name] = expiry
             }
         }
@@ -43,6 +55,24 @@ public final class AWSSessionExpirationService: Sendable {
             expiryByProfileName: expiries,
             newestCacheModificationDate: cache.newestModificationDate
         )
+    }
+
+    /// Every `aws_session_expiration` in the credentials file, from one parse.
+    public static func credentialExpiries(credentialsText: String) -> [String: Date] {
+        var expiries: [String: Date] = [:]
+        var section = ""
+        for line in credentialsText.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("["), trimmed.hasSuffix("]") {
+                section = String(trimmed.dropFirst().dropLast())
+                continue
+            }
+            guard !section.isEmpty, trimmed.hasPrefix("aws_session_expiration") else { continue }
+            let parts = trimmed.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, let date = parseDate(parts[1].trimmingCharacters(in: .whitespaces)) else { continue }
+            expiries[section] = date
+        }
+        return expiries
     }
 
     public func sessionExpiry(for profile: CloudProfile) -> Date? {
@@ -114,9 +144,18 @@ public final class AWSSessionExpirationService: Sendable {
         return (expiryByStartURL, newestModificationDate)
     }
 
+    /// Held once rather than constructed per call. `ISO8601DateFormatter` is one of
+    /// the more expensive objects in Foundation to create, and this used to build
+    /// two of them for every timestamp in the SSO cache and the credentials file.
+    private static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let plainFormatter = ISO8601DateFormatter()
+
     private static func parseDate(_ value: String) -> Date? {
-        let fractionalFormatter = ISO8601DateFormatter()
-        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractionalFormatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        fractionalFormatter.date(from: value) ?? plainFormatter.date(from: value)
     }
 }

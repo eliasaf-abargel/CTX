@@ -75,20 +75,22 @@ enum CTXResourceColumns {
             [
                 .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
                 .text("Kind", min: 80, ideal: 100, max: 130, priority: 2),
-                .text("Name", min: 140, ideal: 320, max: 700, priority: 3, flexible: true, copyable: true),
+                .text("Name", min: 140, ideal: 260, max: 500, priority: 3, flexible: true, copyable: true),
                 .text("Ready", min: 60, ideal: 70, max: 90, priority: 3),
                 .numeric("Available", min: 70, ideal: 80, max: 100, priority: 1, hideOnCompact: true),
+                .text("Image", min: 140, ideal: 280, max: 600, priority: 2, hideOnCompact: true, copyable: true),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
             ]
         case .pods:
             [
                 .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 320, max: 700, priority: 3, flexible: true, copyable: true),
-                .text("Status", min: 80, ideal: 100, max: 130, priority: 3),
+                .text("Name", min: 140, ideal: 260, max: 500, priority: 3, flexible: true, copyable: true),
+                .text("Status", min: 110, ideal: 140, max: 175, priority: 3),
                 .text("Ready", min: 55, ideal: 65, max: 80, priority: 2),
                 .numeric("Restarts", min: 65, ideal: 80, max: 100, priority: 1, hideOnCompact: true),
                 .numeric("CPU", min: 75, ideal: 95, max: 120, priority: 2),
                 .numeric("Memory", min: 85, ideal: 110, max: 140, priority: 2),
+                .text("Image", min: 140, ideal: 280, max: 600, priority: 2, hideOnCompact: true, copyable: true),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2),
                 .text("Node", min: 100, ideal: 140, max: 220, priority: 1, hideOnCompact: true)
             ]
@@ -147,32 +149,61 @@ enum CTXResourceColumns {
                 .text("Last", min: 55, ideal: 65, max: 80, priority: 1, hideOnCompact: true),
                 .numeric("Count", min: 55, ideal: 65, max: 80, priority: 1, hideOnCompact: true)
             ]
+        case .hpa:
+            [
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 300, max: 600, priority: 3, flexible: true, copyable: true),
+                .text("Reference", min: 120, ideal: 220, max: 400, priority: 2, copyable: true),
+                .text("Targets", min: 100, ideal: 160, max: 300, priority: 2),
+                .numeric("MinPods", min: 60, ideal: 75, max: 90, priority: 1, hideOnCompact: true),
+                .numeric("MaxPods", min: 60, ideal: 75, max: 90, priority: 1, hideOnCompact: true),
+                .numeric("Replicas", min: 60, ideal: 75, max: 90, priority: 3),
+                .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
+            ]
+        case .pvc:
+            [
+                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 300, max: 600, priority: 3, flexible: true, copyable: true),
+                .text("Status", min: 70, ideal: 90, max: 110, priority: 3),
+                .text("Volume", min: 120, ideal: 220, max: 400, priority: 2, copyable: true),
+                .numeric("Capacity", min: 70, ideal: 90, max: 120, priority: 2),
+                .text("Access Modes", min: 90, ideal: 120, max: 160, priority: 1, hideOnCompact: true),
+                .text("StorageClass", min: 100, ideal: 150, max: 250, priority: 1, hideOnCompact: true),
+                .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
+            ]
         }
     }
 
     static func columns(for section: ClusterWorkspaceSection) -> [CTXTableColumn] {
         switch section {
         case .gitops:
-            let cols: [CTXTableColumn] = [
-                .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
-                .text("Provider", min: 80, ideal: 100, max: 130, priority: 2),
+            // `Source` distinguishes a chart pulled from a chart repo from manifests
+            // in Git that the controller renders through Helm — the two mean
+            // different things for `Target`, which is a chart version in one case
+            // and a branch or tag in the other. `Synced` is what is actually running
+            // right now, as opposed to what the app is configured to track.
+            return [
+                .text("Namespace", min: 100, ideal: 160, max: 280, priority: 2, copyable: true),
+                .text("Name", min: 140, ideal: 240, max: 500, priority: 3, flexible: true, copyable: true),
+                .text("Provider", min: 80, ideal: 95, max: 120, priority: 2),
+                .text("Source", min: 85, ideal: 105, max: 140, priority: 1, hideOnCompact: true),
                 .text("Status", min: 80, ideal: 100, max: 130, priority: 3),
-                .text("Target", min: 100, ideal: 180, max: 360, priority: 1, hideOnCompact: true, copyable: true),
+                .text("Health", min: 80, ideal: 100, max: 140, priority: 2),
+                .text("Repo URL", min: 140, ideal: 250, max: 550, priority: 1, hideOnCompact: true, copyable: true),
+                .text("Target", min: 90, ideal: 130, max: 240, priority: 1, hideOnCompact: true, copyable: true),
+                .text("Synced", min: 80, ideal: 105, max: 200, priority: 1, hideOnCompact: true, copyable: true),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
             ]
-            return cols
         case .helm:
-            let cols: [CTXTableColumn] = [
+            return [
                 .text("Namespace", min: 100, ideal: 180, max: 300, priority: 2, copyable: true),
-                .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
+                .text("Name", min: 140, ideal: 300, max: 700, priority: 3, flexible: true, copyable: true),
                 .text("Chart", min: 120, ideal: 220, max: 400, priority: 2, copyable: true),
-                .text("Version", min: 80, ideal: 100, max: 130, priority: 1, hideOnCompact: true),
+                .text("App Version", min: 90, ideal: 110, max: 150, priority: 1, hideOnCompact: true),
                 .numeric("Revision", min: 60, ideal: 75, max: 90, priority: 2),
-                .text("Status", min: 70, ideal: 90, max: 110, priority: 3),
-                .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2)
+                .text("Status", min: 70, ideal: 95, max: 120, priority: 3),
+                .numeric("Updated", min: 60, ideal: 75, max: 90, priority: 2)
             ]
-            return cols
         default:
             if let kind = section.resourceKind {
                 return columns(for: kind)

@@ -42,6 +42,7 @@ struct SidebarView: View {
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
     @State private var expandedGroups: Set<String> = []
     @State private var deleteCandidate: CloudProfile? = nil
+    @State private var expandedProviders: Set<CloudProvider> = Set(CloudProvider.allCases)
     @State private var sidebarSearchQuery = ""
 
     private var filteredGroupedProfiles: [ProfileGroup] {
@@ -64,6 +65,20 @@ struct SidebarView: View {
             } else {
                 return nil
             }
+        }
+    }
+
+    private struct ProviderGroup: Identifiable {
+        var id: CloudProvider { provider }
+        let provider: CloudProvider
+        let folderGroups: [ProfileGroup]
+    }
+
+    private var providerGroups: [ProviderGroup] {
+        CloudProvider.allCases.compactMap { provider in
+            let groups = filteredGroupedProfiles.filter { $0.folder.provider == provider && !$0.profiles.isEmpty }
+            guard !groups.isEmpty else { return nil }
+            return ProviderGroup(provider: provider, folderGroups: groups)
         }
     }
 
@@ -98,18 +113,46 @@ struct SidebarView: View {
             .padding(.bottom, 6)
 
             List(selection: $store.selectedSelection) {
-                ForEach(filteredGroupedProfiles) { group in
-                    ProfileDisclosureGroup(
-                        group: group,
-                        selectedSelection: $store.selectedSelection,
-                        isExpanded: binding(for: group.id),
-                        sheet: $sheet,
-                        deleteCandidate: $deleteCandidate,
-                        store: store,
-                        editFolder: { sheet = .editFolder($0) },
-                        deleteFolder: { store.deleteFolder($0) }
-                    )
-                    .tag(SidebarSelection.folder(group.folder.id))
+                ForEach(providerGroups) { pGroup in
+                    DisclosureGroup(isExpanded: providerBinding(for: pGroup.provider)) {
+                        ForEach(pGroup.folderGroups) { group in
+                            ProfileDisclosureGroup(
+                                group: group,
+                                selectedSelection: $store.selectedSelection,
+                                isExpanded: binding(for: group.id),
+                                sheet: $sheet,
+                                deleteCandidate: $deleteCandidate,
+                                store: store,
+                                editFolder: { sheet = .editFolder($0) },
+                                deleteFolder: { store.deleteFolder($0) }
+                            )
+                            .tag(SidebarSelection.folder(group.folder.id))
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            ProviderIcon(provider: pGroup.provider, size: 13, fallbackTint: .primary)
+                            Text(pGroup.provider.sectionHeaderTitle)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.primary)
+
+                            if pGroup.folderGroups.contains(where: { g in g.profiles.contains { $0.status == .connected } }) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                            }
+
+                            Spacer()
+
+                            let totalCount = pGroup.folderGroups.reduce(0) { $0 + $1.profiles.count }
+                            Text("\(totalCount)")
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.12), in: Capsule())
+                        }
+                        .contentShape(Rectangle())
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -229,9 +272,23 @@ struct SidebarView: View {
             if case .profile(let profileID) = newValue,
                let profile = store.profiles.first(where: { $0.id == profileID }) {
                 let folder = store.folder(for: profile)
+                expandedProviders.insert(profile.provider)
                 expandedGroups.insert(folder.id)
             }
         }
+    }
+
+    private func providerBinding(for provider: CloudProvider) -> Binding<Bool> {
+        Binding(
+            get: { expandedProviders.contains(provider) || !sidebarSearchQuery.isEmpty },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedProviders.insert(provider)
+                } else {
+                    expandedProviders.remove(provider)
+                }
+            }
+        )
     }
 
     private var identityStatusColor: Color {
@@ -287,19 +344,29 @@ struct ProfileDisclosureGroup: View {
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 16)
 
-                Text("\(group.folder.provider.rawValue) · \(group.folder.name)")
+                Text(group.folder.name)
                     .lineLimit(1)
 
+                if group.profiles.contains(where: { $0.status == .connected }) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 5, height: 5)
+                }
+
                 Spacer()
+
+                Text("\(group.profiles.count)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .contentShape(Rectangle())
             .onTapGesture {
                 selectedSelection = .folder(group.folder.id)
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
             }
             .contextMenu {
                 Button {

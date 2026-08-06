@@ -129,10 +129,17 @@ struct PodVectorIcon: View {
     }
 }
 
-struct TechBrandIconView: View {
+struct TechBrandIconView: View, Equatable {
     let name: String
 
-    var brand: (icon: String, color: Color) {
+    static func == (lhs: TechBrandIconView, rhs: TechBrandIconView) -> Bool {
+        lhs.name == rhs.name
+    }
+
+    /// Resolved once per body. It was read four times — icon, foreground, background
+    /// and stroke — and each read re-ran `lowercased()` plus up to twenty-five
+    /// substring searches, so a table cell cost about a hundred searches per render.
+    static func brand(for name: String) -> (icon: String, color: Color) {
         let lower = name.lowercased()
         if lower.contains("redis") { return ("cylinder.fill", .red) }
         if lower.contains("postgre") || lower.contains("sql") || lower.contains("db") || lower.contains("mongo") { return ("database.fill", .blue) }
@@ -147,13 +154,16 @@ struct TechBrandIconView: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        let brand = Self.brand(for: name)
+        return HStack(spacing: 4) {
             Image(systemName: brand.icon)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(brand.color)
             Text(name)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 3)

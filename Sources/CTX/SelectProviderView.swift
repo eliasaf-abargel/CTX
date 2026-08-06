@@ -67,11 +67,7 @@ struct SelectProviderView: View {
         target: SidebarSheet
     ) -> some View {
         Button {
-            sheet = nil
-            // Prevent sheet collision by presenting on next runloop cycle
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                sheet = target
-            }
+            sheet = target
         } label: {
             HStack(spacing: 12) {
                 ProviderIcon(

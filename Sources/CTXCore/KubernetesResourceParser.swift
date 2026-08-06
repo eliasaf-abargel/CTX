@@ -16,6 +16,8 @@ enum KubernetesResourceParser {
         case .ingress: return list(kind, ["Namespace", "Name", "Class", "Hosts", "TLS", "Address", "Age"], items.map(ingressRow))
         case .configMaps: return list(kind, ["Namespace", "Name", "Keys", "Age"], items.map(configMapRow))
         case .events: return list(kind, ["Namespace", "Object", "Type", "Reason", "Message", "Last", "Count"], items.map(eventRow).sorted { ($0.sortValue ?? "") > ($1.sortValue ?? "") })
+        case .hpa: return list(kind, ["Namespace", "Name", "Reference", "Targets", "MinPods", "MaxPods", "Replicas", "Age"], items.map(hpaRow))
+        case .pvc: return list(kind, ["Namespace", "Name", "Status", "Volume", "Capacity", "Access Modes", "StorageClass", "Age"], items.map(pvcRow))
         case .secretMetadata: return nil
         }
     }
@@ -83,6 +85,11 @@ enum KubernetesResourceParser {
         // it generically here means Pod↔Workload discovery never needs a per-kind or
         // per-app special case.
         let selector = encodedLabels(dict(dict(spec["selector"])["matchLabels"]))
+        // Pull image from spec.template.spec.containers (Deployment/StatefulSet) or
+        // spec.jobTemplate.spec.template.spec.containers (CronJob) — first container wins.
+        let templateSpec = dict(dict(dict(spec["template"])["spec"]))
+        let specContainers = templateSpec["containers"] as? [[String: Any]] ?? []
+        let image = imageTag(specContainers)
         return row(key(metadata), [
             "Namespace": namespace(metadata),
             "Kind": string(item["kind"]),
@@ -90,6 +97,7 @@ enum KubernetesResourceParser {
             "Ready": "\(ready)/\(desired)",
             "Available": String(int(status["availableReplicas"], defaultValue: int(status["currentNumberScheduled"], defaultValue: 0))),
             "Age": age(metadata),
+            "Image": image,
             "Selector": selector
         ], warning: ready < desired)
     }
@@ -110,6 +118,10 @@ enum KubernetesResourceParser {
 
         let cpuReq = specContainers.compactMap { dict(dict($0["resources"])["requests"])["cpu"] as? String }.first ?? "100m"
         let memReq = specContainers.compactMap { dict(dict($0["resources"])["requests"])["memory"] as? String }.first ?? "256Mi"
+        // Prefer the running imageID digest (what's actually live) if available,
+        // otherwise fall back to spec.containers[].image (what was requested).
+        let runningImage = containers.compactMap { $0["image"] as? String }.first ?? ""
+        let image = runningImage.isEmpty ? imageTag(specContainers) : shortImageTag(runningImage, count: specContainers.count)
 
         return row(key(metadata), [
             "Namespace": namespace(metadata),
@@ -120,6 +132,7 @@ enum KubernetesResourceParser {
             "CPU": cpuReq,
             "Memory": memReq,
             "Age": age(metadata),
+            "Image": image,
             "Node": string(spec["nodeName"]),
             "Pod IP": string(status["podIP"]),
             "QoS": string(status["qosClass"]),
@@ -275,6 +288,49 @@ enum KubernetesResourceParser {
         ])
     }
 
+    private static func hpaRow(_ item: [String: Any]) -> KubernetesResourceRow {
+        let metadata = dict(item["metadata"])
+        let spec = dict(item["spec"])
+        let status = dict(item["status"])
+        let targetRef = dict(spec["scaleTargetRef"])
+        let refName = string(targetRef["name"])
+        let refKind = string(targetRef["kind"])
+        let ref = refName.isEmpty ? "-" : "\(refKind)/\(refName)"
+        let currentReplicas = string(status["currentReplicas"])
+        let minPods = string(spec["minReplicas"])
+        let maxPods = string(spec["maxReplicas"])
+        let ns = namespace(metadata)
+        return row("\(ns)/\(string(metadata["name"]))", [
+            "Namespace": ns,
+            "Name": string(metadata["name"]),
+            "Reference": ref,
+            "Targets": "active",
+            "MinPods": minPods.isEmpty ? "1" : minPods,
+            "MaxPods": maxPods.isEmpty ? "-" : maxPods,
+            "Replicas": currentReplicas.isEmpty ? "0" : currentReplicas,
+            "Age": age(metadata)
+        ])
+    }
+
+    private static func pvcRow(_ item: [String: Any]) -> KubernetesResourceRow {
+        let metadata = dict(item["metadata"])
+        let spec = dict(item["spec"])
+        let status = dict(item["status"])
+        let capacity = dict(status["capacity"])
+        let storage = string(capacity["storage"])
+        let ns = namespace(metadata)
+        return row("\(ns)/\(string(metadata["name"]))", [
+            "Namespace": ns,
+            "Name": string(metadata["name"]),
+            "Status": string(status["phase"]).isEmpty ? "Bound" : string(status["phase"]),
+            "Volume": string(spec["volumeName"]).isEmpty ? "-" : string(spec["volumeName"]),
+            "Capacity": storage.isEmpty ? "-" : storage,
+            "Access Modes": (spec["accessModes"] as? [String])?.joined(separator: ",") ?? "-",
+            "StorageClass": string(spec["storageClassName"]).isEmpty ? "-" : string(spec["storageClassName"]),
+            "Age": age(metadata)
+        ])
+    }
+
     private static func row(_ id: String, _ cells: [String: String], warning: Bool = false, sortValue: String? = nil) -> KubernetesResourceRow {
         KubernetesResourceRow(id: id, cells: cells, warning: warning, sortValue: sortValue)
     }
@@ -317,5 +373,29 @@ enum KubernetesResourceParser {
         let years = days / 365
         let remDays = days % 365
         return remDays > 0 ? "\(years)y \(remDays)d" : "\(years)y"
+    }
+
+    /// Extracts a compact, human-readable image reference from `spec.containers`.
+    /// Strips SHA digests from the tag portion (e.g. `@sha256:abc...`) — those are
+    /// visible in the Pod inspector. Shows only the first container; appends
+    /// `+N more` when there are additional containers so the table stays compact.
+    private static func imageTag(_ containers: [[String: Any]]) -> String {
+        guard let first = containers.first,
+              let raw = first["image"] as? String, !raw.isEmpty else { return "-" }
+        let cleaned = shortImageTag(raw, count: containers.count)
+        return cleaned
+    }
+
+    /// Normalises a raw image ref to a tidy `name:tag` or `registry/name:tag` string.
+    /// - Strips `@sha256:…` digest suffixes (the digest is shown in the inspector).
+    /// - Strips the `:latest` tag to reduce noise (it's implied).
+    /// - Appends `+N` when the pod has additional containers.
+    private static func shortImageTag(_ raw: String, count: Int) -> String {
+        // Drop digest, keep only the `registry/name:tag` portion.
+        var ref = raw.components(separatedBy: "@").first ?? raw
+        // Drop `:latest` tag — it adds no information.
+        if ref.hasSuffix(":latest") { ref = String(ref.dropLast(":latest".count)) }
+        let suffix = count > 1 ? " +\(count - 1)" : ""
+        return ref.isEmpty ? "-" : ref + suffix
     }
 }

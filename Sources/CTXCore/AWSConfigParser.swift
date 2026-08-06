@@ -71,4 +71,22 @@ public enum AWSConfigParser {
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+
+    public static func discoverAvailableRoles(accountID: String, ssoStartURL: String = "") -> [String] {
+        guard let content = try? String(contentsOf: AWSConfigPaths.configURL, encoding: .utf8) else {
+            return []
+        }
+        let profiles = parse(content)
+        var roles = Set<String>()
+        for profile in profiles {
+            if !profile.roleName.isEmpty {
+                if (!accountID.isEmpty && profile.accountID == accountID) ||
+                   (!ssoStartURL.isEmpty && !profile.ssoStartURL.isEmpty && profile.ssoStartURL == ssoStartURL) ||
+                   (accountID.isEmpty && ssoStartURL.isEmpty) {
+                    roles.insert(profile.roleName)
+                }
+            }
+        }
+        return Array(roles).sorted()
+    }
 }

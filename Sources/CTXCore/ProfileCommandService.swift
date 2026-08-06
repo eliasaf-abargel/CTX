@@ -16,39 +16,55 @@ public final class ProfileCommandService: Sendable {
         return await run(["az", "account", "set", "--subscription", target])
     }
 
-    public func login(_ profile: CloudProfile, email: String? = nil) async -> CommandResult {
+    public func login(_ profile: CloudProfile, email: String? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
         switch profile.provider {
         case .aws:
-            return await run(["aws", "sso", "login", "--profile", profile.name])
+            return await runLogin(["aws", "sso", "login", "--profile", profile.name], onOutput: onOutput)
         case .gcp:
-            return await run(["gcloud", "auth", "login", "--update-adc", "--configuration", profile.name])
+            var args = ["gcloud", "auth", "login", "--configuration", profile.name]
+            let emailCandidate = profile.accountID.contains("@") ? profile.accountID : (profile.roleName.contains("@") ? profile.roleName : "")
+            if !emailCandidate.isEmpty {
+                args.append(contentsOf: ["--account", emailCandidate])
+            }
+            return await runLogin(args, onOutput: onOutput)
         case .azure:
             var args = ["az", "login"]
             if !profile.roleName.isEmpty {
                 args.append(contentsOf: ["--tenant", profile.roleName])
             }
-            return await run(args)
+            return await runLogin(args, onOutput: onOutput)
         case .kubernetes:
-            if profile.roleName == "sdm-" + "user" {
-                setenv("SDM_APP_DOMAIN", "app.strongdm.com", 1)
-                if let email = email, !email.isEmpty {
-                    setenv("SDM_EMAIL", email, 1)
+            if profile.usesStrongDM {
+                let connectResult = await runLogin(["sdm", "connect", profile.name], onOutput: onOutput)
+                if connectResult.exitCode == 0 {
+                    return connectResult
                 }
-                defer {
-                    unsetenv("SDM_APP_DOMAIN")
-                    unsetenv("SDM_EMAIL")
+                if connectResult.output.contains("http://") || connectResult.output.contains("https://") {
+                    return connectResult
                 }
-
-                let readyResult = await run(["sdm", "ready"])
-                if readyResult.exitCode != 0 {
-                    let loginResult = await run(["sdm", "login"])
-                    guard loginResult.exitCode == 0 else {
-                        return loginResult
-                    }
+                var loginArgs = ["sdm", "login"]
+                if let userEmail = email, !userEmail.isEmpty {
+                    loginArgs.append(contentsOf: ["--email", userEmail])
                 }
-                return await run(["sdm", "connect", profile.name])
+                let loginResult = await runLogin(loginArgs, onOutput: onOutput)
+                if loginResult.output.contains("http://") || loginResult.output.contains("https://") {
+                    return loginResult
+                }
+                _ = await runLogin(["sdm", "connect", profile.name], onOutput: onOutput)
+                return loginResult
+            } else if profile.usesTeleport {
+                let loginResult = await runLogin(["tsh", "kube", "login", profile.name], onOutput: onOutput)
+                if loginResult.exitCode == 0 {
+                    return loginResult
+                }
+                let authResult = await runLogin(["tsh", "login"], onOutput: onOutput)
+                guard authResult.exitCode == 0 else {
+                    return authResult
+                }
+                return await runLogin(["tsh", "kube", "login", profile.name], onOutput: onOutput)
+            } else {
+                return CommandResult(exitCode: 0, output: "Context selected")
             }
-            return CommandResult(exitCode: 0, output: "")
         }
     }
 
@@ -71,7 +87,7 @@ public final class ProfileCommandService: Sendable {
         case .azure:
             return await run(["az", "logout"])
         case .kubernetes:
-            if profile.roleName == "sdm-" + "user" {
+            if profile.usesStrongDM {
                 return await run(["sdm", "disconnect", profile.name])
             }
             return CommandResult(exitCode: 0, output: "")
@@ -99,31 +115,43 @@ public final class ProfileCommandService: Sendable {
                 "--output", "json"
             ])
         case .kubernetes:
-            if profile.roleName == "sdm-" + "user" {
-                setenv("SDM_APP_DOMAIN", "app.strongdm.com", 1)
-                defer {
-                    unsetenv("SDM_APP_DOMAIN")
-                }
-                var ready = false
-                for _ in 0..<15 {
-                    let readyResult = await run(["sdm", "ready"])
-                    if readyResult.exitCode == 0 {
-                        ready = true
-                        break
-                    }
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                }
-                if !ready {
-                    return CommandResult(exitCode: 1, output: "StrongDM is not logged in or ready")
-                }
-            }
             guard profile.name == activeKubeContext else {
                 return CommandResult(exitCode: 99, output: "Not active context")
             }
-            return await run([
-                "kubectl", "config", "get-contexts", profile.name,
-                "--output", "name"
+            if profile.usesStrongDM {
+                let statusResult = await run(["sdm", "status"])
+                if statusResult.exitCode == 0 {
+                    let lines = statusResult.output.components(separatedBy: .newlines)
+                    let lowerName = profile.name.lowercased()
+                    for line in lines {
+                        let lowerLine = line.lowercased()
+                        if lowerLine.contains(lowerName) && (lowerLine.contains("connected") || lowerLine.contains("ready") || lowerLine.contains("active")) {
+                            return CommandResult(exitCode: 0, output: "StrongDM connected (\(profile.name))")
+                        }
+                    }
+                }
+            }
+
+            if profile.usesTeleport {
+                let statusResult = await run(["tsh", "status"])
+                if statusResult.exitCode == 0 && statusResult.output.lowercased().contains("logged in") {
+                    return CommandResult(exitCode: 0, output: "Teleport connected")
+                }
+            }
+
+            let versionResult = await run([
+                "kubectl", "get", "--raw=/version",
+                "--context", profile.name,
+                "--request-timeout=10s"
             ])
+            if versionResult.exitCode == 0 {
+                return versionResult
+            }
+
+            if profile.usesStrongDM {
+                return CommandResult(exitCode: 401, output: "StrongDM resource '\(profile.name)' is not connected. Run 'sdm connect \(profile.name)'.")
+            }
+            return versionResult
         }
     }
 
@@ -135,12 +163,23 @@ public final class ProfileCommandService: Sendable {
         ])
     }
 
-    private func run(_ arguments: [String]) async -> CommandResult {
-        let result = await runner.run(arguments)
+    /// Verification, activation and logout calls are expected to answer promptly;
+    /// `login(...)` overrides this with `CloudCommandTimeout.interactiveLogin`,
+    /// because an SSO flow legitimately waits on the user finishing in a browser.
+    private func run(
+        _ arguments: [String],
+        timeout: TimeInterval = CloudCommandTimeout.standard,
+        onOutput: (@Sendable (String) -> Void)? = nil
+    ) async -> CommandResult {
+        let result = await runner.run(arguments, timeout: timeout, onOutput: onOutput)
         guard result.exitCode != 0 else { return result }
         return CommandResult(
             exitCode: result.exitCode,
             output: KubernetesDiagnosticClassifier.sanitize(result.output)
         )
+    }
+
+    private func runLogin(_ arguments: [String], onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
+        await run(arguments, timeout: CloudCommandTimeout.interactiveLogin, onOutput: onOutput)
     }
 }

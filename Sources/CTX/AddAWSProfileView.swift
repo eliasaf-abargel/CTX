@@ -45,6 +45,7 @@ struct AddAWSProfileView: View {
     @Environment(\.dismiss) private var dismiss
     let mode: AWSProfileEditorMode
     let targetFolder: CloudFolder?
+    @State private var selectedFolder: CloudFolder?
     @State private var draft: AWSProfileDraft
     @State private var errorMessage = ""
     @State private var ssoRegionSelection = ""
@@ -57,6 +58,8 @@ struct AddAWSProfileView: View {
         self.mode = mode
         self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.draft)
+        let awsFolders = store.folders(for: .aws)
+        self._selectedFolder = State(initialValue: targetFolder ?? awsFolders.first)
     }
 
     var body: some View {
@@ -73,6 +76,15 @@ struct AddAWSProfileView: View {
             Divider()
 
             Form {
+                Section("Organization & Folder") {
+                    Picker("Folder / Environment:", selection: $selectedFolder) {
+                        ForEach(store.folders(for: .aws)) { folder in
+                            Label(folder.name, systemImage: folder.icon.systemImage)
+                                .tag(Optional(folder))
+                        }
+                    }
+                }
+
                 Section("Profile Identity") {
                     TextField("Profile Name:", text: $draft.name, prompt: Text("e.g. dev-sso"))
                         .textFieldStyle(.roundedBorder)
@@ -258,9 +270,12 @@ struct AddAWSProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addAWSProfile(draft, targetFolder: targetFolder)
+                try store.addAWSProfile(draft, targetFolder: selectedFolder)
             case .edit(let profile):
                 try store.updateAWSProfile(profile, draft: draft)
+                if let selectedFolder {
+                    store.move(profile, to: selectedFolder)
+                }
             }
             dismiss()
         } catch {

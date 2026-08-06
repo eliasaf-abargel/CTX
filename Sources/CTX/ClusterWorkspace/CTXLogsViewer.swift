@@ -18,17 +18,29 @@ struct CTXLogsViewer: View {
 
     private static let bottomAnchorID = "ctx-logs-bottom"
 
-    private var filteredText: String {
+    @State private var cachedFilteredText: String = ""
+    /// The rendered form is cached alongside the filtered text. `styledLog` was a
+    /// computed property, so the whole `AttributedString` — every line scanned for a
+    /// leading timestamp — was rebuilt on each body evaluation, including one per
+    /// keystroke in the filter field and every hover anywhere in the window.
+    @State private var cachedStyledLog = AttributedString("")
+
+    private func updateCachedFilteredText() {
         let base = stripANSI ? Self.strippingANSICodes(from: rawText) : rawText
-        guard !filterQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return base }
-        let query = filterQuery.lowercased()
-        return base.components(separatedBy: .newlines)
-            .filter { $0.lowercased().contains(query) }
-            .joined(separator: "\n")
+        let trimmedQuery = filterQuery.trimmingCharacters(in: .whitespaces)
+        if trimmedQuery.isEmpty {
+            cachedFilteredText = base
+        } else {
+            let query = trimmedQuery.lowercased()
+            cachedFilteredText = base.components(separatedBy: .newlines)
+                .filter { $0.lowercased().contains(query) }
+                .joined(separator: "\n")
+        }
+        cachedStyledLog = Self.dimmingLeadingTimestamps(in: cachedFilteredText)
     }
 
     private var lineCount: Int {
-        filteredText.isEmpty ? 0 : filteredText.split(separator: "\n", omittingEmptySubsequences: false).count
+        cachedFilteredText.isEmpty ? 0 : cachedFilteredText.split(separator: "\n", omittingEmptySubsequences: false).count
     }
 
     var body: some View {
@@ -38,7 +50,7 @@ struct CTXLogsViewer: View {
                     Image(systemName: "magnifyingglass")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField("Filter logs...", text: $filterQuery)
+                    TextField("Search logs...", text: $filterQuery)
                         .textFieldStyle(.plain)
                         .font(.caption)
                     if !filterQuery.isEmpty {
@@ -111,9 +123,17 @@ struct CTXLogsViewer: View {
                         .id(Self.bottomAnchorID)
                 }
                 .onChange(of: rawText) { _, _ in
+                    updateCachedFilteredText()
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
+                .onChange(of: stripANSI) { _, _ in
+                    updateCachedFilteredText()
+                }
+                .onChange(of: filterQuery) { _, _ in
+                    updateCachedFilteredText()
+                }
                 .onAppear {
+                    updateCachedFilteredText()
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             }
@@ -122,7 +142,7 @@ struct CTXLogsViewer: View {
     }
 
     private var styledLog: AttributedString {
-        Self.dimmingLeadingTimestamps(in: filteredText)
+        cachedStyledLog
     }
 
     static func strippingANSICodes(from text: String) -> String {

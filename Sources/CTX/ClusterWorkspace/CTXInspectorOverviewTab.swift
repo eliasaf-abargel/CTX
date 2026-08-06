@@ -21,11 +21,13 @@ struct CTXInspectorOverviewTab: View {
     }
 
     @State private var memoizedAdvice: RemediationAdvice?
-    @State private var memoizedEnvVars: [EnvVarItem] = []
-    @State private var memoizedProbes: [ProbeInfo] = []
-    @State private var memoizedSecurityContext = SecurityContextAudit()
-    @State private var memoizedCPUPercentage: Double = 0.2
-    @State private var memoizedMemoryPercentage: Double = 0.3
+    /// Fetched from the live object when the inspector opens. Everything below used
+    /// to be produced by matching the pod's *name* against a hardcoded list, so the
+    /// environment variables, probes, security context and resource gauges on screen
+    /// had no connection to the cluster at all.
+    @State private var podSpec: PodSpecInsight?
+    @State private var endpoints: [EndpointTarget] = []
+    @State private var isLoadingSpec = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -38,6 +40,30 @@ struct CTXInspectorOverviewTab: View {
             ForEach(detail.sections) { section in
                 Divider().opacity(0.3)
                 CTXInspectorSection(title: section.title, fields: section.fields)
+            }
+            if selection.kind == .pods || selection.kind == .workloads {
+                Divider().opacity(0.3)
+                containerImageHeaderSection
+            }
+            if let repoURL = selection.row.cells["Repo URL"], !repoURL.isEmpty {
+                Divider().opacity(0.3)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("GITOPS APPLICATION")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                    // Every value here is whatever the controller reported, falling
+                    // back to the unknown marker. Defaulting these to "ArgoCD" /
+                    // "Synced" / "main" is what made the old screen look
+                    // authoritative about state it had never actually read.
+                    CTXInspectorFieldRow(label: "Provider", value: gitOpsField("Provider"))
+                    CTXInspectorFieldRow(label: "Source Type", value: gitOpsField("Source"))
+                    CTXInspectorFieldRow(label: "Sync Status", value: gitOpsField("Status"))
+                    CTXInspectorFieldRow(label: "Health", value: gitOpsField("Health"))
+                    CTXInspectorFieldRow(label: "Repository", value: repoURL)
+                    CTXInspectorFieldRow(label: "Target Revision", value: gitOpsField("Target"))
+                    CTXInspectorFieldRow(label: "Deployed Revision", value: gitOpsField("Synced"))
+                }
             }
             if selection.kind == .events, let target = viewModel.loadedEventTarget(for: selection.row) {
                 Divider().opacity(0.3)
@@ -53,26 +79,11 @@ struct CTXInspectorOverviewTab: View {
                 Divider().opacity(0.3)
                 CTXInspectorSection(title: "Related Pods", fields: relatedPodFields)
                 Divider().opacity(0.3)
-                CTXServiceEndpointsInspector(targets: sampleEndpoints)
-            }
-            if selection.kind == .nodes {
-                Divider().opacity(0.3)
-                CTXResourceLimitsGauge(title: "Node CPU Capacity", request: "4.0 vCPU", limit: "32 vCPU", usage: cpuUsageString, percentage: memoizedCPUPercentage, tint: .cyan)
-                CTXResourceLimitsGauge(title: "Node Memory Capacity", request: "16.0 GiB", limit: "64.0 GiB", usage: memoryUsageString, percentage: memoizedMemoryPercentage, tint: .purple)
-                CTXResourceLimitsGauge(title: "Node Storage Disk", request: "20.0 GiB", limit: "200.0 GiB", usage: selection.row.cells["Disk"] ?? "42.1 GiB", percentage: 0.21, tint: .indigo)
+                CTXServiceEndpointsInspector(targets: endpoints)
             }
             if selection.kind == .pods {
                 Divider().opacity(0.3)
-                CTXResourceLimitsGauge(title: "CPU Headroom", request: "100m", limit: "500m", usage: cpuUsageString, percentage: memoizedCPUPercentage, tint: .cyan)
-                CTXResourceLimitsGauge(title: "Memory Headroom", request: "256Mi", limit: "1Gi", usage: memoryUsageString, percentage: memoizedMemoryPercentage, tint: .purple)
-                Divider().opacity(0.3)
-                CTXSecurityContextInspector(audit: memoizedSecurityContext)
-                Divider().opacity(0.3)
-                CTXProbesInspector(probes: memoizedProbes)
-                Divider().opacity(0.3)
-                CTXEnvironmentVariablesInspector(items: memoizedEnvVars)
-                Divider().opacity(0.3)
-                imageInspectionSection
+                podSpecSections
             }
             if let note = detail.safetyNote {
                 Label(note, systemImage: "lock.shield")
@@ -89,129 +100,107 @@ struct CTXInspectorOverviewTab: View {
         }
         .onChange(of: selection.row.id) { _, _ in
             memoizeState()
+            podSpec = nil
+            endpoints = []
+        }
+        .task(id: selection.row.id) {
+            await loadLiveSpec()
         }
     }
 
     private func memoizeState() {
         memoizedAdvice = KubernetesRemediationAdvisor.analyze(row: selection.row)
-        memoizedEnvVars = dynamicEnvVars
-        memoizedProbes = dynamicProbes
-        memoizedSecurityContext = dynamicSecurityContext
-        memoizedCPUPercentage = parsedCPUPercentage
-        memoizedMemoryPercentage = parsedMemoryPercentage
     }
 
-    private var cpuUsageString: String {
-        selection.row.cells["CPU"] ?? "100m"
-    }
-
-    private var memoryUsageString: String {
-        selection.row.cells["Memory"] ?? "256Mi"
-    }
-
-    private var parsedCPUPercentage: Double {
-        let cpuStr = cpuUsageString.replacingOccurrences(of: "m", with: "").replacingOccurrences(of: "vCPU", with: "").trimmingCharacters(in: .whitespaces)
-        let cpuVal = Double(cpuStr) ?? 100.0
-        return min(max(cpuVal / 500.0, 0.08), 0.95)
-    }
-
-    private var parsedMemoryPercentage: Double {
-        let memStr = memoryUsageString.replacingOccurrences(of: "Mi", with: "").replacingOccurrences(of: "Gi", with: "000").replacingOccurrences(of: "M", with: "").trimmingCharacters(in: .whitespaces)
-        let memVal = Double(memStr) ?? 256.0
-        return min(max(memVal / 1024.0, 0.10), 0.95)
-    }
-
-    private var dynamicEnvVars: [EnvVarItem] {
-        let name = selection.row.name.lowercased()
-        let ns = (selection.row.namespace ?? "default").lowercased()
-
-        if name.contains("kube-proxy") {
-            return [
-                EnvVarItem(name: "KUBE_PROXY_MODE", value: "iptables"),
-                EnvVarItem(name: "KUBECONFIG", value: "/var/lib/kube-proxy/kubeconfig"),
-                EnvVarItem(name: "NODE_NAME", value: selection.row.cells["Node"] ?? "node-worker-01")
-            ]
-        } else if name.contains("aws-node") {
-            return [
-                EnvVarItem(name: "AWS_VPC_K8S_CNI_LOGLEVEL", value: "DEBUG"),
-                EnvVarItem(name: "AWS_VPC_K8S_CNI_RANDOMIZESNORT", value: "true"),
-                EnvVarItem(name: "WARM_ENI_TARGET", value: "1")
-            ]
-        } else if name.contains("metrics-server") {
-            return [
-                EnvVarItem(name: "METRICS_SERVER_PORT", value: "4443"),
-                EnvVarItem(name: "METRICS_RESOLUTION", value: "60s")
-            ]
-        } else if name.contains("wiz") {
-            return [
-                EnvVarItem(name: "WIZ_SENSOR_MODE", value: "ebpf_auto"),
-                EnvVarItem(name: "WIZ_CLIENT_ID", value: "wiz_client_982", isSecret: true),
-                EnvVarItem(name: "WIZ_CLIENT_SECRET", value: "secret_wiz_491823", isSecret: true)
-            ]
-        } else if name.contains("external-secrets") {
-            return [
-                EnvVarItem(name: "POLL_INTERVAL", value: "300s"),
-                EnvVarItem(name: "AWS_REGION", value: "us-east-1"),
-                EnvVarItem(name: "VAULT_ADDR", value: "https://vault.internal:8200")
-            ]
-        } else {
-            let appName = name.components(separatedBy: "-").first ?? "app"
-            return [
-                EnvVarItem(name: "APP_NAME", value: appName),
-                EnvVarItem(name: "APP_ENV", value: ns.contains("prod") ? "production" : "staging"),
-                EnvVarItem(name: "PORT", value: "8080"),
-                EnvVarItem(name: "DB_HOST", value: "\(appName)-db.internal"),
-                EnvVarItem(name: "DB_PASSWORD", value: "secret123", isSecret: true),
-                EnvVarItem(name: "API_SECRET_KEY", value: "key_xyz987", isSecret: true)
-            ]
+    /// Reads the single object the inspector is showing. Scoped to the one resource
+    /// rather than folded into the list fetch, so opening an inspector on a cluster
+    /// with thousands of pods costs one small read instead of carrying every
+    /// container's spec around in memory.
+    private func loadLiveSpec() async {
+        guard let namespace = selection.row.namespace else { return }
+        isLoadingSpec = true
+        defer { isLoadingSpec = false }
+        switch selection.kind {
+        case .pods:
+            podSpec = await viewModel.specReader.podSpec(
+                context: viewModel.context,
+                namespace: namespace,
+                name: selection.row.name
+            )
+        case .services:
+            let result = await viewModel.specReader.serviceEndpoints(
+                context: viewModel.context,
+                namespace: namespace,
+                name: selection.row.name
+            )
+            endpoints = result.targets
+        default:
+            break
         }
     }
 
-    private var dynamicProbes: [ProbeInfo] {
-        let name = selection.row.name.lowercased()
-
-        if name.contains("kube-proxy") {
-            return [
-                ProbeInfo(type: "Liveness", path: "/healthz", port: "10256", delaySeconds: 5, periodSeconds: 10, isConfigured: true)
-            ]
-        } else if name.contains("aws-node") {
-            return [
-                ProbeInfo(type: "Readiness", path: "/ping", port: "61821", delaySeconds: 2, periodSeconds: 5, isConfigured: true),
-                ProbeInfo(type: "Liveness", path: "/healthz", port: "61821", delaySeconds: 5, periodSeconds: 10, isConfigured: true)
-            ]
-        } else if name.contains("metrics-server") {
-            return [
-                ProbeInfo(type: "Liveness", path: "/livez", port: "4443", delaySeconds: 10, periodSeconds: 15, isConfigured: true)
-            ]
-        } else if name.contains("wiz") {
-            return [
-                ProbeInfo(type: "Liveness", path: "/health", port: "8443", delaySeconds: 5, periodSeconds: 10, isConfigured: true)
-            ]
-        } else {
-            return [
-                ProbeInfo(type: "Readiness", path: "/healthz", port: "8080", delaySeconds: 5, periodSeconds: 10, isConfigured: true),
-                ProbeInfo(type: "Liveness", path: "/live", port: "8080", delaySeconds: 5, periodSeconds: 10, isConfigured: true)
-            ]
+    /// Container-level facts, straight from the pod object.
+    @ViewBuilder
+    private var podSpecSections: some View {
+        if let podSpec, podSpec.status == .reachable {
+            ForEach(podSpec.containers) { container in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: container.isInitContainer ? "arrow.down.circle" : "shippingbox")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text(container.isInitContainer ? "INIT CONTAINER · \(container.name)" : "CONTAINER · \(container.name)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    CTXInspectorFieldRow(label: "Image", value: container.image, monospaced: true)
+                    resourceRows(container.resources)
+                    CTXSecurityContextInspector(audit: container.security)
+                    CTXProbesInspector(probes: container.probes)
+                    CTXEnvironmentVariablesInspector(items: container.env)
+                }
+                Divider().opacity(0.3)
+            }
+            CTXInspectorFieldRow(label: "Service Account", value: podSpec.serviceAccount, monospaced: true)
+        } else if isLoadingSpec {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Reading pod spec…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let diagnostic = podSpec?.diagnostic {
+            Label(diagnostic.stderrSummary, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var dynamicSecurityContext: SecurityContextAudit {
-        let name = selection.row.name.lowercased()
-        let ns = (selection.row.namespace ?? "default").lowercased()
-
-        if ns == "kube-system" || name.contains("kube-proxy") || name.contains("aws-node") || name.contains("wiz") {
-            return SecurityContextAudit(runAsUser: "0", isRoot: true, isReadOnlyRootFS: false, isPrivileged: true)
-        } else {
-            return SecurityContextAudit(runAsUser: "1000", isRoot: false, isReadOnlyRootFS: true, isPrivileged: false)
-        }
+    /// Declared requests and limits. An absent limit is shown as absent — that is a
+    /// real finding (the container can consume the whole node), not a blank to fill.
+    @ViewBuilder
+    private func resourceRows(_ allocation: ResourceAllocation) -> some View {
+        let unset = "not set"
+        CTXInspectorFieldRow(
+            label: "CPU",
+            value: "request \(allocation.cpuRequest ?? unset) · limit \(allocation.cpuLimit ?? unset)",
+            monospaced: true
+        )
+        CTXInspectorFieldRow(
+            label: "Memory",
+            value: "request \(allocation.memoryRequest ?? unset) · limit \(allocation.memoryLimit ?? unset)",
+            monospaced: true
+        )
     }
 
-    private var sampleEndpoints: [EndpointTarget] {
-        [
-            EndpointTarget(name: "\(selection.row.name)-pod-1", namespace: selection.row.namespace ?? "default", targetPort: "8080", isHealthy: true),
-            EndpointTarget(name: "\(selection.row.name)-pod-2", namespace: selection.row.namespace ?? "default", targetPort: "8080", isHealthy: true)
-        ]
-    }
+
+
+
+
+
+
+
 
     private var relatedPodFields: [KubernetesResourceDetail.Field] {
         guard !encodedSelector.isEmpty else {
@@ -264,37 +253,49 @@ struct CTXInspectorOverviewTab: View {
         }
     }
 
-    private var imageInspectionSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("CONTAINER IMAGE LAYERS (ZERO-EXEC)")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.secondary)
 
-            let imageRef = selection.row.cells["Containers"] ?? selection.row.cells["Image"] ?? selection.row.name
-            let info = KubernetesContainerImageService.inspect(imageRef: imageRef)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Total Image Size:")
-                        .font(.caption)
-                    Spacer()
-                    Text(info.formattedTotalSize)
-                        .font(.caption.weight(.semibold))
-                }
-                ForEach(info.layers) { layer in
-                    HStack {
-                        Text(layer.createdBy ?? layer.digest)
-                            .font(.system(size: 9, design: .monospaced))
-                            .lineLimit(1)
-                        Spacer()
-                        Text(layer.formattedSize)
-                            .font(.system(size: 9, weight: .bold))
-                    }
-                    .padding(4)
-                    .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                }
+    private var containerImageHeaderSection: some View {
+        let rawImage = selection.row.cells["Image"] ?? selection.row.cells["Containers"] ?? ""
+        guard !rawImage.isEmpty, rawImage != "-" else { return AnyView(EmptyView()) }
+        
+        let (registry, repository, tag) = parseImageRef(rawImage)
+        return AnyView(
+            VStack(alignment: .leading, spacing: 6) {
+                Text("CONTAINER IMAGE & VERSION TAG")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 2)
+                
+                CTXInspectorFieldRow(label: "Image Tag", value: tag, monospaced: true)
+                CTXInspectorFieldRow(label: "Image Ref", value: repository, monospaced: true)
+                CTXInspectorFieldRow(label: "Registry", value: registry)
             }
-        }
+        )
     }
+
+    private func parseImageRef(_ imageRef: String) -> (registry: String, repository: String, tag: String) {
+        let components = imageRef.components(separatedBy: "/")
+        var registry = "docker.io"
+        var repoWithTag = imageRef
+        
+        if components.count > 1 && (components[0].contains(".") || components[0].contains(":") || components[0] == "localhost") {
+            registry = components[0]
+            repoWithTag = components.dropFirst().joined(separator: "/")
+        }
+        
+        let tagComponents = repoWithTag.components(separatedBy: ":")
+        let repository = tagComponents.first ?? repoWithTag
+        let tag = tagComponents.count > 1 ? tagComponents.dropFirst().joined(separator: ":") : "latest"
+        
+        return (registry, repository, tag)
+    }
+
+    /// A GitOps cell as reported, or the shared unknown marker — never a guess.
+    private func gitOpsField(_ key: String) -> String {
+        let value = selection.row.cells[key] ?? ""
+        return value.isEmpty ? KubernetesGitOpsService.unknownValue : value
+    }
+
 }
 
 /// One titled group of fields inside the Overview tab (Identity, State, Service,
@@ -328,7 +329,8 @@ struct CTXInspectorFieldRow: View {
     /// glance, never copied, so an icon there would just be clutter.
     static let copyableFieldLabels: Set<String> = [
         "Name", "Namespace", "Reference", "Object", "Message",
-        "Cluster IP", "External", "Ports", "Hosts", "Address", "IP"
+        "Cluster IP", "External", "Ports", "Hosts", "Address", "IP",
+        "Git Repository", "Target Revision", "Image", "Image Ref", "Image Tag", "Registry"
     ]
 
     var body: some View {

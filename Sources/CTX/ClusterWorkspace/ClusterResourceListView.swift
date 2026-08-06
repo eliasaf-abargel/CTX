@@ -9,38 +9,51 @@ struct ClusterResourceListView: View {
     let refreshError: KubernetesCommandDiagnostic?
     let selectedRow: KubernetesResourceRow?
     let showsNamespaceColumn: Bool
-    let showIssuesOnly: Bool
+    /// Set by sections that can explain their own emptiness better than the generic
+    /// "there are none here" — GitOps distinguishes "no controller installed" from
+    /// "installed but reporting nothing".
+    var emptyMessageOverride: String? = nil
+    /// A short caveat shown above the table, for when the data is real but came from
+    /// a degraded source (e.g. Helm read from storage Secrets because the CLI is absent).
+    var notice: String? = nil
     let loadIfNeeded: () -> Void
     let refresh: () -> Void
     let selectRow: (KubernetesResourceRow) -> Void
 
     @State private var filter = ""
+    /// The filtered rows, computed once per change rather than once per read.
+    ///
+    /// `rows` was a computed property that scanned the whole list, and `body` read
+    /// it five times — for the subtitle, the empty check, the count, the summary
+    /// panel, and the table. On a namespace with a few thousand pods that was five
+    /// full passes for every keystroke in the search field.
+    @State private var rows: [KubernetesResourceRow] = []
 
-    private var rows: [KubernetesResourceRow] {
-        let baseRows = list?.rows ?? []
-        let issueFiltered = showIssuesOnly ? baseRows.filter { row in
-            if row.warning { return true }
-            let status = (row.cells["Status"] ?? row.cells["Ready"] ?? "").lowercased()
-            return status.contains("crash") || status.contains("error") || status.contains("fail") || status.contains("pending") || status.contains("notready")
-        } : baseRows
-        guard !filter.isEmpty else { return issueFiltered }
-        return issueFiltered.filter { $0.matchesFilter(filter) }
-    }
+    /// The table shares the page's scroll view, so its `LazyVStack` has no vertical
+    /// viewport to be lazy against and every row it is handed is built. Until the
+    /// table owns its own scrolling, the row count is what bounds the work.
+    static let rowCap = 500
 
     private var visibleRows: [KubernetesResourceRow] {
-        Array(rows.prefix(500))
+        rows.count > Self.rowCap ? Array(rows.prefix(Self.rowCap)) : rows
+    }
+
+    private func recomputeRows() {
+        let baseRows = list?.rows ?? []
+        guard !filter.isEmpty else {
+            rows = baseRows
+            return
+        }
+        rows = baseRows.filter { $0.matchesFilter(filter) }
     }
 
     private var emptyTitle: String {
-        if showIssuesOnly { return "No Issues Found" }
-        return filter.isEmpty ? "No \(section.rawValue)" : "No matching \(section.rawValue.lowercased())"
+        filter.isEmpty ? "No \(section.rawValue)" : "No matching \(section.rawValue.lowercased())"
     }
 
     private var emptyMessage: String {
-        if showIssuesOnly {
-            return "No resources with warnings or errors were found in this scope. Toggle off 'Issues Only' to view all items."
-        }
-        return filter.isEmpty ? "There are no \(section.rawValue.lowercased()) in the selected namespace scope." : "No \(section.rawValue.lowercased()) match '\(filter)'."
+        guard filter.isEmpty else { return "No \(section.rawValue.lowercased()) match '\(filter)'." }
+        return emptyMessageOverride ?? "There are no \(section.rawValue.lowercased()) in the selected namespace scope."
     }
 
     var body: some View {
@@ -64,14 +77,21 @@ struct ClusterResourceListView: View {
                 } else if refreshError != nil {
                     CTXInlineRefreshingIndicator(state: .failed, retry: refresh)
                 }
+                if let notice {
+                    Label(notice, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                }
                 resourceSummaryPanel
                 if rows.isEmpty {
                     CTXGlassPanel {
                         CTXEmptyStateView(title: emptyTitle, message: emptyMessage, systemImage: section.systemImage)
                     }
                 } else {
-                    if rows.count > 500 {
-                        Text("Showing top 500 of \(rows.count) \(section.rawValue.lowercased()). Use search filter to refine.")
+                    if rows.count > Self.rowCap {
+                        Text("Showing the first \(Self.rowCap) of \(rows.count) \(section.rawValue.lowercased()). Narrow the list with the search field.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
@@ -80,7 +100,13 @@ struct ClusterResourceListView: View {
                 }
             }
         }
-        .onAppear(perform: loadIfNeeded)
+        .onAppear {
+            recomputeRows()
+            loadIfNeeded()
+        }
+        .onChange(of: filter) { _, _ in recomputeRows() }
+        .onChange(of: list?.loadedAt) { _, _ in recomputeRows() }
+        .onChange(of: list?.rows.count) { _, _ in recomputeRows() }
         .animation(.easeInOut(duration: 0.12), value: isLoading)
     }
 
@@ -94,18 +120,18 @@ struct ClusterResourceListView: View {
         HStack(alignment: .center, spacing: 10) {
             CTXSectionHeader(title: section.rawValue, subtitle: subtitle)
             Spacer()
-            CTXSearchField(placeholder: "Filter", text: $filter)
+            CTXSearchField(placeholder: "Search...", text: $filter)
                 .frame(width: 230)
-                .help("Filter loaded \(section.rawValue.lowercased()). This does not run kubectl.")
+                .help("Search loaded \(section.rawValue.lowercased()) by name, namespace, or status.")
         }
     }
 
     private var compactToolbar: some View {
         VStack(alignment: .leading, spacing: 10) {
             CTXSectionHeader(title: section.rawValue, subtitle: subtitle)
-            CTXSearchField(placeholder: "Filter", text: $filter)
+            CTXSearchField(placeholder: "Search...", text: $filter)
                 .frame(width: 230)
-                .help("Filter loaded \(section.rawValue.lowercased()). This does not run kubectl.")
+                .help("Search loaded \(section.rawValue.lowercased()) by name, namespace, or status.")
         }
     }
 
@@ -195,20 +221,25 @@ struct ClusterResourceListView: View {
                     tint: .orange
                 )
             case .gitops:
+                let providers = Set(rows.compactMap { $0.cells["Provider"] }).sorted()
+                let outOfSync = rows.filter { ($0.cells["Status"] ?? "").lowercased() == "outofsync" }.count
                 ResourceSummaryPanel(
-                    title: "GitOps Continuous Delivery",
-                    detail: "\(rows.count) ArgoCD & Flux CD applications synced",
+                    title: outOfSync > 0 ? "Applications out of sync" : "GitOps applications",
+                    detail: providers.isEmpty
+                        ? "\(rows.count) applications"
+                        : "\(providers.joined(separator: " · ")) · \(rows.count - outOfSync) synced · \(outOfSync) out of sync",
                     badgeTitle: countTitle(rows.count, noun: "app"),
                     systemImage: section.systemImage,
-                    tint: .indigo
+                    tint: outOfSync > 0 ? .orange : .indigo
                 )
             case .helm:
+                let failed = rows.filter { !["deployed", "superseded"].contains(($0.cells["Status"] ?? "").lowercased()) }.count
                 ResourceSummaryPanel(
-                    title: "Helm Releases",
-                    detail: "\(rows.count) deployed helm chart releases",
+                    title: failed > 0 ? "Releases need attention" : "Helm releases",
+                    detail: "\(rows.count - failed) deployed · \(failed) not deployed",
                     badgeTitle: countTitle(rows.count, noun: "release"),
                     systemImage: section.systemImage,
-                    tint: .cyan
+                    tint: failed > 0 ? .orange : .cyan
                 )
             case .events:
                 EventSummaryPanel(summary: KubernetesEventsSummary.summarize(rows: rows, status: list.status), eventCount: rows.count)

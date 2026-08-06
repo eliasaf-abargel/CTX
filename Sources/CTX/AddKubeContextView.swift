@@ -25,9 +25,17 @@ enum KubeContextEditorMode {
 }
 
 private enum KubeContextAuthMode: String, CaseIterable, Identifiable {
-    case internalProxy = "Internal"
-    case bearerToken = "Bearer token"
+    case proxyTunnel = "Zero-Trust / Proxy"
+    case cloudIAM = "Cloud IAM"
+    case bearerToken = "Bearer Token"
+
+    var id: String { rawValue }
+}
+
+private enum KubeCloudIAMProvider: String, CaseIterable, Identifiable {
     case awsEKS = "AWS EKS"
+    case gcpGKE = "Google GKE"
+    case azureAKS = "Azure AKS"
 
     var id: String { rawValue }
 }
@@ -38,15 +46,19 @@ struct AddKubeContextView: View {
     let mode: KubeContextEditorMode
     let targetFolder: CloudFolder?
 
+    @State private var selectedFolder: CloudFolder?
     @State private var name = ""
     @State private var server = ""
     @State private var cluster = ""
     @State private var user = ""
     @State private var namespace = ""
     @State private var token = ""
-    @State private var authMode: KubeContextAuthMode = .bearerToken
-    @State private var awsRegion = ""
+    @State private var authMode: KubeContextAuthMode = .proxyTunnel
+    @State private var cloudProvider: KubeCloudIAMProvider = .awsEKS
+    @State private var awsRegion = "us-east-1"
     @State private var awsProfile = ""
+    @State private var gcpConfig = ""
+    @State private var azureSub = ""
     @State private var isResolvingServer = false
     @State private var isSaving = false
     @State private var errorMessage = ""
@@ -55,6 +67,8 @@ struct AddKubeContextView: View {
         self.store = store
         self.mode = mode
         self.targetFolder = targetFolder
+        let kubeFolders = store.folders(for: .kubernetes)
+        self._selectedFolder = State(initialValue: targetFolder ?? kubeFolders.first)
     }
 
     var body: some View {
@@ -71,6 +85,15 @@ struct AddKubeContextView: View {
             Divider()
 
             Form {
+                Section("Organization & Folder") {
+                    Picker("Folder / Environment:", selection: $selectedFolder) {
+                        ForEach(store.folders(for: .kubernetes)) { folder in
+                            Label(folder.name, systemImage: folder.icon.systemImage)
+                                .tag(Optional(folder))
+                        }
+                    }
+                }
+
                 Section("Context Settings") {
                     TextField("Context Name:", text: $name, prompt: Text("e.g. dev-k8s"))
                         .textFieldStyle(.roundedBorder)
@@ -104,21 +127,54 @@ struct AddKubeContextView: View {
 
                     TextField("User Name:", text: $user, prompt: Text("e.g. my-user (optional, defaults to name-user)"))
                         .textFieldStyle(.roundedBorder)
-                        .disabled(authMode == .internalProxy)
 
-                    if authMode == .awsEKS {
-                        TextField("AWS Region:", text: $awsRegion, prompt: Text("e.g. us-east-1"))
-                            .textFieldStyle(.roundedBorder)
-                        Picker("AWS Profile:", selection: $awsProfile) {
-                            Text("Default AWS credentials").tag("")
-                            ForEach(awsProfiles, id: \.name) { profile in
-                                Text(profile.name).tag(profile.name)
+                    switch authMode {
+                    case .proxyTunnel:
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.shield.fill")
+                                .foregroundStyle(.blue)
+                            Text("Session identity managed automatically via local proxy tunnel (StrongDM, Teleport, Boundary, or local gateway).")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+
+                    case .cloudIAM:
+                        Picker("Cloud Provider:", selection: $cloudProvider) {
+                            ForEach(KubeCloudIAMProvider.allCases) { provider in
+                                Text(provider.rawValue).tag(provider)
                             }
                         }
-                    } else {
-                        SecureField("Token:", text: $token, prompt: Text("Bearer token (optional)"))
+                        .pickerStyle(.segmented)
+
+                        if cloudProvider == .awsEKS {
+                            AWSRegionPickerView(selection: $awsRegion, label: "AWS Region:")
+
+                            Picker("AWS Profile:", selection: $awsProfile) {
+                                Text("Default AWS credentials").tag("")
+                                ForEach(awsProfiles, id: \.name) { profile in
+                                    Text(profile.name).tag(profile.name)
+                                }
+                            }
+                        } else if cloudProvider == .gcpGKE {
+                            Picker("GCP Configuration:", selection: $gcpConfig) {
+                                Text("Active gcloud configuration").tag("")
+                                ForEach(gcpProfiles, id: \.name) { profile in
+                                    Text(profile.name).tag(profile.name)
+                                }
+                            }
+                        } else if cloudProvider == .azureAKS {
+                            Picker("Azure Subscription:", selection: $azureSub) {
+                                Text("Active Azure subscription").tag("")
+                                ForEach(azureProfiles, id: \.name) { profile in
+                                    Text(profile.name).tag(profile.name)
+                                }
+                            }
+                        }
+
+                    case .bearerToken:
+                        SecureField("Bearer Token:", text: $token, prompt: Text("Token string (optional)"))
                             .textFieldStyle(.roundedBorder)
-                            .disabled(authMode == .internalProxy)
                     }
                 }
             }
@@ -165,13 +221,20 @@ struct AddKubeContextView: View {
         .onAppear {
             setupInitialValues()
         }
-        .onChange(of: server) { _, newValue in
-            if authMode == .awsEKS, awsRegion.isEmpty {
-                awsRegion = Self.eksRegion(from: newValue)
+        .onChange(of: name) { _, newName in
+            autoDetectAuthMode(from: newName)
+        }
+        .onChange(of: cluster) { _, newCluster in
+            autoDetectAuthMode(from: newCluster)
+        }
+        .onChange(of: server) { _, newServer in
+            autoDetectAuthMode(from: newServer)
+            if authMode == .cloudIAM && cloudProvider == .awsEKS, awsRegion.isEmpty {
+                awsRegion = Self.eksRegion(from: newServer)
             }
         }
         .onChange(of: authMode) { _, newValue in
-            if newValue == .awsEKS {
+            if newValue == .cloudIAM {
                 if awsProfile.isEmpty {
                     awsProfile = store.activeAWSProfile
                 }
@@ -182,10 +245,44 @@ struct AddKubeContextView: View {
         }
     }
 
+    private func autoDetectAuthMode(from text: String) {
+        let lower = text.lowercased()
+        guard !lower.isEmpty else { return }
+
+        if lower.contains("arn:aws:eks") || lower.contains("eks") {
+            authMode = .cloudIAM
+            cloudProvider = .awsEKS
+            let region = Self.eksRegion(from: text)
+            if !region.isEmpty {
+                awsRegion = region
+            }
+        } else if lower.contains("gke") || lower.contains("googleapis") {
+            authMode = .cloudIAM
+            cloudProvider = .gcpGKE
+        } else if lower.contains("azmk8s") || lower.contains("azure") || lower.contains("aks") {
+            authMode = .cloudIAM
+            cloudProvider = .azureAKS
+        } else if lower.contains("sdm") || lower.contains("teleport") || lower.contains("tsh") {
+            authMode = .proxyTunnel
+        }
+    }
+
 
     private var awsProfiles: [CloudProfile] {
         store.profiles
             .filter { $0.provider == .aws }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private var gcpProfiles: [CloudProfile] {
+        store.profiles
+            .filter { $0.provider == .gcp }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private var azureProfiles: [CloudProfile] {
+        store.profiles
+            .filter { $0.provider == .azure }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -198,6 +295,16 @@ struct AddKubeContextView: View {
             cluster = profile.accountID // accountID is cluster
             user = profile.roleName     // roleName is user
             namespace = profile.region  // region is namespace
+
+            if profile.provider == .aws || cluster.contains("arn:aws:eks") || name.lowercased().contains("eks") {
+                authMode = .cloudIAM
+                cloudProvider = .awsEKS
+                awsProfile = profile.roleName.isEmpty ? store.activeAWSProfile : profile.roleName
+                awsRegion = Self.eksRegion(from: cluster)
+            } else if !profile.token.isEmpty {
+                authMode = .bearerToken
+                token = profile.token
+            }
             
             // Resolve server endpoint dynamically
             if !cluster.isEmpty {
@@ -222,15 +329,22 @@ struct AddKubeContextView: View {
                 switch mode {
                 case .create:
                     let credential: KubeConfigCredential = switch authMode {
-                    case .internalProxy:
+                    case .proxyTunnel:
                         .internalProxy
                     case .bearerToken:
                         .bearerToken(token.isEmpty ? nil : token)
-                    case .awsEKS:
-                        .awsEKS(
-                            region: awsRegion.trimmingCharacters(in: .whitespaces),
-                            profile: awsProfile.trimmingCharacters(in: .whitespaces)
-                        )
+                    case .cloudIAM:
+                        switch cloudProvider {
+                        case .awsEKS:
+                            .awsEKS(
+                                region: awsRegion.trimmingCharacters(in: .whitespaces),
+                                profile: awsProfile.trimmingCharacters(in: .whitespaces)
+                            )
+                        case .gcpGKE:
+                            .internalProxy
+                        case .azureAKS:
+                            .internalProxy
+                        }
                     }
 
                     try await store.addKubeContext(
@@ -240,7 +354,7 @@ struct AddKubeContextView: View {
                         user: user.trimmingCharacters(in: .whitespaces),
                         namespace: namespace.trimmingCharacters(in: .whitespaces),
                         credential: credential,
-                        targetFolder: targetFolder
+                        targetFolder: selectedFolder
                     )
                 case .edit(let profile):
                     try await store.updateKubeContext(
@@ -252,6 +366,9 @@ struct AddKubeContextView: View {
                         namespace: namespace.trimmingCharacters(in: .whitespaces),
                         token: token.isEmpty ? nil : token
                     )
+                    if let selectedFolder {
+                        store.move(profile, to: selectedFolder)
+                    }
                 }
                 await MainActor.run {
                     isSaving = false

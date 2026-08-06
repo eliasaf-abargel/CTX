@@ -84,6 +84,8 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
         case .services: "service"
         case .ingress: "ingress"
         case .events: "event"
+        case .hpa: "hpa"
+        case .pvc: "pvc"
         case .workloads, .configMaps, .secretMetadata: nil
         }
     }

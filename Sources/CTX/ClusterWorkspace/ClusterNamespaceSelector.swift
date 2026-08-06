@@ -47,7 +47,7 @@ struct ClusterNamespaceSelector: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Namespace")
                 .font(.headline)
-            CTXSearchField(placeholder: "Filter namespaces", text: $filter)
+            CTXSearchField(placeholder: "Search namespaces...", text: $filter)
 
             ScrollView {
                 VStack(spacing: 4) {

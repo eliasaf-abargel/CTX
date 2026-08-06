@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: ProfileStore
     @State private var localSheet: SidebarSheet?
+    @AppStorage("ctxAppAppearance") private var appAppearanceRaw: String = AppAppearance.dark.rawValue
 
     var body: some View {
         TabView(selection: $store.selectedSettingsTab) {
@@ -150,6 +151,20 @@ struct SettingsView: View {
 
             // Tab 2: About
             Form {
+                Section {
+                    HStack(spacing: 12) {
+                        CTXAppLogoView(size: 34)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("CTX")
+                                .font(.headline)
+                            Text("Cloud & Kubernetes Context Tool")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
                 Section("Application Info") {
                     LabeledContent("Name", value: "CTX")
                     LabeledContent("Version", value: appVersion)
@@ -196,6 +211,17 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("Appearance & Theme") {
+                    Picker("Theme:", selection: $appAppearanceRaw) {
+                        ForEach(AppAppearance.allCases) { mode in
+                            Image(systemName: mode.systemImage)
+                                .tag(mode.rawValue)
+                                .help("\(mode.rawValue) Theme")
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
@@ -204,14 +230,12 @@ struct SettingsView: View {
             }
             .tag(2)
         }
+        .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .dark).colorScheme)
         .id(store.selectedSettingsTab)
         .frame(width: 580, height: 420)
         .background(
-            ZStack {
-                Color(red: 0.12, green: 0.14, blue: 0.18)
-                VisualEffectBackground(material: .sidebar, blendingMode: .withinWindow)
-            }
-            .ignoresSafeArea()
+            VisualEffectBackground(material: .sidebar, blendingMode: .withinWindow)
+                .ignoresSafeArea()
         )
 
         .sheet(item: $localSheet) { item in

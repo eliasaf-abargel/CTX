@@ -27,7 +27,7 @@ enum KubernetesDiagnosticClassifier {
         if message.contains("no context exists") { return .contextNotFound }
         if message.contains("forbidden") { return .forbidden }
         if message.contains("unauthorized") || message.contains("must be logged in") { return .unauthorized }
-        if message.contains("sso") && (message.contains("expired") || message.contains("login") || message.contains("token")) { return .awsSSOExpired }
+        if message.contains("sso") || message.contains("error loading sso token") || (message.contains("aws") && message.contains("token")) { return .awsSSOExpired }
         if message.contains("gcloud") || message.contains("invalid_grant") { return .gcpAuthExpired }
         if message.contains("exec plugin") || message.contains("credential plugin") || (message.contains("executable") && (message.contains("failed") || message.contains("not found"))) { return .authPluginFailed }
         if message.contains("certificate") || message.contains("tls") || message.contains("x509") { return .tlsCertificate }
@@ -42,6 +42,14 @@ enum KubernetesDiagnosticClassifier {
         var text = value
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.contains("clientVersion") || text.hasPrefix("{") {
+            if let lastBrace = text.lastIndex(of: "}") {
+                let remainder = text[text.index(after: lastBrace)...].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !remainder.isEmpty {
+                    text = remainder
+                }
+            }
+        }
         let patterns = [
             #"(?i)(bearer\s+)[A-Za-z0-9._\-=/+]+"#,
             #"(?i)(token[=:]\s*)[A-Za-z0-9._\-=/+]+"#,

@@ -14,8 +14,15 @@ final class ClusterWorkspaceViewModel: ObservableObject {
             handleNamespaceChange(previousNamespace: oldValue)
         }
     }
-    @Published private(set) var namespaceOptions: [String] = []
-    var availableNamespaces: [String] {
+    @Published private(set) var namespaceOptions: [String] = [] {
+        didSet { updateAvailableNamespaces() }
+    }
+    @Published private(set) var availableNamespaces: [String] = ["default"]
+    @Published private(set) var resourceLists: [String: KubernetesResourceList] = [:] {
+        didSet { updateAvailableNamespaces() }
+    }
+
+    private func updateAvailableNamespaces() {
         var set = Set<String>()
         set.formUnion(namespaceOptions)
         for list in resourceLists.values {
@@ -26,9 +33,11 @@ final class ClusterWorkspaceViewModel: ObservableObject {
             }
         }
         set.insert("default")
-        return Array(set).sorted()
+        let sorted = Array(set).sorted()
+        if availableNamespaces != sorted {
+            availableNamespaces = sorted
+        }
     }
-    @Published private(set) var resourceLists: [String: KubernetesResourceList] = [:]
     /// Set only when a background refresh fails *and* good cached data already exists
     /// for that key — the good data stays in `resourceLists` and this surfaces the
     /// failure separately, so a flaky refresh never blanks a screen that already had
@@ -57,6 +66,18 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var selectedTopologyRelation: TopologyServiceRelation?
     @Published var showIssuesOnly = false
     @Published var cronJobs: [CronJobItem] = []
+    @Published var gitOpsResult: GitOpsReadResult?
+    @Published var gitOpsList: KubernetesResourceList?
+    @Published var isLoadingGitOps = false
+    @Published var helmResult: HelmReadResult?
+    @Published var helmList: KubernetesResourceList?
+    @Published var isLoadingHelm = false
+    var gitOpsLoadedAt: Date?
+    var helmLoadedAt: Date?
+    var gitOpsTask: Task<Void, Never>?
+    var helmTask: Task<Void, Never>?
+
+    var onStatusCheckFailed: ((String, String) -> Void)?
 
     let context: KubernetesContextProfile
     private let healthService: any ClusterHealthChecking
@@ -65,6 +86,9 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     let logsReader: any KubernetesLogsReading
     let portForwardService: any KubernetesPortForwarding
     let auditLog: any AuditLogging
+    let gitOpsReader: any KubernetesGitOpsReading
+    let helmReader: any KubernetesHelmReading
+    let specReader: any KubernetesWorkloadSpecReading
     private let coordinator: ResourceRefreshCoordinator
     private var refreshTask: Task<Void, Never>?
     private var resourceTasks: [KubernetesResourceKind: Task<Void, Never>] = [:]
@@ -76,7 +100,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     /// still shown immediately (nothing clears or blanks), but a fresh load kicks off
     /// behind it automatically — actual stale-while-revalidate, not just a same-session
     /// existence check that never re-validates for the lifetime of the window.
-    private let staleThreshold: TimeInterval = 30
+    let staleThreshold: TimeInterval = 30
 
     init(
         context: KubernetesContextProfile,
@@ -85,8 +109,14 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         yamlReader: any KubernetesYAMLReading = KubernetesYAMLReader(),
         logsReader: any KubernetesLogsReading = KubernetesLogsReader(),
         portForwardService: any KubernetesPortForwarding = KubernetesPortForwardService(),
-        auditLog: any AuditLogging = LocalAuditLogService()
+        auditLog: any AuditLogging = LocalAuditLogService(),
+        gitOpsReader: any KubernetesGitOpsReading = KubernetesGitOpsReader(),
+        helmReader: any KubernetesHelmReading = KubernetesHelmReader(),
+        specReader: any KubernetesWorkloadSpecReading = KubernetesWorkloadSpecReader()
     ) {
+        self.gitOpsReader = gitOpsReader
+        self.helmReader = helmReader
+        self.specReader = specReader
         self.context = context
         self.healthService = healthService
         self.resourceReader = resourceReader
@@ -114,6 +144,8 @@ final class ClusterWorkspaceViewModel: ObservableObject {
 
     deinit {
         refreshTask?.cancel()
+        gitOpsTask?.cancel()
+        helmTask?.cancel()
         resourceTasks.values.forEach { $0.cancel() }
         yamlTask?.cancel()
         diffTasks.values.forEach { $0.cancel() }
@@ -207,11 +239,17 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         }
         if loadNamespacesOnSuccess, summary.apiStatus == .reachable {
             loadNamespaces(bypassCache: namespaceBypassCache)
+        } else if summary.apiStatus != .reachable, let failure = summary.primaryFailure {
+            onStatusCheckFailed?(context.contextName, failure.stderrSummary)
         }
     }
 
     func cancelRefresh() {
         refreshTask?.cancel()
+        gitOpsTask?.cancel()
+        helmTask?.cancel()
+        isLoadingGitOps = false
+        isLoadingHelm = false
         resourceTasks.values.forEach { $0.cancel() }
         yamlTask?.cancel()
         diffTasks.values.forEach { $0.cancel() }
@@ -258,6 +296,10 @@ final class ClusterWorkspaceViewModel: ObservableObject {
             reloadLogs()
         } else if selectedSection == .overview {
             refreshOverview(loadNamespacesOnSuccess: true, namespaceBypassCache: true)
+        } else if selectedSection == .issues {
+            loadResource(kind: .pods, bypassCache: true)
+            loadResource(kind: .nodes, bypassCache: true)
+            loadResource(kind: .workloads, bypassCache: true)
         } else if selectedSection == .logs {
             if selectedLogPodID != nil {
                 reloadLogs()
@@ -270,8 +312,15 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     }
 
     func loadSelectedSection(bypassCache: Bool = false) {
-        guard let kind = selectedSection.resourceKind else { return }
-        loadResource(kind: kind, bypassCache: bypassCache)
+        switch selectedSection {
+        case .helm:
+            loadHelm(bypassCache: bypassCache)
+        case .gitops:
+            loadGitOps(bypassCache: bypassCache)
+        default:
+            guard let kind = selectedSection.resourceKind else { return }
+            loadResource(kind: kind, bypassCache: bypassCache)
+        }
     }
 
     func loadNamespaces(bypassCache: Bool) {
@@ -291,30 +340,31 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         selectedNamespace = selection
     }
 
+    /// GitOps and Helm are not plain `kubectl get` kinds — they come from custom
+    /// resources and (for Helm) from the `helm` CLI, so they are loaded by their own
+    /// readers and cached here as finished lists. They used to be *synthesised* on
+    /// every access: GitOps rows were guessed from any pod whose name mentioned
+    /// argocd/flux, with the repository URL, target branch and sync status invented
+    /// outright; Helm rows carried a hardcoded chart suffix and version. Both now
+    /// report only what the cluster actually says.
     func resourceList(for section: ClusterWorkspaceSection) -> KubernetesResourceList? {
-        if section == .gitops {
-            let sampleRows = [
-                KubernetesResourceRow(id: "argocd/payment-api", cells: ["Namespace": "argocd", "Name": "payment-api", "Provider": "ArgoCD", "Status": "Synced", "Target": "main (3a7f10b)", "Age": "2d"]),
-                KubernetesResourceRow(id: "argocd/auth-service", cells: ["Namespace": "argocd", "Name": "auth-service", "Provider": "ArgoCD", "Status": "Synced", "Target": "main (891cd02)", "Age": "5d"]),
-                KubernetesResourceRow(id: "flux-system/frontend-web", cells: ["Namespace": "flux-system", "Name": "frontend-web", "Provider": "Flux CD", "Status": "Synced", "Target": "v1.4.2", "Age": "1d"])
-            ]
-            return KubernetesResourceList(kind: .workloads, columns: ["Namespace", "Name", "Provider", "Status", "Target", "Age"], rows: sampleRows, status: .reachable, diagnostic: nil, loadedAt: Date())
+        switch section {
+        case .gitops: return gitOpsList
+        case .helm: return helmList
+        default:
+            guard let kind = section.resourceKind else { return nil }
+            return resourceLists[resourceKey(kind: kind)]
         }
-        if section == .helm {
-            let sampleRows = [
-                KubernetesResourceRow(id: "monitoring/prometheus", cells: ["Namespace": "monitoring", "Name": "prometheus", "Chart": "prometheus-25.8.0", "Version": "v2.48.0", "Revision": "3", "Status": "deployed", "Age": "12d"]),
-                KubernetesResourceRow(id: "ingress-nginx/ingress-nginx", cells: ["Namespace": "ingress-nginx", "Name": "ingress-nginx", "Chart": "ingress-nginx-4.8.3", "Version": "v1.9.4", "Revision": "1", "Status": "deployed", "Age": "30d"]),
-                KubernetesResourceRow(id: "default/redis-cluster", cells: ["Namespace": "default", "Name": "redis-cluster", "Chart": "redis-18.6.1", "Version": "7.2.3", "Revision": "2", "Status": "deployed", "Age": "4d"])
-            ]
-            return KubernetesResourceList(kind: .workloads, columns: ["Namespace", "Name", "Chart", "Version", "Revision", "Status", "Age"], rows: sampleRows, status: .reachable, diagnostic: nil, loadedAt: Date())
-        }
-        guard let kind = section.resourceKind else { return nil }
-        return resourceLists[resourceKey(kind: kind)]
     }
 
     func isLoading(section: ClusterWorkspaceSection) -> Bool {
-        guard let kind = section.resourceKind else { return false }
-        return loadingResourceKinds.contains(kind)
+        switch section {
+        case .gitops: return isLoadingGitOps
+        case .helm: return isLoadingHelm
+        default:
+            guard let kind = section.resourceKind else { return false }
+            return loadingResourceKinds.contains(kind)
+        }
     }
 
     var isRefreshingCurrentScreen: Bool {
@@ -326,6 +376,9 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         }
         if selectedSection == .overview {
             return isRefreshingOverview
+        }
+        if selectedSection == .issues {
+            return isLoading(section: .pods) || isLoading(section: .nodes) || isLoading(section: .workloads)
         }
         if selectedSection == .logs {
             return selectedLogPodID != nil ? isLoadingLogs : isLoading(section: .pods)
@@ -571,7 +624,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
             } else {
                 overviewSummary.ingress.status = list.status
             }
-        case .configMaps, .secretMetadata:
+        case .configMaps, .secretMetadata, .hpa, .pvc:
             break
         }
     }
@@ -612,6 +665,17 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         Task { [coordinator, contextID = context.id] in
             await coordinator.cancel(contextID: contextID, namespace: previousNamespace)
         }
+
+        // GitOps and Helm are namespace-scoped reads that live outside the
+        // coordinator, so their cached lists have to be invalidated here too —
+        // otherwise the new namespace would show the previous one's applications.
+        // GitOps is cluster-wide, so a namespace switch cannot change its answer —
+        // it is deliberately left alone here rather than cancelled and refetched.
+        helmTask?.cancel()
+        helmTask = nil
+        helmLoadedAt = nil
+        isLoadingHelm = false
+        if selectedSection == .helm { loadHelm() }
 
         // Cached data for the new namespace (if any) is already what `resourceList(for:)`
         // returns, since cache keys are namespace-scoped — no separate "render cached

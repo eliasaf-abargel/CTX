@@ -9,6 +9,47 @@ enum ResourceExportFormatter {
         return try encoder.encode(rows)
     }
 
+    static func stripNoiseFromYAML(_ yaml: String) -> String {
+        let noisePrefixes = [
+            "managedFields:",
+            "resourceVersion:",
+            "uid:",
+            "creationTimestamp:",
+            "generation:",
+            "kubectl.kubernetes.io/last-applied-configuration:"
+        ]
+
+        let lines = yaml.components(separatedBy: .newlines)
+        var filteredLines: [String] = []
+        var skippingBlock = false
+        var blockIndent = 0
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let indent = line.prefix(while: { $0 == " " }).count
+
+            if skippingBlock {
+                if indent > blockIndent {
+                    continue
+                } else {
+                    skippingBlock = false
+                }
+            }
+
+            if noisePrefixes.contains(where: { trimmed.hasPrefix($0) }) {
+                if trimmed == "managedFields:" || trimmed.hasSuffix(":") {
+                    skippingBlock = true
+                    blockIndent = indent
+                }
+                continue
+            }
+
+            filteredLines.append(line)
+        }
+
+        return filteredLines.joined(separator: "\n")
+    }
+
     static func jsonCombined(_ lists: [ClusterWorkspaceSection: KubernetesResourceList]) throws -> Data {
         var combinedDict: [String: [[String: String]]] = [:]
         for (section, list) in lists {

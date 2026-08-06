@@ -5,6 +5,12 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var store: ProfileStore
     @State private var sheet: SidebarSheet?
+    @AppStorage("ctxAppAppearance") private var appAppearanceRaw: String = AppAppearance.dark.rawValue
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var currentAppearance: AppAppearance {
+        AppAppearance(rawValue: appAppearanceRaw) ?? .dark
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -12,13 +18,14 @@ struct ContentView: View {
                 store: store,
                 sheet: $sheet
             )
-            .background(Color.black.opacity(0.25))
+            .background(colorScheme == .light ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color.black.opacity(0.25))
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 280)
         } detail: {
             DetailPane(store: store, sheet: $sheet)
-                .background(Color(white: 0.12).opacity(0.65))
+                .background(colorScheme == .light ? Color(NSColor.windowBackgroundColor) : Color(white: 0.12).opacity(0.65))
         }
         .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
+        .preferredColorScheme(currentAppearance.colorScheme)
         .sheet(item: $sheet) { sheet in
             switch sheet {
             case .selectProvider:
@@ -66,6 +73,22 @@ struct ContentView: View {
         .sheet(item: $store.pendingFolderPrompt) { profile in
             ChooseFolderPromptView(store: store, profile: profile) {
                 store.pendingFolderPrompt = nil
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { store.activeInAppAuthURL != nil },
+            set: {
+                if !$0 {
+                    store.activeInAppAuthURL = nil
+                    store.activeInAppAuthEmail = nil
+                }
+            }
+        )) {
+            if let authURL = store.activeInAppAuthURL {
+                InAppAuthWebModalView(url: authURL, userEmail: store.activeInAppAuthEmail) { _ in
+                    store.activeInAppAuthURL = nil
+                    store.activeInAppAuthEmail = nil
+                }
             }
         }
         .alert(
@@ -280,16 +303,7 @@ struct SessionCountdownView: View {
 struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 24) {
-            if let icon = NSApp.applicationIconImage {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 80, height: 80)
-                    .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
-            } else {
-                Image(systemName: "cloud.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(Color.accentColor)
-            }
+            CTXAppLogoView(size: 80)
             
             VStack(spacing: 8) {
                 Text("Welcome to CTX")
