@@ -82,3 +82,28 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         self.token = token
     }
 }
+
+public extension KubernetesContextProfile {
+    /// The `--kubeconfig` argument for this context, or nothing when the context
+    /// came from the default location.
+    ///
+    /// `AGENTS.md` requires every kubectl call to preserve the kubeconfig path the
+    /// context was actually discovered in. That rule was implemented as a private
+    /// copy of these two helpers in eight separate services — byte-identical, and
+    /// eight places to get it wrong the next time a reader is added. It belongs on
+    /// the context, which is the thing that knows its own path.
+    var kubeconfigArguments: [String] {
+        resolvedKubeconfigPath.map { ["--kubeconfig", $0] } ?? []
+    }
+
+    /// `KUBECONFIG` for the child process, so credential plugins spawned by kubectl
+    /// resolve the same file kubectl itself was pointed at.
+    var kubeconfigEnvironment: [String: String] {
+        resolvedKubeconfigPath.map { ["KUBECONFIG": $0] } ?? [:]
+    }
+
+    private var resolvedKubeconfigPath: String? {
+        let path = kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? nil : path
+    }
+}

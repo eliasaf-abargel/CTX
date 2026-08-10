@@ -31,7 +31,7 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
         do {
             let commandArguments = arguments(kind: kind, context: context, namespace: namespace)
             var command = try kubectl.inspectionCommand(context: context.contextName, arguments: commandArguments)
-            command.environmentOverrides = kubeconfigEnvironment(context)
+            command.environmentOverrides = context.kubeconfigEnvironment
             let timeout = timeout(for: kind, namespace: namespace)
             let result = try await kubectl.run(command, timeout: timeout)
             let subprocessDurationMs = durationMilliseconds(since: started)
@@ -175,7 +175,7 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
     }
 
     private func arguments(kind: KubernetesResourceKind, context: KubernetesContextProfile, namespace: KubernetesNamespaceSelection) -> [String] {
-        var args = kubeconfigArguments(context) + ["get", kind.kubectlResource]
+        var args = context.kubeconfigArguments + ["get", kind.kubectlResource]
         if !kind.isClusterScoped {
             args += namespace.commandArguments
         }
@@ -196,24 +196,12 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
         kind.isClusterScoped ? .allNamespaces : namespace
     }
 
-    private func kubeconfigArguments(_ context: KubernetesContextProfile) -> [String] {
-        context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : ["--kubeconfig", context.kubeconfigPath]
-    }
 
-    private func kubeconfigEnvironment(_ context: KubernetesContextProfile) -> [String: String] {
-        let path = context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? [:] : ["KUBECONFIG": path]
-    }
 
     private func diagnostic(kind: KubernetesResourceKind, context: KubernetesContextProfile, result: KubectlResult, category: KubernetesDiagnosticCategory, timeout: TimeInterval, started: Date) -> KubernetesCommandDiagnostic {
         KubernetesCommandDiagnostic(
-            commandKind: kind.title,
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: result.exitCode,
-            durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-            category: category,
-            stderrSummary: diagnosticSummary(result: result, category: category, timeout: timeout)
+            kind: kind.title, context: context, result: result, category: category, startedAt: started,
+            summary: diagnosticSummary(result: result, category: category, timeout: timeout)
         )
     }
 
@@ -229,7 +217,7 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
     }
 
     private func failed(kind: KubernetesResourceKind, context: KubernetesContextProfile, category: KubernetesDiagnosticCategory, message: String, started: Date) -> KubernetesResourceList {
-        let diag = KubernetesCommandDiagnostic(commandKind: kind.title, contextName: context.contextName, kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath), exitCode: nil, durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)), category: category, stderrSummary: KubernetesDiagnosticClassifier.sanitize(message))
+        let diag = KubernetesCommandDiagnostic(kind: kind.title, context: context, category: category, message: message, startedAt: started)
         return KubernetesResourceList(kind: kind, columns: columns(for: kind), rows: [], status: KubernetesDiagnosticClassifier.status(from: category), diagnostic: diag)
     }
 

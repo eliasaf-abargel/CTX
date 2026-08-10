@@ -68,6 +68,12 @@ struct ClusterWorkspaceContent: View {
         }
         // Fresh view identity per section → instant zero-stutter tab switching.
         .id(viewModel.selectedSection)
+        // Both Overview and Nodes read live utilisation, so the poll follows either.
+        .task(id: viewModel.selectedSection) {
+            if viewModel.selectedSection == .nodes {
+                viewModel.startTelemetryUpdates()
+            }
+        }
         .sheet(item: $viewModel.presentation) { presentation in
             CTXResourceInspector(viewModel: viewModel, selection: presentation.selection, activeTab: presentation.tab)
         }

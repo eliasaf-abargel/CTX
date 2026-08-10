@@ -147,7 +147,10 @@ public final class KubernetesHelmReader: KubernetesHelmReading {
                     items: [],
                     source: .helmCLI,
                     status: KubernetesDiagnosticClassifier.status(from: KubernetesDiagnosticClassifier.category(from: result)),
-                    diagnostic: diagnostic(kind: "Helm releases", context: context, result: result, started: started)
+                    diagnostic: KubernetesCommandDiagnostic(
+                        kind: "Helm releases", context: context, result: result,
+                        category: KubernetesDiagnosticClassifier.category(from: result), startedAt: started
+                    )
                 )
             }
             return HelmReadResult(
@@ -202,7 +205,7 @@ public final class KubernetesHelmReader: KubernetesHelmReading {
         namespace: KubernetesNamespaceSelection
     ) async -> HelmReadResult {
         let started = Date()
-        var arguments = kubeconfigArguments(context) + ["get", "secrets", "--selector", "owner=helm"]
+        var arguments = context.kubeconfigArguments + ["get", "secrets", "--selector", "owner=helm"]
         arguments += namespace.commandArguments
         // Only labels and creation time are requested. `.data` is never selected, so
         // no secret value is fetched, logged or cached.
@@ -214,14 +217,17 @@ public final class KubernetesHelmReader: KubernetesHelmReading {
 
         do {
             var command = try kubectl.inspectionCommand(context: context.contextName, arguments: arguments)
-            command.environmentOverrides = kubeconfigEnvironment(context)
+            command.environmentOverrides = context.kubeconfigEnvironment
             let result = try await kubectl.run(command, timeout: timeout)
             guard result.exitCode == 0 else {
                 return HelmReadResult(
                     items: [],
                     source: .releaseSecretLabels,
                     status: KubernetesDiagnosticClassifier.status(from: KubernetesDiagnosticClassifier.category(from: result)),
-                    diagnostic: diagnostic(kind: "Helm releases", context: context, result: result, started: started)
+                    diagnostic: KubernetesCommandDiagnostic(
+                        kind: "Helm releases", context: context, result: result,
+                        category: KubernetesDiagnosticClassifier.category(from: result), startedAt: started
+                    )
                 )
             }
             return HelmReadResult(
@@ -270,31 +276,6 @@ public final class KubernetesHelmReader: KubernetesHelmReading {
 
     // MARK: - Shared
 
-    private func diagnostic(
-        kind: String,
-        context: KubernetesContextProfile,
-        result: KubectlResult,
-        started: Date
-    ) -> KubernetesCommandDiagnostic {
-        let category = KubernetesDiagnosticClassifier.category(from: result)
-        let stderr = KubernetesDiagnosticClassifier.sanitize(result.stderr)
-        return KubernetesCommandDiagnostic(
-            commandKind: kind,
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: result.exitCode,
-            durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-            category: category,
-            stderrSummary: stderr.isEmpty ? category.presentationSummary : stderr
-        )
-    }
 
-    private func kubeconfigArguments(_ context: KubernetesContextProfile) -> [String] {
-        context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : ["--kubeconfig", context.kubeconfigPath]
-    }
 
-    private func kubeconfigEnvironment(_ context: KubernetesContextProfile) -> [String: String] {
-        let path = context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? [:] : ["KUBECONFIG": path]
-    }
 }

@@ -1,28 +1,7 @@
 import CTXCore
 import SwiftUI
 
-enum KubeContextEditorMode {
-    case create
-    case edit(CloudProfile)
-
-    var title: String {
-        switch self {
-        case .create:
-            "Add Kubernetes Context"
-        case .edit:
-            "Edit Kubernetes Context"
-        }
-    }
-
-    var actionTitle: String {
-        switch self {
-        case .create:
-            "Create"
-        case .edit:
-            "Save"
-        }
-    }
-}
+typealias KubeContextEditorMode = ProfileEditorMode
 
 private enum KubeContextAuthMode: String, CaseIterable, Identifiable {
     case proxyTunnel = "Zero-Trust / Proxy"
@@ -75,7 +54,7 @@ struct AddKubeContextView: View {
         VStack(alignment: .leading, spacing: 20) {
             // Header
             VStack(alignment: .leading, spacing: 4) {
-                Text(mode.title)
+                Text(mode.title(noun: "Kubernetes Context"))
                     .font(.title2.weight(.semibold))
                 Text("Configure context, cluster and authentication saved to your ~/.kube/config file.")
                     .font(.subheadline)
@@ -182,39 +161,17 @@ struct AddKubeContextView: View {
             .scrollContentBackground(.hidden)
             .frame(height: 380)
 
-            // Error banner
-            if !errorMessage.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.octagon.fill")
-                        .foregroundStyle(.red)
-                    Text(errorMessage)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            }
+            ProfileEditorErrorBanner(message: errorMessage)
 
             // Footer Actions
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
-                .buttonStyle(CTXSecondaryButton())
-                .keyboardShortcut(.cancelAction)
-                .disabled(isSaving)
-
-                Button(mode.actionTitle) {
-                    save()
-                }
-                .buttonStyle(CTXPrimaryButton())
-                .keyboardShortcut(.defaultAction)
-                .disabled(isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty || server.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
+            ProfileEditorFooter(
+                actionTitle: mode.actionTitle,
+                isBusy: isSaving,
+                isConfirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty
+                    || server.trimmingCharacters(in: .whitespaces).isEmpty,
+                cancel: { dismiss() },
+                confirm: { save() }
+            )
         }
         .padding(24)
         .frame(width: 440)
@@ -290,7 +247,8 @@ struct AddKubeContextView: View {
         switch mode {
         case .create:
             awsProfile = store.activeAWSProfile
-        case .edit(let profile):
+        // Duplicating pre-fills from the source context exactly like editing does.
+        case .edit(let profile), .duplicate(let profile):
             name = profile.name
             cluster = profile.accountID // accountID is cluster
             user = profile.roleName     // roleName is user
@@ -327,7 +285,9 @@ struct AddKubeContextView: View {
         Task {
             do {
                 switch mode {
-                case .create:
+                // Duplicating writes a *new* context — grouped with create, not with
+                // edit, which would overwrite the context being copied from.
+                case .create, .duplicate:
                     let credential: KubeConfigCredential = switch authMode {
                     case .proxyTunnel:
                         .internalProxy

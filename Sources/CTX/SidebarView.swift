@@ -45,41 +45,8 @@ struct SidebarView: View {
     @State private var expandedProviders: Set<CloudProvider> = Set(CloudProvider.allCases)
     @State private var sidebarSearchQuery = ""
 
-    private var filteredGroupedProfiles: [ProfileGroup] {
-        if sidebarSearchQuery.isEmpty {
-            return store.groupedProfiles
-        }
-        return store.groupedProfiles.compactMap { group in
-            let matchesFolder = group.folder.name.localizedCaseInsensitiveContains(sidebarSearchQuery)
-                || group.folder.provider.rawValue.localizedCaseInsensitiveContains(sidebarSearchQuery)
-
-            let matchingProfiles = group.profiles.filter { profile in
-                profile.name.localizedCaseInsensitiveContains(sidebarSearchQuery)
-                    || profile.provider.rawValue.localizedCaseInsensitiveContains(sidebarSearchQuery)
-            }
-
-            if matchesFolder {
-                return group
-            } else if !matchingProfiles.isEmpty {
-                return ProfileGroup(folder: group.folder, profiles: matchingProfiles)
-            } else {
-                return nil
-            }
-        }
-    }
-
-    private struct ProviderGroup: Identifiable {
-        var id: CloudProvider { provider }
-        let provider: CloudProvider
-        let folderGroups: [ProfileGroup]
-    }
-
     private var providerGroups: [ProviderGroup] {
-        CloudProvider.allCases.compactMap { provider in
-            let groups = filteredGroupedProfiles.filter { $0.folder.provider == provider && !$0.profiles.isEmpty }
-            guard !groups.isEmpty else { return nil }
-            return ProviderGroup(provider: provider, folderGroups: groups)
-        }
+        ProfileGrouping.providerGroups(store.groupedProfiles, query: sidebarSearchQuery)
     }
 
     var body: some View {
@@ -221,53 +188,7 @@ struct SidebarView: View {
                 .help("Create Profile or Folder")
             }
         }
-        .alert(
-            "Delete \(deleteCandidate?.name ?? "profile")?",
-            isPresented: Binding(
-                get: { deleteCandidate != nil },
-                set: { if !$0 { deleteCandidate = nil } }
-            )
-        ) {
-            Button("Delete", role: .destructive) {
-                if let profile = deleteCandidate {
-                    do {
-                        switch profile.provider {
-                        case .aws:
-                            try store.deleteAWSProfile(profile)
-                        case .gcp:
-                            try store.deleteGCPProfile(profile)
-                        case .azure:
-                            try store.deleteAzureProfile(profile)
-                        case .kubernetes:
-                            Task {
-                                do {
-                                    try await store.deleteKubeContext(profile)
-                                } catch {
-                                    store.report(error.localizedDescription)
-                                }
-                            }
-                        }
-                    } catch {
-                        store.report(error.localizedDescription)
-                    }
-                }
-                deleteCandidate = nil
-            }
-            Button("Cancel", role: .cancel) { deleteCandidate = nil }
-        } message: {
-            if let profile = deleteCandidate {
-                switch profile.provider {
-                case .aws:
-                    Text("CTX will remove this AWS profile and its matching SSO session from ~/.aws/config after creating a backup.")
-                case .gcp:
-                    Text("CTX will permanently delete the gcloud configuration file config_\(profile.name) from ~/.config/gcloud/configurations/.")
-                case .azure:
-                    Text("CTX will permanently delete the Azure profile JSON file config_\(profile.name).json from ~/.config/ctx/azure/.")
-                case .kubernetes:
-                    Text("CTX will delete the context \(profile.name) from your ~/.kube/config configuration file.")
-                }
-            }
-        }
+        .deleteProfileAlert(store: store, candidate: $deleteCandidate)
         .onChange(of: store.selectedSelection) { _, newValue in
             if case .profile(let profileID) = newValue,
                let profile = store.profiles.first(where: { $0.id == profileID }) {
@@ -278,17 +199,13 @@ struct SidebarView: View {
         }
     }
 
+
     private func providerBinding(for provider: CloudProvider) -> Binding<Bool> {
-        Binding(
-            get: { expandedProviders.contains(provider) || !sidebarSearchQuery.isEmpty },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedProviders.insert(provider)
-                } else {
-                    expandedProviders.remove(provider)
-                }
-            }
-        )
+        ProfileGrouping.expansionBinding(for: provider, in: $expandedProviders, forcedOpenWhile: sidebarSearchQuery)
+    }
+
+    private func binding(for id: String) -> Binding<Bool> {
+        ProfileGrouping.expansionBinding(for: id, in: $expandedGroups, forcedOpenWhile: sidebarSearchQuery)
     }
 
     private var identityStatusColor: Color {
@@ -305,18 +222,6 @@ struct SidebarView: View {
         sheet = .selectProvider
     }
 
-    private func binding(for id: String) -> Binding<Bool> {
-        Binding(
-            get: { expandedGroups.contains(id) || !sidebarSearchQuery.isEmpty },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedGroups.insert(id)
-                } else {
-                    expandedGroups.remove(id)
-                }
-            }
-        )
-    }
 }
 
 struct ProfileDisclosureGroup: View {

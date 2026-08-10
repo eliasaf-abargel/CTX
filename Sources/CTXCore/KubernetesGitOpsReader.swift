@@ -151,20 +151,23 @@ public final class KubernetesGitOpsReader: KubernetesGitOpsReading {
         context: KubernetesContextProfile
     ) async -> ReadOutcome {
         let started = Date()
-        var arguments = kubeconfigArguments(context) + ["get", source.resource]
+        var arguments = context.kubeconfigArguments + ["get", source.resource]
         arguments += ["--all-namespaces"]
         arguments += ["--request-timeout=\(Int(timeout))s", "--output=json", "--ignore-not-found"]
 
         do {
             var command = try kubectl.inspectionCommand(context: context.contextName, arguments: arguments)
-            command.environmentOverrides = kubeconfigEnvironment(context)
+            command.environmentOverrides = context.kubeconfigEnvironment
             let result = try await kubectl.run(command, timeout: timeout)
 
             if result.exitCode != 0 {
                 if Self.indicatesMissingCRD(result.stderr) {
                     return .notInstalled
                 }
-                return .failure(diagnostic(source: source, context: context, result: result, started: started))
+                return .failure(KubernetesCommandDiagnostic(
+                    kind: "GitOps \(source.controller)", context: context, result: result,
+                    category: KubernetesDiagnosticClassifier.category(from: result), startedAt: started
+                ))
             }
 
             // `--ignore-not-found` yields empty stdout when the type exists but has
@@ -177,33 +180,22 @@ public final class KubernetesGitOpsReader: KubernetesGitOpsReading {
                 let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let rawItems = root["items"] as? [[String: Any]]
             else {
-                return .failure(diagnostic(source: source, context: context, result: result, started: started, override: .unknown))
+                return .failure(KubernetesCommandDiagnostic(
+                    kind: "GitOps \(source.controller)", context: context, result: result,
+                    category: .unknown, startedAt: started
+                ))
             }
             return .success(source.parse(rawItems))
         } catch KubectlRunnerError.kubectlNotFound {
-            return .failure(
-                KubernetesCommandDiagnostic(
-                    commandKind: "GitOps \(source.controller)",
-                    contextName: context.contextName,
-                    kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-                    exitCode: nil,
-                    durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-                    category: .kubectlMissing,
-                    stderrSummary: "kubectl was not found"
-                )
-            )
+            return .failure(KubernetesCommandDiagnostic(
+                kind: "GitOps \(source.controller)", context: context,
+                category: .kubectlMissing, message: "kubectl was not found", startedAt: started
+            ))
         } catch {
-            return .failure(
-                KubernetesCommandDiagnostic(
-                    commandKind: "GitOps \(source.controller)",
-                    contextName: context.contextName,
-                    kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-                    exitCode: nil,
-                    durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-                    category: .unknown,
-                    stderrSummary: KubernetesDiagnosticClassifier.sanitize(error.localizedDescription)
-                )
-            )
+            return .failure(KubernetesCommandDiagnostic(
+                kind: "GitOps \(source.controller)", context: context,
+                category: .unknown, message: error.localizedDescription, startedAt: started
+            ))
         }
     }
 
@@ -217,32 +209,6 @@ public final class KubernetesGitOpsReader: KubernetesGitOpsReading {
             || lowered.contains("unable to recognize")
     }
 
-    private func diagnostic(
-        source: Source,
-        context: KubernetesContextProfile,
-        result: KubectlResult,
-        started: Date,
-        override: KubernetesDiagnosticCategory? = nil
-    ) -> KubernetesCommandDiagnostic {
-        let category = override ?? KubernetesDiagnosticClassifier.category(from: result)
-        let stderr = KubernetesDiagnosticClassifier.sanitize(result.stderr)
-        return KubernetesCommandDiagnostic(
-            commandKind: "GitOps \(source.controller)",
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: result.exitCode,
-            durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-            category: category,
-            stderrSummary: stderr.isEmpty ? category.presentationSummary : stderr
-        )
-    }
 
-    private func kubeconfigArguments(_ context: KubernetesContextProfile) -> [String] {
-        context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : ["--kubeconfig", context.kubeconfigPath]
-    }
 
-    private func kubeconfigEnvironment(_ context: KubernetesContextProfile) -> [String: String] {
-        let path = context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? [:] : ["KUBECONFIG": path]
-    }
 }

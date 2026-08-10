@@ -37,10 +37,13 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
                 context: context.contextName,
                 arguments: arguments(resource: resource, ref: ref, context: context)
             )
-            command.environmentOverrides = kubeconfigEnvironment(context)
+            command.environmentOverrides = context.kubeconfigEnvironment
             let result = try await kubectl.run(command, timeout: timeout)
             let category = KubernetesDiagnosticClassifier.category(from: result)
-            let diagnostic = diagnostic(kind: ref.kind, context: context, result: result, category: category, started: started)
+            let diagnostic = KubernetesCommandDiagnostic(
+                kind: "\(ref.kind.title) YAML", context: context, result: result, category: category, startedAt: started,
+                summary: category == .success ? "inspection YAML completed" : nil
+            )
             logCall(kind: ref.kind, context: context, namespace: ref.namespace, started: started, outcome: result.timedOut ? .timeout : (category == .success ? .success : .error))
             guard category == .success else {
                 return KubernetesYAMLResult(yaml: nil, status: KubernetesDiagnosticClassifier.status(from: category), diagnostic: diagnostic)
@@ -68,7 +71,7 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
     }
 
     private func arguments(resource: String, ref: KubernetesResourceRef, context: KubernetesContextProfile) -> [String] {
-        var args = kubeconfigArguments(context) + ["get", resource, ref.name]
+        var args = context.kubeconfigArguments + ["get", resource, ref.name]
         if !ref.kind.isClusterScoped, let namespace = ref.namespace {
             args += ["--namespace", namespace]
         }
@@ -90,32 +93,8 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
         }
     }
 
-    private func kubeconfigArguments(_ context: KubernetesContextProfile) -> [String] {
-        context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : ["--kubeconfig", context.kubeconfigPath]
-    }
 
-    private func kubeconfigEnvironment(_ context: KubernetesContextProfile) -> [String: String] {
-        let path = context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? [:] : ["KUBECONFIG": path]
-    }
 
-    private func diagnostic(
-        kind: KubernetesResourceKind,
-        context: KubernetesContextProfile,
-        result: KubectlResult,
-        category: KubernetesDiagnosticCategory,
-        started: Date
-    ) -> KubernetesCommandDiagnostic {
-        KubernetesCommandDiagnostic(
-            commandKind: "\(kind.title) YAML",
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: result.exitCode,
-            durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-            category: category,
-            stderrSummary: diagnosticSummary(result: result, category: category)
-        )
-    }
 
     private func diagnosticSummary(result: KubectlResult, category: KubernetesDiagnosticCategory) -> String {
         let stderr = KubernetesDiagnosticClassifier.sanitize(result.stderr)
@@ -136,13 +115,8 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
             yaml: nil,
             status: KubernetesDiagnosticClassifier.status(from: category),
             diagnostic: KubernetesCommandDiagnostic(
-                commandKind: "\(kind.title) YAML",
-                contextName: context.contextName,
-                kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-                exitCode: nil,
-                durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-                category: category,
-                stderrSummary: KubernetesDiagnosticClassifier.sanitize(message)
+                kind: "\(kind.title) YAML", context: context,
+                category: category, message: message, startedAt: started
             )
         )
     }

@@ -64,9 +64,14 @@ enum CTXResourceColumns {
                 .text("Name", min: 140, ideal: 340, max: 750, priority: 3, flexible: true, copyable: true),
                 .text("Ready", min: 60, ideal: 70, max: 80, priority: 3),
                 .text("Roles", min: 70, ideal: 90, max: 130, priority: 2),
-                .numeric("CPU", min: 75, ideal: 95, max: 120, priority: 2),
-                .numeric("Memory", min: 85, ideal: 110, max: 140, priority: 2),
-                .numeric("Disk", min: 80, ideal: 100, max: 130, priority: 2),
+                // Live usage sits ahead of capacity: on a managed node group every
+                // node reports the same size, so the capacity columns alone make the
+                // table look static regardless of what the cluster is doing.
+                .numeric("CPU Used", min: 70, ideal: 85, max: 100, priority: 3),
+                .numeric("Memory Used", min: 85, ideal: 100, max: 120, priority: 3),
+                .numeric("CPU", min: 75, ideal: 95, max: 120, priority: 1, hideOnCompact: true),
+                .numeric("Memory", min: 85, ideal: 110, max: 140, priority: 1, hideOnCompact: true),
+                .numeric("Disk", min: 80, ideal: 100, max: 130, priority: 1, hideOnCompact: true),
                 .text("Version", min: 80, ideal: 100, max: 130, priority: 1, hideOnCompact: true),
                 .numeric("Age", min: 55, ideal: 65, max: 80, priority: 2),
                 .text("IP", min: 100, ideal: 120, max: 160, priority: 1, hideOnCompact: true, copyable: true)

@@ -58,9 +58,23 @@ struct CTXResourceTable: View {
 
     static let initialWindow = 100
     private static let windowGrowth = 150
+    /// How far from the end of the built rows the next batch starts building.
+    ///
+    /// Triggering on the very last row means the user reaches the bottom, stops, and
+    /// only then waits for more — a visible hitch on every batch. Starting a batch
+    /// while there is still roughly a screenful left means it is usually ready
+    /// before they get there.
+    private static let growthLeadRows = 40
 
     private var visibleRows: [KubernetesResourceRow] {
         rows.count <= displayLimit ? rows : Array(rows.prefix(displayLimit))
+    }
+
+    /// The row whose appearance starts building the next batch.
+    private var growthTriggerRowID: String? {
+        guard displayLimit < rows.count else { return nil }
+        let index = max(0, visibleRows.count - Self.growthLeadRows)
+        return visibleRows.indices.contains(index) ? visibleRows[index].id : visibleRows.last?.id
     }
     /// Cached result of `resolve()` — only recomputed when `availableWidth` or
     /// `allColumns` changes, not on every hover or selection state update.
@@ -121,7 +135,7 @@ struct CTXResourceTable: View {
                             )
                             .equatable()
                             .onAppear {
-                                guard row.id == visibleRows.last?.id, displayLimit < rows.count else { return }
+                                guard row.id == growthTriggerRowID else { return }
                                 displayLimit = min(displayLimit + Self.windowGrowth, rows.count)
                             }
                             Divider().opacity(0.45)

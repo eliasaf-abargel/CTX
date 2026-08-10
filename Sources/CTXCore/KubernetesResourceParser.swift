@@ -57,9 +57,13 @@ enum KubernetesResourceParser {
         let memCap = string(capacity["memory"])
         let diskCap = string(capacity["ephemeral-storage"])
 
-        let cpuText = cpuCap.isEmpty ? "4 vCPU" : "\(cpuCap) vCPU"
-        let memText = memCap.isEmpty ? "16 GiB" : (memCap.hasSuffix("Ki") ? String(format: "%.1f GiB", Double(int(memCap.dropLast(2), defaultValue: 0)) / 1_048_576.0) : memCap)
-        let diskText = diskCap.isEmpty ? "80 GiB" : (diskCap.hasSuffix("Ki") ? String(format: "%.0f GiB", Double(int(diskCap.dropLast(2), defaultValue: 0)) / 1_048_576.0) : diskCap)
+        // A node that reports no capacity says so. The previous defaults — "4 vCPU",
+        // "16 GiB", "80 GiB" — were indistinguishable from a real reading.
+        let unknown = KubernetesGitOpsService.unknownValue
+        let cpuText = cpuCap.isEmpty ? unknown : "\(cpuCap) vCPU"
+        let memText = memCap.isEmpty ? unknown : (memCap.hasSuffix("Ki") ? String(format: "%.1f GiB", Double(int(memCap.dropLast(2), defaultValue: 0)) / 1_048_576.0) : memCap)
+        let diskText = diskCap.isEmpty ? unknown : (diskCap.hasSuffix("Ki") ? String(format: "%.0f GiB", Double(int(diskCap.dropLast(2), defaultValue: 0)) / 1_048_576.0) : diskCap)
+        let allocatable = dict(status["allocatable"])
 
         return row(string(metadata["name"]), [
             "Name": string(metadata["name"]),
@@ -70,7 +74,12 @@ enum KubernetesResourceParser {
             "Disk": diskText,
             "Version": string(dict(status["nodeInfo"])["kubeletVersion"]),
             "Age": age(metadata),
-            "IP": ip
+            "IP": ip,
+            // Not shown as columns — the telemetry panel reads these to work out how
+            // much of the cluster is committed and how much is actually in use.
+            "Pod Capacity": string(allocatable["pods"]),
+            "Allocatable CPU": string(allocatable["cpu"]),
+            "Allocatable Memory": string(allocatable["memory"])
         ], warning: !ready)
     }
 
@@ -116,8 +125,14 @@ enum KubernetesResourceParser {
             return reason.contains("crashloop") || reason.contains("backoff")
         }
 
-        let cpuReq = specContainers.compactMap { dict(dict($0["resources"])["requests"])["cpu"] as? String }.first ?? "100m"
-        let memReq = specContainers.compactMap { dict(dict($0["resources"])["requests"])["memory"] as? String }.first ?? "256Mi"
+        // Summed over every container, not just the first: a pod's footprint on the
+        // scheduler includes its sidecars. A pod that declares no request at all is
+        // reported as unset — the previous defaults of "100m"/"256Mi" made an
+        // unbounded pod look like a modest one.
+        let cpuRequestCores = totalRequest(specContainers, key: "cpu", parse: KubernetesMetricsReader.cores)
+        let memRequestBytes = totalRequest(specContainers, key: "memory", parse: KubernetesMetricsReader.bytes)
+        let cpuReq = cpuRequestCores.map { formatCores($0) } ?? KubernetesGitOpsService.unknownValue
+        let memReq = memRequestBytes.map { formatBytes($0) } ?? KubernetesGitOpsService.unknownValue
         // Prefer the running imageID digest (what's actually live) if available,
         // otherwise fall back to spec.containers[].image (what was requested).
         let runningImage = containers.compactMap { $0["image"] as? String }.first ?? ""
@@ -138,7 +153,11 @@ enum KubernetesResourceParser {
             "QoS": string(status["qosClass"]),
             "Owner": ownerChain(metadata),
             "Workload": workloadLabel(metadata),
-            "Labels": encodedLabels(dict(metadata["labels"]))
+            "Labels": encodedLabels(dict(metadata["labels"])),
+            // Not shown as columns — read by the telemetry panel.
+            "Memory Limit": memoryLimit(spec),
+            "CPU Request Cores": cpuRequestCores.map { String($0) } ?? "",
+            "Memory Request Bytes": memRequestBytes.map { String($0) } ?? ""
         ], warning: phase != "Running" || crashLoop)
     }
 
@@ -146,6 +165,49 @@ enum KubernetesResourceParser {
     /// picker) — prefers common app labels, falls back to the owning
     /// controller's kind/name (stripping the ReplicaSet hash suffix so it reads
     /// as the Deployment name), empty if neither is present.
+    /// A pod's total request for one resource, or `nil` when no container declares it.
+    private static func totalRequest(
+        _ containers: [[String: Any]],
+        key: String,
+        parse: (String) -> Double?
+    ) -> Double? {
+        var total: Double = 0
+        var declared = false
+        for container in containers {
+            let requests = dict(dict(container["resources"])["requests"])
+            guard let raw = requests[key], let value = parse(String(describing: raw)) else { continue }
+            total += value
+            declared = true
+        }
+        return declared ? total : nil
+    }
+
+    private static func formatCores(_ cores: Double) -> String {
+        cores >= 1 ? String(format: "%.2g", cores) : "\(Int((cores * 1000).rounded()))m"
+    }
+
+    private static func formatBytes(_ bytes: Double) -> String {
+        let gib = bytes / 1_073_741_824
+        if gib >= 1 { return String(format: "%.1fGi", gib) }
+        return "\(Int((bytes / 1_048_576).rounded()))Mi"
+    }
+
+    /// The pod's total declared memory limit, summed across its containers. Empty
+    /// when any container leaves the limit unset — a pod that can grow without bound
+    /// has no threshold to be measured against.
+    private static func memoryLimit(_ spec: [String: Any]) -> String {
+        let containers = spec["containers"] as? [[String: Any]] ?? []
+        guard !containers.isEmpty else { return "" }
+        var total: Double = 0
+        for container in containers {
+            let limits = dict(dict(container["resources"])["limits"])
+            guard let raw = limits["memory"],
+                  let bytes = KubernetesMetricsReader.bytes(String(describing: raw)) else { return "" }
+            total += bytes
+        }
+        return String(Int(total))
+    }
+
     private static func workloadLabel(_ metadata: [String: Any]) -> String {
         let labels = dict(metadata["labels"])
         if let name = labels["app.kubernetes.io/name"] as? String, !name.isEmpty { return name }

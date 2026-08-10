@@ -79,3 +79,38 @@ final class TimeoutFlag: @unchecked Sendable {
         lock.unlock()
     }
 }
+
+/// Runs `operation` over `items` with at most `limit` running at once, returning the
+/// results in the order the items were given.
+///
+/// The hand-rolled version of this — prime the group up to the limit, then start one
+/// more each time one finishes — appeared three times, twice inside a single
+/// function, with the whole task body copied verbatim in both halves of the loop.
+public func withBoundedConcurrency<Item: Sendable, Result: Sendable>(
+    over items: [Item],
+    limit: Int,
+    _ operation: @escaping @Sendable (Item) async -> Result
+) async -> [Result] {
+    guard limit > 0, !items.isEmpty else { return [] }
+
+    return await withTaskGroup(of: (Int, Result).self) { group in
+        var next = 0
+        while next < min(limit, items.count) {
+            let index = next
+            group.addTask { (index, await operation(items[index])) }
+            next += 1
+        }
+
+        var collected: [(Int, Result)] = []
+        collected.reserveCapacity(items.count)
+        while let finished = await group.next() {
+            collected.append(finished)
+            if next < items.count {
+                let index = next
+                group.addTask { (index, await operation(items[index])) }
+                next += 1
+            }
+        }
+        return collected.sorted { $0.0 < $1.0 }.map(\.1)
+    }
+}

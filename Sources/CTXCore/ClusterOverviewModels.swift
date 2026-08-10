@@ -441,3 +441,57 @@ public enum KubernetesRBACResource: CaseIterable, Sendable {
         }
     }
 }
+
+public extension KubernetesCommandDiagnostic {
+    /// Builds a diagnostic for a kubectl call that ran to completion.
+    ///
+    /// Every reader assembled this by hand and repeated the same three things each
+    /// time: redact the kubeconfig path, convert the elapsed interval to clamped
+    /// milliseconds, and fall back from a sanitized stderr to the category's own
+    /// wording. Redaction in particular is a safety rule, and it should not depend
+    /// on each new reader remembering to call `safeKubeconfigPath`.
+    init(
+        kind: String,
+        context: KubernetesContextProfile,
+        result: KubectlResult,
+        category: KubernetesDiagnosticCategory,
+        startedAt: Date,
+        summary: String? = nil
+    ) {
+        let sanitized = KubernetesDiagnosticClassifier.sanitize(result.stderr)
+        self.init(
+            commandKind: kind,
+            contextName: context.contextName,
+            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
+            exitCode: result.exitCode,
+            durationMilliseconds: Self.elapsedMilliseconds(since: startedAt),
+            category: category,
+            stderrSummary: summary ?? (sanitized.isEmpty ? category.presentationSummary : sanitized)
+        )
+    }
+
+    /// Builds a diagnostic for a failure that never produced a kubectl result —
+    /// kubectl missing, a launch failure, or a rejected request.
+    init(
+        kind: String,
+        context: KubernetesContextProfile,
+        category: KubernetesDiagnosticCategory,
+        message: String,
+        startedAt: Date,
+        exitCode: Int32? = nil
+    ) {
+        self.init(
+            commandKind: kind,
+            contextName: context.contextName,
+            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
+            exitCode: exitCode,
+            durationMilliseconds: Self.elapsedMilliseconds(since: startedAt),
+            category: category,
+            stderrSummary: KubernetesDiagnosticClassifier.sanitize(message)
+        )
+    }
+
+    static func elapsedMilliseconds(since started: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(started) * 1000))
+    }
+}

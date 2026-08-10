@@ -11,41 +11,8 @@ struct MenuBarView: View {
     @State private var expandedProviders: Set<CloudProvider> = Set(CloudProvider.allCases)
     @State private var searchQuery = ""
 
-    private var filteredGroupedProfiles: [ProfileGroup] {
-        if searchQuery.isEmpty {
-            return store.groupedProfiles
-        }
-        return store.groupedProfiles.compactMap { group in
-            let matchesFolder = group.folder.name.localizedCaseInsensitiveContains(searchQuery)
-                || group.folder.provider.rawValue.localizedCaseInsensitiveContains(searchQuery)
-
-            let matchingProfiles = group.profiles.filter { profile in
-                profile.name.localizedCaseInsensitiveContains(searchQuery)
-                    || profile.provider.rawValue.localizedCaseInsensitiveContains(searchQuery)
-            }
-
-            if matchesFolder {
-                return group
-            } else if !matchingProfiles.isEmpty {
-                return ProfileGroup(folder: group.folder, profiles: matchingProfiles)
-            } else {
-                return nil
-            }
-        }
-    }
-
-    private struct ProviderGroup: Identifiable {
-        var id: CloudProvider { provider }
-        let provider: CloudProvider
-        let folderGroups: [ProfileGroup]
-    }
-
     private var providerGroups: [ProviderGroup] {
-        CloudProvider.allCases.compactMap { provider in
-            let groups = filteredGroupedProfiles.filter { $0.folder.provider == provider && !$0.profiles.isEmpty }
-            guard !groups.isEmpty else { return nil }
-            return ProviderGroup(provider: provider, folderGroups: groups)
-        }
+        ProfileGrouping.providerGroups(store.groupedProfiles, query: searchQuery)
     }
 
     var body: some View {
@@ -291,6 +258,14 @@ struct MenuBarView: View {
         return store.kubernetesContexts.first { $0.contextName == store.activeKubeContext }
     }
 
+    private func providerBinding(for provider: CloudProvider) -> Binding<Bool> {
+        ProfileGrouping.expansionBinding(for: provider, in: $expandedProviders, forcedOpenWhile: searchQuery)
+    }
+
+    private func binding(for id: String) -> Binding<Bool> {
+        ProfileGrouping.expansionBinding(for: id, in: $expandedGroups, forcedOpenWhile: searchQuery)
+    }
+
     private func activeName(for provider: CloudProvider) -> String {
         switch provider {
         case .aws: store.activeAWSProfile
@@ -313,31 +288,7 @@ struct MenuBarView: View {
         )
     }
 
-    private func providerBinding(for provider: CloudProvider) -> Binding<Bool> {
-        Binding(
-            get: { expandedProviders.contains(provider) || !searchQuery.isEmpty },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedProviders.insert(provider)
-                } else {
-                    expandedProviders.remove(provider)
-                }
-            }
-        )
-    }
 
-    private func binding(for id: String) -> Binding<Bool> {
-        Binding(
-            get: { expandedGroups.contains(id) || !searchQuery.isEmpty },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedGroups.insert(id)
-                } else {
-                    expandedGroups.remove(id)
-                }
-            }
-        )
-    }
 }
 
 private struct ActiveContextPill: View {

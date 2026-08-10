@@ -76,10 +76,10 @@ public final class KubernetesWorkloadSpecReader: KubernetesWorkloadSpecReading {
         let started = Date()
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            return .failure(diagnostic(kind: kind, context: context, exitCode: nil, category: .unknown, summary: "missing resource name", started: started))
+            return .failure(KubernetesCommandDiagnostic(kind: kind, context: context, category: .unknown, message: "missing resource name", startedAt: started))
         }
 
-        var arguments = kubeconfigArguments(context) + ["get", kind, trimmedName]
+        var arguments = context.kubeconfigArguments + ["get", kind, trimmedName]
         let trimmedNamespace = namespace.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedNamespace.isEmpty {
             arguments += ["--namespace", trimmedNamespace]
@@ -91,60 +91,20 @@ public final class KubernetesWorkloadSpecReader: KubernetesWorkloadSpecReading {
 
         do {
             var command = try kubectl.inspectionCommand(context: context.contextName, arguments: arguments)
-            command.environmentOverrides = kubeconfigEnvironment(context)
+            command.environmentOverrides = context.kubeconfigEnvironment
             let result = try await kubectl.run(command, timeout: timeout)
             guard result.exitCode == 0 else {
                 let category = KubernetesDiagnosticClassifier.category(from: result)
-                let stderr = KubernetesDiagnosticClassifier.sanitize(result.stderr)
-                return .failure(diagnostic(
-                    kind: kind,
-                    context: context,
-                    exitCode: result.exitCode,
-                    category: category,
-                    summary: stderr.isEmpty ? category.presentationSummary : stderr,
-                    started: started
-                ))
+                return .failure(KubernetesCommandDiagnostic(kind: kind, context: context, result: result, category: category, startedAt: started))
             }
             return .success(result.stdout)
         } catch KubectlRunnerError.kubectlNotFound {
-            return .failure(diagnostic(kind: kind, context: context, exitCode: nil, category: .kubectlMissing, summary: "kubectl was not found", started: started))
+            return .failure(KubernetesCommandDiagnostic(kind: kind, context: context, category: .kubectlMissing, message: "kubectl was not found", startedAt: started))
         } catch {
-            return .failure(diagnostic(
-                kind: kind,
-                context: context,
-                exitCode: nil,
-                category: .unknown,
-                summary: KubernetesDiagnosticClassifier.sanitize(error.localizedDescription),
-                started: started
-            ))
+            return .failure(KubernetesCommandDiagnostic(kind: kind, context: context, category: .unknown, message: error.localizedDescription, startedAt: started))
         }
     }
 
-    private func diagnostic(
-        kind: String,
-        context: KubernetesContextProfile,
-        exitCode: Int32?,
-        category: KubernetesDiagnosticCategory,
-        summary: String,
-        started: Date
-    ) -> KubernetesCommandDiagnostic {
-        KubernetesCommandDiagnostic(
-            commandKind: kind,
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: exitCode,
-            durationMilliseconds: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-            category: category,
-            stderrSummary: summary
-        )
-    }
 
-    private func kubeconfigArguments(_ context: KubernetesContextProfile) -> [String] {
-        context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : ["--kubeconfig", context.kubeconfigPath]
-    }
 
-    private func kubeconfigEnvironment(_ context: KubernetesContextProfile) -> [String: String] {
-        let path = context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? [:] : ["KUBECONFIG": path]
-    }
 }

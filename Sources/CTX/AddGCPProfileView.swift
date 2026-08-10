@@ -1,41 +1,16 @@
 import CTXCore
 import SwiftUI
 
-enum GCPProfileEditorMode {
-    case create
-    case edit(CloudProfile)
-    case duplicate(CloudProfile)
+typealias GCPProfileEditorMode = ProfileEditorMode
 
-    var title: String {
+extension ProfileEditorMode {
+    /// The draft this editor starts from: empty for a new profile, a copy of the
+    /// existing one for an edit, and a renamed copy for a duplicate.
+    var gCPProfileDraft: GCPProfileDraft {
         switch self {
-        case .create:
-            "Add GCP Configuration"
-        case .edit:
-            "Edit GCP Configuration"
-        case .duplicate:
-            "Duplicate GCP Configuration"
-        }
-    }
-
-    var actionTitle: String {
-        switch self {
-        case .create:
-            "Create"
-        case .edit:
-            "Save"
-        case .duplicate:
-            "Duplicate"
-        }
-    }
-
-    var draft: GCPProfileDraft {
-        switch self {
-        case .create:
-            GCPProfileDraft()
-        case .edit(let profile):
-            GCPProfileDraft(profile: profile)
-        case .duplicate(let profile):
-            GCPProfileDraft(profile: profile, duplicate: true)
+        case .create: GCPProfileDraft()
+        case .edit(let profile): GCPProfileDraft(profile: profile)
+        case .duplicate(let profile): GCPProfileDraft(profile: profile, duplicate: true)
         }
     }
 }
@@ -53,7 +28,7 @@ struct AddGCPProfileView: View {
         self.store = store
         self.mode = mode
         self.targetFolder = targetFolder
-        self._draft = State(initialValue: mode.draft)
+        self._draft = State(initialValue: mode.gCPProfileDraft)
         let gcpFolders = store.folders(for: .gcp)
         self._selectedFolder = State(initialValue: targetFolder ?? gcpFolders.first)
     }
@@ -62,7 +37,7 @@ struct AddGCPProfileView: View {
         VStack(alignment: .leading, spacing: 20) {
             // Header
             VStack(alignment: .leading, spacing: 4) {
-                Text(mode.title)
+                Text(mode.title(noun: "GCP Configuration"))
                     .font(.title2.weight(.semibold))
                 Text("Configure GCP settings saved to your local gcloud configuration file config_\(draft.name.isEmpty ? "<name>" : draft.name).")
                     .font(.subheadline)
@@ -102,37 +77,14 @@ struct AddGCPProfileView: View {
             .scrollContentBackground(.hidden)
             .frame(height: 260)
 
-            // Error banner
-            if !errorMessage.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.octagon.fill")
-                        .foregroundStyle(.red)
-                    Text(errorMessage)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            }
+            ProfileEditorErrorBanner(message: errorMessage)
 
             // Footer Actions
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
-                .buttonStyle(CTXSecondaryButton())
-                .keyboardShortcut(.cancelAction)
-                
-                Button(mode.actionTitle) {
-                    save()
-                }
-                .buttonStyle(CTXPrimaryButton())
-                .keyboardShortcut(.defaultAction)
-            }
+            ProfileEditorFooter(
+                actionTitle: mode.actionTitle,
+                cancel: { dismiss() },
+                confirm: { save() }
+            )
         }
         .padding(24)
         .frame(width: 400)

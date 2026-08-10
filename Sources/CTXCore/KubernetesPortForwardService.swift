@@ -114,7 +114,7 @@ public actor KubernetesPortForwardService: KubernetesPortForwarding {
         let id = UUID()
         do {
             var command = try kubectl.inspectionCommand(context: context.contextName, arguments: arguments(context: context, request: request))
-            command.environmentOverrides = kubeconfigEnvironment(context)
+            command.environmentOverrides = context.kubeconfigEnvironment
             let process = try kubectl.start(command)
             if let onTerminate {
                 process.setTerminationHandler {
@@ -168,7 +168,7 @@ public actor KubernetesPortForwardService: KubernetesPortForwarding {
     }
 
     private func arguments(context: KubernetesContextProfile, request: KubernetesPortForwardRequest) -> [String] {
-        kubeconfigArguments(context) + [
+        context.kubeconfigArguments + [
             "port-forward",
             "\(request.targetKind.kubectlResource)/\(request.targetName)",
             "--namespace", request.namespace,
@@ -177,14 +177,7 @@ public actor KubernetesPortForwardService: KubernetesPortForwarding {
         ]
     }
 
-    private func kubeconfigArguments(_ context: KubernetesContextProfile) -> [String] {
-        context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : ["--kubeconfig", context.kubeconfigPath]
-    }
 
-    private func kubeconfigEnvironment(_ context: KubernetesContextProfile) -> [String: String] {
-        let path = context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? [:] : ["KUBECONFIG": path]
-    }
 
     private func session(
         id: UUID,
@@ -212,13 +205,8 @@ public actor KubernetesPortForwardService: KubernetesPortForwarding {
         let result = KubectlResult(exitCode: 1, stdout: "", stderr: message)
         let category = KubernetesDiagnosticClassifier.category(from: result)
         return KubernetesCommandDiagnostic(
-            commandKind: "Port Forward",
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: 1,
-            durationMilliseconds: max(0, Int(Date().timeIntervalSince(startedAt) * 1000)),
-            category: category,
-            stderrSummary: "\(request.targetKind.rawValue)/\(request.targetName) \(request.localPort):\(request.remotePort) \(KubernetesDiagnosticClassifier.sanitize(message))"
+            kind: "Port Forward", context: context, result: result, category: category, startedAt: startedAt,
+            summary: "\(request.targetKind.rawValue)/\(request.targetName) \(request.localPort):\(request.remotePort) \(KubernetesDiagnosticClassifier.sanitize(message))"
         )
     }
 }

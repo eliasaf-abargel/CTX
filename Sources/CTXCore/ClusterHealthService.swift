@@ -71,70 +71,57 @@ public final class ClusterHealthService: ClusterHealthChecking {
     }
 
     private func loadRBAC(context: KubernetesContextProfile) async -> SummaryResult<[KubernetesPermissionSummary]> {
-        let resources = Array(KubernetesRBACResource.allCases)
-        let concurrencyLimit = 2
-        let results = await withTaskGroup(of: (Int, KubernetesPermissionSummary, KubernetesCommandDiagnostic).self) { group in
-            var collected: [(Int, KubernetesPermissionSummary, KubernetesCommandDiagnostic)] = []
-            var iterator = resources.enumerated().makeIterator()
-            
-            for _ in 0..<concurrencyLimit {
-                if let next = iterator.next() {
-                    group.addTask {
-                        let (index, resource) = next
-                        var arguments = ["auth", "can-i", "list", resource.kubectlResource]
-                        if resource.allNamespaces {
-                            arguments.append("--all-namespaces")
-                        }
-                        let result = await self.runRead(step: "cluster_health", kind: "RBAC \(resource.label)", context: context, arguments: arguments)
-                        let answer = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                        let allowed = answer == "yes" ? true : answer == "no" ? false : nil
-                        let summary = KubernetesPermissionSummary(resource: resource.label, allowed: allowed, status: allowed == nil ? result.status : allowed == true ? .reachable : .permissionDenied)
-                        return (index, summary, result.diagnostic)
-                    }
-                }
-            }
-            
-            while let entry = await group.next() {
-                collected.append(entry)
-                if let next = iterator.next() {
-                    group.addTask {
-                        let (index, resource) = next
-                        var arguments = ["auth", "can-i", "list", resource.kubectlResource]
-                        if resource.allNamespaces {
-                            arguments.append("--all-namespaces")
-                        }
-                        let result = await self.runRead(step: "cluster_health", kind: "RBAC \(resource.label)", context: context, arguments: arguments)
-                        let answer = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                        let allowed = answer == "yes" ? true : answer == "no" ? false : nil
-                        let summary = KubernetesPermissionSummary(resource: resource.label, allowed: allowed, status: allowed == nil ? result.status : allowed == true ? .reachable : .permissionDenied)
-                        return (index, summary, result.diagnostic)
-                    }
-                }
-            }
-            return collected.sorted { $0.0 < $1.0 }
+        let results = await withBoundedConcurrency(over: Array(KubernetesRBACResource.allCases), limit: 2) { resource in
+            await self.permission(for: resource, context: context)
         }
-        return SummaryResult(value: results.map(\.1), diagnostics: results.map(\.2))
+        return SummaryResult(value: results.map(\.0), diagnostics: results.map(\.1))
+    }
+
+    private func permission(
+        for resource: KubernetesRBACResource,
+        context: KubernetesContextProfile
+    ) async -> (KubernetesPermissionSummary, KubernetesCommandDiagnostic) {
+        var arguments = ["auth", "can-i", "list", resource.kubectlResource]
+        if resource.allNamespaces {
+            arguments.append("--all-namespaces")
+        }
+        let result = await runRead(step: "cluster_health", kind: "RBAC \(resource.label)", context: context, arguments: arguments)
+        let answer = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allowed = answer == "yes" ? true : answer == "no" ? false : nil
+        let summary = KubernetesPermissionSummary(
+            resource: resource.label,
+            allowed: allowed,
+            status: allowed == nil ? result.status : allowed == true ? .reachable : .permissionDenied
+        )
+        return (summary, result.diagnostic)
     }
 
     private func runRead(step: String, kind: String, context: KubernetesContextProfile, arguments: [String]) async -> ReadResult {
         let started = Date()
         do {
-            var command = try kubectl.inspectionCommand(context: context.contextName, arguments: kubeconfigArguments(context) + arguments)
-            command.environmentOverrides = kubeconfigEnvironment(context)
+            var command = try kubectl.inspectionCommand(context: context.contextName, arguments: context.kubeconfigArguments + arguments)
+            command.environmentOverrides = context.kubeconfigEnvironment
             let result = try await kubectl.run(command, timeout: timeout)
             let category = KubernetesDiagnosticClassifier.category(from: result)
-            logCall(step: step, kind: kind, context: context, durationMilliseconds: durationMilliseconds(since: started), outcome: result.timedOut ? .timeout : (category == .success ? .success : .error))
+            logCall(step: step, kind: kind, context: context, durationMilliseconds: KubernetesCommandDiagnostic.elapsedMilliseconds(since: started), outcome: result.timedOut ? .timeout : (category == .success ? .success : .error))
             return ReadResult(
                 status: KubernetesDiagnosticClassifier.status(from: category),
                 stdout: result.stdout,
-                diagnostic: diagnostic(kind: kind, context: context, result: result, category: category, started: started)
+                diagnostic: KubernetesCommandDiagnostic(
+                    kind: kind, context: context, result: result, category: category, startedAt: started,
+                    summary: category == .success ? "read completed" : nil
+                )
             )
         } catch KubectlRunnerError.kubectlNotFound {
-            logCall(step: step, kind: kind, context: context, durationMilliseconds: durationMilliseconds(since: started), outcome: .error)
-            return failedRead(kind: kind, context: context, category: .kubectlMissing, message: "kubectl was not found", started: started)
+            logCall(step: step, kind: kind, context: context, durationMilliseconds: KubernetesCommandDiagnostic.elapsedMilliseconds(since: started), outcome: .error)
+            return ReadResult(status: .kubectlMissing, stdout: "", diagnostic: KubernetesCommandDiagnostic(
+                kind: kind, context: context, category: .kubectlMissing, message: "kubectl was not found", startedAt: started
+            ))
         } catch {
-            logCall(step: step, kind: kind, context: context, durationMilliseconds: durationMilliseconds(since: started), outcome: .error)
-            return failedRead(kind: kind, context: context, category: .unknown, message: error.localizedDescription, started: started)
+            logCall(step: step, kind: kind, context: context, durationMilliseconds: KubernetesCommandDiagnostic.elapsedMilliseconds(since: started), outcome: .error)
+            return ReadResult(status: .unknownError, stdout: "", diagnostic: KubernetesCommandDiagnostic(
+                kind: kind, context: context, category: .unknown, message: error.localizedDescription, startedAt: started
+            ))
         }
     }
 
@@ -142,63 +129,11 @@ public final class ClusterHealthService: ClusterHealthChecking {
         CTXPerfLog.log(step: step, contextID: context.id, namespace: "cluster", kind: kind, cache: .none, durationMs: durationMilliseconds, outcome: outcome)
     }
 
-    private func kubeconfigArguments(_ context: KubernetesContextProfile) -> [String] {
-        context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : ["--kubeconfig", context.kubeconfigPath]
-    }
 
-    private func kubeconfigEnvironment(_ context: KubernetesContextProfile) -> [String: String] {
-        let path = context.kubeconfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? [:] : ["KUBECONFIG": path]
-    }
 
-    private func diagnostic(
-        kind: String,
-        context: KubernetesContextProfile,
-        result: KubectlResult,
-        category: KubernetesDiagnosticCategory,
-        started: Date
-    ) -> KubernetesCommandDiagnostic {
-        KubernetesCommandDiagnostic(
-            commandKind: kind,
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: result.exitCode,
-            durationMilliseconds: durationMilliseconds(since: started),
-            category: category,
-            stderrSummary: diagnosticSummary(result: result, category: category)
-        )
-    }
 
-    private func diagnosticSummary(result: KubectlResult, category: KubernetesDiagnosticCategory) -> String {
-        let stderr = KubernetesDiagnosticClassifier.sanitize(result.stderr)
-        if category == .success {
-            return "read completed"
-        }
-        return stderr.isEmpty ? category.presentationSummary : stderr
-    }
 
-    private func failedRead(
-        kind: String,
-        context: KubernetesContextProfile,
-        category: KubernetesDiagnosticCategory,
-        message: String,
-        started: Date
-    ) -> ReadResult {
-        let diag = KubernetesCommandDiagnostic(
-            commandKind: kind,
-            contextName: context.contextName,
-            kubeconfigPath: KubernetesDiagnosticClassifier.safeKubeconfigPath(context.kubeconfigPath),
-            exitCode: nil,
-            durationMilliseconds: durationMilliseconds(since: started),
-            category: category,
-            stderrSummary: KubernetesDiagnosticClassifier.sanitize(message)
-        )
-        return ReadResult(status: KubernetesDiagnosticClassifier.status(from: category), stdout: "", diagnostic: diag)
-    }
 
-    private func durationMilliseconds(since started: Date) -> Int {
-        max(0, Int(Date().timeIntervalSince(started) * 1000))
-    }
 
     private func namespace(from context: KubernetesContextProfile) -> String {
         context.namespace.isEmpty ? "default" : context.namespace

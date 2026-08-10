@@ -488,53 +488,7 @@ struct ProfileDetailView: View {
             .frame(maxWidth: 720)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(32)
-        .alert(
-            "Delete \(deleteCandidate?.name ?? "profile")?",
-            isPresented: Binding(
-                get: { deleteCandidate != nil },
-                set: { if !$0 { deleteCandidate = nil } }
-            )
-        ) {
-            Button("Delete", role: .destructive) {
-                if let profile = deleteCandidate {
-                    do {
-                        switch profile.provider {
-                        case .aws:
-                            try store.deleteAWSProfile(profile)
-                        case .gcp:
-                            try store.deleteGCPProfile(profile)
-                        case .azure:
-                            try store.deleteAzureProfile(profile)
-                        case .kubernetes:
-                            Task {
-                                do {
-                                    try await store.deleteKubeContext(profile)
-                                } catch {
-                                    store.report(error.localizedDescription)
-                                }
-                            }
-                        }
-                    } catch {
-                        store.report(error.localizedDescription)
-                    }
-                }
-                deleteCandidate = nil
-            }
-            Button("Cancel", role: .cancel) { deleteCandidate = nil }
-        } message: {
-            if let profile = deleteCandidate {
-                switch profile.provider {
-                case .aws:
-                    Text("CTX will remove this AWS profile and its matching SSO session from ~/.aws/config after creating a backup.")
-                case .gcp:
-                    Text("CTX will permanently delete the gcloud configuration file config_\(profile.name) from ~/.config/gcloud/configurations/.")
-                case .azure:
-                    Text("CTX will permanently delete the Azure profile JSON file config_\(profile.name).json from ~/.config/ctx/azure/.")
-                case .kubernetes:
-                    Text("CTX will delete the context \(profile.name) from your ~/.kube/config configuration file.")
-                }
-            }
-        }
+        .deleteProfileAlert(store: store, candidate: $deleteCandidate)
         .scrollContentBackground(.hidden)
         .task(id: profile.id) {
             await loadAvailableRoles()

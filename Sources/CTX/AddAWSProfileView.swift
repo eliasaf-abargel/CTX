@@ -1,41 +1,16 @@
 import CTXCore
 import SwiftUI
 
-enum AWSProfileEditorMode {
-    case create
-    case edit(CloudProfile)
-    case duplicate(CloudProfile)
+typealias AWSProfileEditorMode = ProfileEditorMode
 
-    var title: String {
+extension ProfileEditorMode {
+    /// The draft this editor starts from: empty for a new profile, a copy of the
+    /// existing one for an edit, and a renamed copy for a duplicate.
+    var aWSProfileDraft: AWSProfileDraft {
         switch self {
-        case .create:
-            "Add AWS SSO Profile"
-        case .edit:
-            "Edit AWS SSO Profile"
-        case .duplicate:
-            "Duplicate AWS SSO Profile"
-        }
-    }
-
-    var actionTitle: String {
-        switch self {
-        case .create:
-            "Create"
-        case .edit:
-            "Save"
-        case .duplicate:
-            "Duplicate"
-        }
-    }
-
-    var draft: AWSProfileDraft {
-        switch self {
-        case .create:
-            AWSProfileDraft()
-        case .edit(let profile):
-            AWSProfileDraft(profile: profile)
-        case .duplicate(let profile):
-            AWSProfileDraft(profile: profile, duplicate: true)
+        case .create: AWSProfileDraft()
+        case .edit(let profile): AWSProfileDraft(profile: profile)
+        case .duplicate(let profile): AWSProfileDraft(profile: profile, duplicate: true)
         }
     }
 }
@@ -57,7 +32,7 @@ struct AddAWSProfileView: View {
         self.store = store
         self.mode = mode
         self.targetFolder = targetFolder
-        self._draft = State(initialValue: mode.draft)
+        self._draft = State(initialValue: mode.aWSProfileDraft)
         let awsFolders = store.folders(for: .aws)
         self._selectedFolder = State(initialValue: targetFolder ?? awsFolders.first)
     }
@@ -66,7 +41,7 @@ struct AddAWSProfileView: View {
         VStack(alignment: .leading, spacing: 20) {
             // Header
             VStack(alignment: .leading, spacing: 4) {
-                Text(mode.title)
+                Text(mode.title(noun: "AWS Profile"))
                     .font(.title2.weight(.semibold))
                 Text("Configure AWS SSO settings saved to your local ~/.aws/config configuration.")
                     .font(.subheadline)
@@ -185,37 +160,14 @@ struct AddAWSProfileView: View {
             .scrollContentBackground(.hidden)
             .frame(height: 380)
 
-            // Error banner
-            if !errorMessage.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.octagon.fill")
-                        .foregroundStyle(.red)
-                    Text(errorMessage)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            }
+            ProfileEditorErrorBanner(message: errorMessage)
 
             // Footer Actions
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
-                .buttonStyle(CTXSecondaryButton())
-                .keyboardShortcut(.cancelAction)
-                
-                Button(mode.actionTitle) {
-                    save()
-                }
-                .buttonStyle(CTXPrimaryButton())
-                .keyboardShortcut(.defaultAction)
-            }
+            ProfileEditorFooter(
+                actionTitle: mode.actionTitle,
+                cancel: { dismiss() },
+                confirm: { save() }
+            )
         }
         .padding(24)
         .frame(width: 440)

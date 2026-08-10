@@ -46,43 +46,27 @@ struct ClusterDiffView: View {
         ClusterWorkspaceSection.allCases.filter { $0.resourceKind != nil }
     }
 
-    @State private var diffMode: DiffMode = .crossContext
-
-    enum DiffMode: String, CaseIterable, Identifiable {
-        case crossContext = "Cross-Context Drift (Multi-Cluster)"
-        case snapshot = "Snapshot Diff"
-        var id: String { rawValue }
-    }
+    // The "Cross-Context Drift" mode is gone. It was the screen's default, and it
+    // returned three hardcoded rows — metrics-server v0.6.3 vs v0.7.0 and friends —
+    // from a service whose own comment called them a mock. A real implementation
+    // means reading the same kind from two contexts and comparing; until that
+    // exists, the snapshot diff below is the only comparison CTX can actually make.
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                CTXSectionHeader(title: "Diff & Drift Engine", subtitle: "Multi-cluster configuration drift and snapshot comparison")
-                Spacer()
-                Picker("", selection: $diffMode) {
-                    ForEach(DiffMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
+            CTXSectionHeader(title: "Snapshot Diff", subtitle: "Compare the cached snapshot of a resource kind against a fresh read")
 
             ResourceSummaryPanel(
-                title: "Configuration Drift Inspection",
-                detail: "Comparing live resource specifications across contexts and snapshots",
-                badgeTitle: "Drift Engine",
+                title: "Snapshot Comparison",
+                detail: "Re-reads a resource kind and reports what changed since the cached snapshot",
+                badgeTitle: "Live vs cached",
                 systemImage: "arrow.left.arrow.right",
                 tint: .purple
             )
 
-            if diffMode == .crossContext {
-                MultiClusterDriftView(viewModel: viewModel)
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(sections) { section in
-                        diffRow(section)
-                    }
+            VStack(spacing: 10) {
+                ForEach(sections) { section in
+                    diffRow(section)
                 }
             }
         }

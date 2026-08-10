@@ -117,6 +117,82 @@ extension ClusterWorkspaceViewModel {
         return "\(controllers) is installed, but reports no applications anywhere on this cluster."
     }
 
+    // MARK: - Telemetry
+
+    /// Live utilisation for the Overview panel.
+    ///
+    /// Metrics move constantly, so this is the one screen where cached data goes
+    /// stale in seconds rather than the workspace's usual thirty. It is refreshed on
+    /// a short interval while Overview is on screen and stopped as soon as it isn't
+    /// — a background poll against a production cluster nobody is looking at is
+    /// exactly the kind of thing that shows up in an API-server audit log.
+    static let telemetryRefreshInterval: TimeInterval = 15
+
+    func loadTelemetry(force: Bool = false) {
+        if !force, let loadedAt = telemetryLoadedAt,
+           Date().timeIntervalSince(loadedAt) <= Self.telemetryRefreshInterval {
+            return
+        }
+        guard telemetryTask == nil || force else { return }
+        telemetryTask?.cancel()
+
+        // Memory limits come from the pod list already on hand, in the same scope the
+        // metrics read uses, so the two always describe the same set of pods.
+        let podRows = resourceList(for: .pods)?.rows ?? []
+        let limits = Dictionary(
+            podRows.compactMap { row -> (String, Double)? in
+                guard let raw = row.cells["Memory Limit"], let limit = Double(raw), limit > 0 else { return nil }
+                let namespace = row.namespace.map { "\($0)/" } ?? ""
+                return ("\(namespace)\(row.name)", limit)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // Requests come from the same pod rows, summed. Committed capacity is what
+        // decides whether anything can still be scheduled, and it is routinely far
+        // higher than live utilisation.
+        let requests = ClusterResourceRequests(
+            cpuCores: podRows.compactMap { Double($0.cells["CPU Request Cores"] ?? "") }.reduce(0, +),
+            memoryBytes: podRows.compactMap { Double($0.cells["Memory Request Bytes"] ?? "") }.reduce(0, +)
+        )
+        let scope = selectedNamespace
+        let podCount = podRows.isEmpty ? nil : podRows.count
+
+        telemetryTask = Task { [weak self] in
+            guard let self else { return }
+            defer { telemetryTask = nil }
+            let result = await metricsReader.telemetry(
+                context: context,
+                namespace: scope,
+                podCount: podCount,
+                requests: requests,
+                memoryLimitsByPodID: limits
+            )
+            guard !Task.isCancelled else { return }
+            telemetry = result
+            telemetryLoadedAt = Date()
+        }
+    }
+
+    /// Starts the poll. Cancelled by `stopTelemetryUpdates()` when Overview goes away.
+    func startTelemetryUpdates() {
+        loadTelemetry()
+        guard telemetryTimerTask == nil else { return }
+        telemetryTimerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.telemetryRefreshInterval * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                loadTelemetry(force: true)
+            }
+        }
+    }
+
+    func stopTelemetryUpdates() {
+        telemetryTimerTask?.cancel()
+        telemetryTimerTask = nil
+        telemetryTask?.cancel()
+        telemetryTask = nil
+    }
+
     // MARK: - Helm
 
     func loadHelm(bypassCache: Bool = false) {

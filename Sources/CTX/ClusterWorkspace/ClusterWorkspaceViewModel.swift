@@ -65,13 +65,16 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var topologyRelations: [TopologyServiceRelation] = []
     @Published var selectedTopologyRelation: TopologyServiceRelation?
     @Published var showIssuesOnly = false
-    @Published var cronJobs: [CronJobItem] = []
     @Published var gitOpsResult: GitOpsReadResult?
     @Published var gitOpsList: KubernetesResourceList?
     @Published var isLoadingGitOps = false
     @Published var helmResult: HelmReadResult?
     @Published var helmList: KubernetesResourceList?
     @Published var isLoadingHelm = false
+    @Published var telemetry = ClusterTelemetryMetrics()
+    var telemetryTask: Task<Void, Never>?
+    var telemetryTimerTask: Task<Void, Never>?
+    var telemetryLoadedAt: Date?
     var gitOpsLoadedAt: Date?
     var helmLoadedAt: Date?
     var gitOpsTask: Task<Void, Never>?
@@ -89,6 +92,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     let gitOpsReader: any KubernetesGitOpsReading
     let helmReader: any KubernetesHelmReading
     let specReader: any KubernetesWorkloadSpecReading
+    let metricsReader: any KubernetesMetricsReading
     private let coordinator: ResourceRefreshCoordinator
     private var refreshTask: Task<Void, Never>?
     private var resourceTasks: [KubernetesResourceKind: Task<Void, Never>] = [:]
@@ -112,11 +116,13 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         auditLog: any AuditLogging = LocalAuditLogService(),
         gitOpsReader: any KubernetesGitOpsReading = KubernetesGitOpsReader(),
         helmReader: any KubernetesHelmReading = KubernetesHelmReader(),
-        specReader: any KubernetesWorkloadSpecReading = KubernetesWorkloadSpecReader()
+        specReader: any KubernetesWorkloadSpecReading = KubernetesWorkloadSpecReader(),
+        metricsReader: any KubernetesMetricsReading = KubernetesMetricsReader()
     ) {
         self.gitOpsReader = gitOpsReader
         self.helmReader = helmReader
         self.specReader = specReader
+        self.metricsReader = metricsReader
         self.context = context
         self.healthService = healthService
         self.resourceReader = resourceReader
@@ -146,6 +152,8 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         refreshTask?.cancel()
         gitOpsTask?.cancel()
         helmTask?.cancel()
+        telemetryTask?.cancel()
+        telemetryTimerTask?.cancel()
         resourceTasks.values.forEach { $0.cancel() }
         yamlTask?.cancel()
         diffTasks.values.forEach { $0.cancel() }
@@ -351,6 +359,30 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         switch section {
         case .gitops: return gitOpsList
         case .helm: return helmList
+        case .nodes:
+            guard var list = resourceLists[resourceKey(kind: .nodes)] else { return nil }
+            // Capacity is identical on every node of a managed node group, so a table
+            // of capacities looks static and says nothing about what is happening.
+            // Live usage from `kubectl top` is merged in where it exists.
+            guard !telemetry.utilizationByNode.isEmpty else { return list }
+            list.rows = list.rows.map { row in
+                guard let usage = telemetry.utilizationByNode[row.name] else { return row }
+                var cells = row.cells
+                if let percent = usage.cpuPercent {
+                    cells["CPU Used"] = String(format: "%.0f%%", percent)
+                }
+                if let percent = usage.memoryPercent {
+                    cells["Memory Used"] = String(format: "%.0f%%", percent)
+                }
+                return KubernetesResourceRow(
+                    id: row.id,
+                    cells: cells,
+                    warning: row.warning || (usage.cpuPercent ?? 0) >= 90 || (usage.memoryPercent ?? 0) >= 90,
+                    sortValue: row.sortValue,
+                    ref: row.ref
+                )
+            }
+            return list
         default:
             guard let kind = section.resourceKind else { return nil }
             return resourceLists[resourceKey(kind: kind)]

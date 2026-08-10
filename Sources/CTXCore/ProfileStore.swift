@@ -1015,118 +1015,112 @@ public final class ProfileStore: ObservableObject {
         }
     }
 
+    // The three providers differ only in which writer persists the draft; the
+    // bookkeeping around it — carry the folder override across a rename, rediscover,
+    // re-find the profile, activate it, offer a folder — was written out three times.
+
     public func addAWSProfile(_ draft: AWSProfileDraft, targetFolder: CloudFolder? = nil) throws {
-        try profilePersistence.addAWSProfile(draft)
-        let profileName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let targetFolder, targetFolder.provider == .aws {
-            folderOverrides[CloudProfile(provider: .aws, name: profileName).id] = targetFolder.id
-            saveFolderOverrides()
-        }
-        refreshImmediately()
-        if let profile = profiles.first(where: { $0.provider == .aws && $0.name == profileName }) {
-            setActive(profile)
-            promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
+        try add(provider: .aws, name: draft.name, targetFolder: targetFolder) {
+            try profilePersistence.addAWSProfile(draft)
         }
     }
 
     public func updateAWSProfile(_ profile: CloudProfile, draft: AWSProfileDraft) throws {
-        try profilePersistence.updateAWSProfile(originalName: profile.name, draft: draft)
-        let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
-        refreshImmediately()
-        if let updated = profiles.first(where: { $0.provider == .aws && $0.name == draft.name }) {
-            if let oldFolderID {
-                folderOverrides[updated.id] = oldFolderID
-                saveFolderOverrides()
-            }
-            setActive(updated)
+        try update(profile, newName: draft.name) {
+            try profilePersistence.updateAWSProfile(originalName: profile.name, draft: draft)
         }
     }
 
     public func deleteAWSProfile(_ profile: CloudProfile) throws {
-        try profilePersistence.deleteAWSProfile(profile.name)
-        folderOverrides.removeValue(forKey: profile.id)
-        saveFolderOverrides()
-        if activeAWSProfile == profile.name {
-            clearActive()
+        try delete(profile) {
+            try profilePersistence.deleteAWSProfile(profile.name)
         }
-        refreshImmediately()
-        lastMessage = "Deleted \(profile.name)"
     }
 
     public func addGCPProfile(_ draft: GCPProfileDraft, targetFolder: CloudFolder? = nil) throws {
-        try profilePersistence.addGCPProfile(draft)
-        let profileName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let targetFolder, targetFolder.provider == .gcp {
-            folderOverrides[CloudProfile(provider: .gcp, name: profileName).id] = targetFolder.id
-            saveFolderOverrides()
-        }
-        refreshImmediately()
-        if let profile = profiles.first(where: { $0.provider == .gcp && $0.name == profileName }) {
-            setActive(profile)
-            promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
+        try add(provider: .gcp, name: draft.name, targetFolder: targetFolder) {
+            try profilePersistence.addGCPProfile(draft)
         }
     }
 
     public func updateGCPProfile(_ profile: CloudProfile, draft: GCPProfileDraft) throws {
-        try profilePersistence.updateGCPProfile(originalName: profile.name, draft: draft)
-        let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
-        refreshImmediately()
-        if let updated = profiles.first(where: { $0.provider == .gcp && $0.name == draft.name }) {
-            if let oldFolderID {
-                folderOverrides[updated.id] = oldFolderID
-                saveFolderOverrides()
-            }
-            setActive(updated)
+        try update(profile, newName: draft.name) {
+            try profilePersistence.updateGCPProfile(originalName: profile.name, draft: draft)
         }
     }
 
     public func deleteGCPProfile(_ profile: CloudProfile) throws {
-        try profilePersistence.deleteGCPProfile(profile.name)
-        folderOverrides.removeValue(forKey: profile.id)
-        saveFolderOverrides()
-        if activeGCPProfile == profile.name {
-            clearActive(for: .gcp)
+        try delete(profile) {
+            try profilePersistence.deleteGCPProfile(profile.name)
         }
-        refreshImmediately()
-        lastMessage = "Deleted \(profile.name)"
     }
 
     public func addAzureProfile(_ draft: AzureProfileDraft, targetFolder: CloudFolder? = nil) throws {
-        try profilePersistence.addAzureProfile(draft)
-        let profileName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let targetFolder, targetFolder.provider == .azure {
-            folderOverrides[CloudProfile(provider: .azure, name: profileName).id] = targetFolder.id
-            saveFolderOverrides()
-        }
-        refreshImmediately()
-        if let profile = profiles.first(where: { $0.provider == .azure && $0.name == profileName }) {
-            setActive(profile)
-            promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
+        try add(provider: .azure, name: draft.name, targetFolder: targetFolder) {
+            try profilePersistence.addAzureProfile(draft)
         }
     }
 
     public func updateAzureProfile(_ profile: CloudProfile, draft: AzureProfileDraft) throws {
-        try profilePersistence.updateAzureProfile(originalName: profile.name, draft: draft)
-        let oldFolderID = folderOverrides.removeValue(forKey: profile.id)
-        refreshImmediately()
-        if let updated = profiles.first(where: { $0.provider == .azure && $0.name == draft.name }) {
-            if let oldFolderID {
-                folderOverrides[updated.id] = oldFolderID
-                saveFolderOverrides()
-            }
-            setActive(updated)
+        try update(profile, newName: draft.name) {
+            try profilePersistence.updateAzureProfile(originalName: profile.name, draft: draft)
         }
     }
 
     public func deleteAzureProfile(_ profile: CloudProfile) throws {
-        try profilePersistence.deleteAzureProfile(profile.name)
+        try delete(profile) {
+            try profilePersistence.deleteAzureProfile(profile.name)
+        }
+    }
+
+    /// `persist` writes the draft to disk; everything after it is identical for
+    /// every provider. Kubernetes has its own version because its writes are async.
+    private func add(
+        provider: CloudProvider,
+        name: String,
+        targetFolder: CloudFolder?,
+        persist: () throws -> Void
+    ) rethrows {
+        try persist()
+        let profileName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        assignFolder(targetFolder, provider: provider, profileName: profileName)
+        refreshImmediately()
+        guard let profile = profiles.first(where: { $0.provider == provider && $0.name == profileName }) else { return }
+        setActive(profile)
+        promptForFolderIfUnassigned(profile, targetFolder: targetFolder)
+    }
+
+    private func update(_ profile: CloudProfile, newName: String, persist: () throws -> Void) rethrows {
+        try persist()
+        // A rename changes the profile's id, so its folder override has to be moved
+        // rather than left behind pointing at an id that no longer exists.
+        let previousFolderID = folderOverrides.removeValue(forKey: profile.id)
+        refreshImmediately()
+        guard let updated = profiles.first(where: { $0.provider == profile.provider && $0.name == newName }) else { return }
+        if let previousFolderID {
+            folderOverrides[updated.id] = previousFolderID
+            saveFolderOverrides()
+        }
+        setActive(updated)
+    }
+
+    private func delete(_ profile: CloudProfile, persist: () throws -> Void) rethrows {
+        try persist()
         folderOverrides.removeValue(forKey: profile.id)
         saveFolderOverrides()
-        if activeAzureProfile == profile.name {
-            clearActive(for: .azure)
+        if isActive(profile) {
+            clearActive(for: profile.provider)
         }
         refreshImmediately()
         lastMessage = "Deleted \(profile.name)"
+    }
+
+    /// Records a folder choice made at creation time, before discovery has run and
+    /// the profile exists — hence building the id from provider and name.
+    private func assignFolder(_ folder: CloudFolder?, provider: CloudProvider, profileName: String) {
+        guard let folder, folder.provider == provider else { return }
+        folderOverrides[CloudProfile(provider: provider, name: profileName).id] = folder.id
+        saveFolderOverrides()
     }
 
     // MARK: - Kubernetes Context Management
@@ -1327,21 +1321,8 @@ public final class ProfileStore: ObservableObject {
     }
 
     private func runVerificationSweep() async {
-        let concurrencyLimit = 3
-        await withTaskGroup(of: Void.self) { group in
-            var iterator = profiles.makeIterator()
-            var running = 0
-
-            while running < concurrencyLimit, let profile = iterator.next() {
-                running += 1
-                group.addTask { await self.verify(profile) }
-            }
-
-            while await group.next() != nil {
-                if let nextProfile = iterator.next() {
-                    group.addTask { await self.verify(nextProfile) }
-                }
-            }
+        _ = await withBoundedConcurrency(over: profiles, limit: 3) { profile in
+            await self.verify(profile)
         }
     }
 
