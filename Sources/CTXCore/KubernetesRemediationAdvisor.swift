@@ -87,17 +87,22 @@ public enum KubernetesRemediationAdvisor {
         return nil
     }
 
-    public static func calculateSecurityHealthScore(rows: [KubernetesResourceRow]) -> Int {
-        guard !rows.isEmpty else { return 100 }
-        let total = rows.reduce(0) { $0 + calculateSecurityHealthScore(row: $1) }
-        return max(0, min(100, total / rows.count))
+    /// A workload-hygiene score over pod rows.
+    ///
+    /// Deliberately pods only. Workload rows carry no CPU or memory cells at all —
+    /// the workloads list never requests them — so every workload used to lose the
+    /// full 30 points for "no resource requests" that were never fetched in the
+    /// first place, dragging the whole cluster's score down by construction.
+    public static func workloadHygieneScore(pods: [KubernetesResourceRow]) -> Int {
+        guard !pods.isEmpty else { return 100 }
+        let total = pods.reduce(0) { $0 + workloadHygieneScore(pod: $1) }
+        return max(0, min(100, total / pods.count))
     }
 
-    public static func calculateSecurityHealthScore(row: KubernetesResourceRow) -> Int {
+    public static func workloadHygieneScore(pod row: KubernetesResourceRow) -> Int {
         var score = 100
         let status = (row.cells["Status"] ?? row.cells["Ready"] ?? "").lowercased()
-        let restartsStr = row.cells["Restarts"] ?? "0"
-        let restarts = Int(restartsStr) ?? 0
+        let restarts = Int(row.cells["Restarts"] ?? "0") ?? 0
 
         if row.warning || status.contains("crash") || status.contains("err") {
             score -= 40
@@ -107,13 +112,19 @@ public enum KubernetesRemediationAdvisor {
         } else if restarts > 0 {
             score -= 10
         }
-        let cpu = row.cells["CPU"] ?? ""
-        let mem = row.cells["Memory"] ?? ""
-        if cpu.isEmpty || cpu == "-" {
+        // Requests are read from the raw cells the parser records for telemetry, not
+        // from the display cells: those now render the unknown marker for a pod that
+        // declares nothing, which the previous `== "-"` check silently stopped
+        // recognising — so unset requests quietly stopped costing anything.
+        if (row.cells["CPU Request Cores"] ?? "").isEmpty {
             score -= 15
         }
-        if mem.isEmpty || mem == "-" {
+        if (row.cells["Memory Request Bytes"] ?? "").isEmpty {
             score -= 15
+        }
+        // A pod with no memory limit cannot be bounded by the kubelet at all.
+        if (row.cells["Memory Limit"] ?? "").isEmpty {
+            score -= 10
         }
 
         return max(0, min(100, score))

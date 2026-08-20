@@ -7,6 +7,10 @@ struct TroubledWorkloadsView: View {
     @State private var filterText: String = ""
     @State private var selectedCategory: IssueCategory = .all
     @State private var activeQuickFilter: QuickFilter? = nil
+    /// Measured locally: this screen is not inside the Overview, so it cannot
+    /// inherit that measurement, but it uses the same grid so the two screens agree
+    /// on column count at the same width.
+    @State private var availableWidth: CGFloat = 1000
 
     enum IssueCategory: String, CaseIterable, Identifiable {
         case all = "All Issues"
@@ -35,7 +39,7 @@ struct TroubledWorkloadsView: View {
         viewModel.resourceList(for: .workloads) ?? KubernetesResourceList(kind: .workloads, columns: [], rows: [], status: .notChecked)
     }
 
-    private struct FilteredIssues {
+    struct FilteredIssues {
         let troubledPods: [KubernetesResourceRow]
         let troubledNodes: [KubernetesResourceRow]
         let troubledWorkloads: [KubernetesResourceRow]
@@ -139,75 +143,41 @@ struct TroubledWorkloadsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 14) {
-                    // Interactive Summary KPI Cards
-                    HStack(spacing: 12) {
-                        MetricSummaryCard(
-                            title: "Total Issues",
-                            count: data.allIssues.count,
-                            icon: "exclamationmark.triangle.fill",
-                            color: .red,
-                            isSelected: activeQuickFilter == nil && selectedCategory == .all
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                activeQuickFilter = nil
-                                selectedCategory = .all
-                            }
-                        }
-
-                        MetricSummaryCard(
-                            title: "Crash / OOM",
-                            count: data.crashCount,
-                            icon: "bolt.horizontal.circle.fill",
-                            color: .orange,
-                            isSelected: activeQuickFilter == .crashOOM
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                if activeQuickFilter == .crashOOM {
-                                    activeQuickFilter = nil
-                                } else {
-                                    activeQuickFilter = .crashOOM
-                                    selectedCategory = .all
+                    // Four tiles, one row, always.
+                    //
+                    // They use the Overview's card, but not the Overview's three
+                    // columns: four does not divide by three, so the fourth tile
+                    // dropped onto a second row on its own next to a gap. A row of
+                    // summary tiles is a single unit — it either fits on one line or
+                    // it is not a row — so this grid is sized to the tile count
+                    // rather than to a shared column rhythm.
+                    LazyVGrid(columns: IssueSummaryTile.columns, spacing: ClusterOverviewLayout.spacing) {
+                        ForEach(IssueSummaryTile.tiles(for: data)) { tile in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    apply(tile)
+                                }
+                            } label: {
+                                CTXResourceCard(
+                                    title: tile.title,
+                                    value: "\(tile.count)",
+                                    subtitle: isActive(tile) ? "Filtering" : tile.subtitle,
+                                    systemImage: tile.icon,
+                                    tint: tile.tint
+                                )
+                                .overlay {
+                                    if isActive(tile) {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(tile.tint.opacity(0.55), lineWidth: 1.5)
+                                    }
                                 }
                             }
-                        }
-
-                        MetricSummaryCard(
-                            title: "Pending / NotReady",
-                            count: data.pendingCount + data.troubledNodes.count,
-                            icon: "clock.fill",
-                            color: .yellow,
-                            isSelected: activeQuickFilter == .pendingNotReady
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                if activeQuickFilter == .pendingNotReady {
-                                    activeQuickFilter = nil
-                                } else {
-                                    activeQuickFilter = .pendingNotReady
-                                    selectedCategory = .all
-                                }
-                            }
-                        }
-
-                        MetricSummaryCard(
-                            title: "Restart Spikes",
-                            count: data.restartCount,
-                            icon: "arrow.counterclockwise.circle.fill",
-                            color: .purple,
-                            isSelected: activeQuickFilter == .restartSpikes
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                if activeQuickFilter == .restartSpikes {
-                                    activeQuickFilter = nil
-                                } else {
-                                    activeQuickFilter = .restartSpikes
-                                    selectedCategory = .all
-                                }
-                            }
+                            .buttonStyle(.plain)
+                            .frame(maxHeight: .infinity)
                         }
                     }
 
-                    // Toolbar (Category Menu + Search Bar)
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         Menu {
                             ForEach(IssueCategory.allCases) { cat in
                                 Button {
@@ -225,41 +195,28 @@ struct TroubledWorkloadsView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "line.3.horizontal.decrease.circle")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 11, weight: .medium))
                                 Text(selectedCategory.rawValue)
                                     .font(.system(size: 12, weight: .semibold))
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .padding(.vertical, 5)
                         }
-                        .menuStyle(.borderlessButton)
+                        .menuStyle(.button)
+                        .menuIndicator(.hidden)
+                        .buttonStyle(.plain)
+                        .ctxGlassCard(cornerRadius: 8)
                         .fixedSize()
 
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            TextField("Search...", text: $filterText)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                            if !filterText.isEmpty {
-                                Button {
-                                    filterText = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(white: 0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        // The shared field. The hand-rolled one hardcoded
+                        // `Color(white: 0.12)`, so it ignored the theme and sat at a
+                        // different height and corner radius from every other search
+                        // box in the app.
+                        CTXSearchField(placeholder: "Search issues...", text: $filterText)
+                            .frame(maxWidth: 320)
 
                         Spacer()
                     }
@@ -285,11 +242,39 @@ struct TroubledWorkloadsView: View {
                 }
             }
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size.width, initial: true) { _, width in
+                        guard abs(width - availableWidth) > 1 else { return }
+                        availableWidth = width
+                    }
+            }
+        )
         .task {
             viewModel.loadResource(kind: .pods, bypassCache: false)
             viewModel.loadResource(kind: .nodes, bypassCache: false)
             viewModel.loadResource(kind: .workloads, bypassCache: false)
         }
+    }
+
+    private func isActive(_ tile: IssueSummaryTile) -> Bool {
+        guard let filter = tile.filter else {
+            return activeQuickFilter == nil && selectedCategory == .all
+        }
+        return activeQuickFilter == filter
+    }
+
+    /// Tapping the active tile clears it, so the tiles behave like toggles rather
+    /// than a selection you cannot get out of.
+    private func apply(_ tile: IssueSummaryTile) {
+        guard let filter = tile.filter else {
+            activeQuickFilter = nil
+            selectedCategory = .all
+            return
+        }
+        activeQuickFilter = activeQuickFilter == filter ? nil : filter
+        selectedCategory = .all
     }
 
     private var targetSectionForCategory: ClusterWorkspaceSection {
@@ -334,46 +319,45 @@ struct TroubledWorkloadsView: View {
     }
 }
 
-private struct MetricSummaryCard: View {
+/// The four issue tiles as data, so the view renders them through the shared
+/// `CTXResourceCard` instead of a second card implementation that had to be kept
+/// looking like the first one by hand.
+struct IssueSummaryTile: Identifiable {
+    /// One column per tile, so the four always share a single row and split the
+    /// available width evenly between them.
+    static var columns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: ClusterOverviewLayout.spacing, alignment: .top),
+            count: 4
+        )
+    }
+
+    let id: String
     let title: String
+    let subtitle: String
     let count: Int
     let icon: String
-    let color: Color
-    let isSelected: Bool
-    let action: () -> Void
+    let tint: Color
+    let filter: TroubledWorkloadsView.QuickFilter?
 
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(color)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(count)")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(.primary)
-                    Text(title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                isSelected ? color.opacity(0.18) : (isHovered ? Color(white: 0.18).opacity(0.8) : Color(white: 0.14).opacity(0.6))
+    static func tiles(for data: TroubledWorkloadsView.FilteredIssues) -> [IssueSummaryTile] {
+        [
+            IssueSummaryTile(
+                id: "all", title: "Total Issues", subtitle: "Everything needing attention",
+                count: data.allIssues.count, icon: "exclamationmark.triangle.fill", tint: .red, filter: nil
+            ),
+            IssueSummaryTile(
+                id: "crash", title: "Crash / OOM", subtitle: "Restarting or killed",
+                count: data.crashCount, icon: "bolt.horizontal.circle.fill", tint: .orange, filter: .crashOOM
+            ),
+            IssueSummaryTile(
+                id: "pending", title: "Pending / NotReady", subtitle: "Waiting to become ready",
+                count: data.pendingCount + data.troubledNodes.count, icon: "clock.fill", tint: .yellow, filter: .pendingNotReady
+            ),
+            IssueSummaryTile(
+                id: "restarts", title: "Restart Spikes", subtitle: "Repeatedly restarted",
+                count: data.restartCount, icon: "arrow.counterclockwise.circle.fill", tint: .purple, filter: .restartSpikes
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? color.opacity(0.7) : (isHovered ? Color.white.opacity(0.2) : Color.white.opacity(0.08)), lineWidth: isSelected ? 1.5 : 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .shadow(color: isSelected ? color.opacity(0.25) : Color.clear, radius: 6, x: 0, y: 2)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        ]
     }
 }

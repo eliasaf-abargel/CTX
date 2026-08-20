@@ -154,6 +154,14 @@ extension ClusterWorkspaceViewModel {
             cpuCores: podRows.compactMap { Double($0.cells["CPU Request Cores"] ?? "") }.reduce(0, +),
             memoryBytes: podRows.compactMap { Double($0.cells["Memory Request Bytes"] ?? "") }.reduce(0, +)
         )
+        // Pods per node, so the peak-density figure is a real "fullest node" rather
+        // than an average that hides an unschedulable one.
+        var podsByNode: [String: Int] = [:]
+        for row in podRows {
+            let node = row.cells["Node"] ?? ""
+            guard !node.isEmpty, node != KubernetesGitOpsService.unknownValue else { continue }
+            podsByNode[node, default: 0] += 1
+        }
         let scope = selectedNamespace
         let podCount = podRows.isEmpty ? nil : podRows.count
 
@@ -164,6 +172,7 @@ extension ClusterWorkspaceViewModel {
                 context: context,
                 namespace: scope,
                 podCount: podCount,
+                podsByNode: podsByNode,
                 requests: requests,
                 memoryLimitsByPodID: limits
             )
@@ -171,6 +180,12 @@ extension ClusterWorkspaceViewModel {
             telemetry = result
             telemetryLoadedAt = Date()
         }
+    }
+
+    /// The scope the pod-based figures were read for, shown next to them so a
+    /// namespace-scoped count is never mistaken for a cluster-wide one.
+    var telemetryScopeLabel: String {
+        selectedNamespace == .allNamespaces ? "cluster-wide" : selectedNamespace.displayName
     }
 
     /// Starts the poll. Cancelled by `stopTelemetryUpdates()` when Overview goes away.
@@ -263,5 +278,17 @@ extension ClusterWorkspaceViewModel {
     var helmEmptyMessage: String {
         guard helmResult != nil else { return "Loading Helm releases." }
         return "No Helm releases in this namespace scope."
+    }
+}
+
+extension ClusterWorkspaceViewModel {
+    /// Opens a section filtered to the rows a summary counted.
+    ///
+    /// Setting the section before the focus matters: `selectedSection`'s `didSet`
+    /// clears any focus belonging to a different section, so assigning them the
+    /// other way round would immediately discard the one just set.
+    func focus(_ focus: ResourceFocus) {
+        selectedSection = focus.section
+        resourceFocus = focus
     }
 }

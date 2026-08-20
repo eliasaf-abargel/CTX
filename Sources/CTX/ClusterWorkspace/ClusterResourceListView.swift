@@ -16,6 +16,10 @@ struct ClusterResourceListView: View {
     /// A short caveat shown above the table, for when the data is real but came from
     /// a degraded source (e.g. Helm read from storage Secrets because the CLI is absent).
     var notice: String? = nil
+    /// An active "only the rows this summary counted" filter, with the control that
+    /// clears it.
+    var focus: ResourceFocus? = nil
+    var clearFocus: (() -> Void)? = nil
     let loadIfNeeded: () -> Void
     let refresh: () -> Void
     let selectRow: (KubernetesResourceRow) -> Void
@@ -39,12 +43,13 @@ struct ClusterResourceListView: View {
     }
 
     private func recomputeRows() {
-        let baseRows = list?.rows ?? []
-        guard !filter.isEmpty else {
-            rows = baseRows
-            return
+        // Focus first, then the search box: the chip narrows the list to the rows a
+        // summary counted, and typing searches within that.
+        var baseRows = list?.rows ?? []
+        if let focus, focus.section == section {
+            baseRows = baseRows.filter(focus.matches)
         }
-        rows = baseRows.filter { $0.matchesFilter(filter) }
+        rows = KubernetesResourceRow.filtered(baseRows, matching: filter)
     }
 
     private var emptyTitle: String {
@@ -77,6 +82,9 @@ struct ClusterResourceListView: View {
                 } else if refreshError != nil {
                     CTXInlineRefreshingIndicator(state: .failed, retry: refresh)
                 }
+                if let focus, focus.section == section, let clearFocus {
+                    ResourceFocusChip(focus: focus, matchCount: rows.count, clear: clearFocus)
+                }
                 if let notice {
                     Label(notice, systemImage: "info.circle")
                         .font(.caption)
@@ -100,11 +108,22 @@ struct ClusterResourceListView: View {
                 }
             }
         }
+        // Claims the full width it is offered.
+        //
+        // A `VStack` sizes to its widest child, and the widest child here is the
+        // table — which sizes itself from a width it measures off its own frame,
+        // starting at a 900pt default. Without this the two fed each other: the
+        // table stayed at its default width, the stack shrank to match, and the
+        // measurement never grew, so a full-screen window showed a table sized for a
+        // small one with dead space beside it — and, because the resolver sheds
+        // low-priority columns to fit, silently dropped Restarts and Node as well.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             recomputeRows()
             loadIfNeeded()
         }
         .onChange(of: filter) { _, _ in recomputeRows() }
+        .onChange(of: focus) { _, _ in recomputeRows() }
         .onChange(of: list?.loadedAt) { _, _ in recomputeRows() }
         .onChange(of: list?.rows.count) { _, _ in recomputeRows() }
         .animation(.easeInOut(duration: 0.12), value: isLoading)

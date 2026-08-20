@@ -3,7 +3,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var store: ProfileStore
-    @AppStorage("ctxAppAppearance") private var appAppearanceRaw: String = AppAppearance.dark.rawValue
+    @AppStorage(AppAppearance.storageKey) private var appAppearanceRaw: String = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
@@ -240,16 +240,8 @@ struct MenuBarView: View {
     }
 
     private var activeMenuProfiles: [CloudProfile] {
-        [
-            (.aws, store.activeAWSProfile),
-            (.gcp, store.activeGCPProfile),
-            (.azure, store.activeAzureProfile),
-            (.kubernetes, store.activeKubeContext)
-        ].compactMap { provider, name in
-            guard !name.isEmpty else { return nil }
-            guard let profile = store.profiles.first(where: { $0.provider == provider && $0.name == name }),
-                  profile.status == .connected else { return nil }
-            return profile
+        CloudProvider.allCases.compactMap { provider in
+            store.activeProfile(for: provider)
         }
     }
 

@@ -10,6 +10,17 @@ public struct AWSSessionExpirationSnapshot: Sendable {
     }
 }
 
+/// What `aws sso login` will actually do for a profile, decided from the token
+/// cache instead of guessed from stdout.
+public enum AWSSSOTokenState: Sendable, Equatable {
+    /// Token still valid — no login, no browser, nothing to show the user.
+    case valid(Date)
+    /// Expired, but the CLI can refresh it silently. No browser either.
+    case refreshable
+    /// No usable token or the client registration is dead — a real sign-in.
+    case needsInteractive
+}
+
 public final class AWSSessionExpirationService: Sendable {
     private let credentialsURL: URL
     private let ssoCacheURL: URL
@@ -85,6 +96,54 @@ public final class AWSSessionExpirationService: Sendable {
         }
         let cache = cacheExpiries(from: files)
         return sessionExpiry(for: profile, cacheExpiries: cache.expiryByStartURL)
+    }
+
+    /// Answers "is this a fresh sign-in or a session we already have?" before any
+    /// browser is opened. `~/.aws/sso/cache` is the only source of truth for it.
+    public func ssoTokenState(for profile: CloudProfile, now: Date = Date()) -> AWSSSOTokenState {
+        let normalizedStartURL = profile.ssoStartURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard profile.provider == .aws, !normalizedStartURL.isEmpty,
+              let files = try? FileManager.default.contentsOfDirectory(at: ssoCacheURL, includingPropertiesForKeys: nil)
+        else { return .needsInteractive }
+
+        var best = AWSSSOTokenState.needsInteractive
+        for fileURL in files where fileURL.pathExtension == "json" {
+            guard
+                let data = try? Data(contentsOf: fileURL),
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let startURL = json["startUrl"] as? String,
+                startURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedStartURL
+            else { continue }
+
+            let state = Self.tokenState(
+                expiresAt: (json["expiresAt"] as? String).flatMap(Self.parseDate),
+                refreshToken: json["refreshToken"] as? String,
+                registrationExpiresAt: (json["registrationExpiresAt"] as? String).flatMap(Self.parseDate),
+                now: now
+            )
+            // Several cache files can share a start URL; the healthiest one wins.
+            switch (state, best) {
+            case (.valid, _): best = state
+            case (.refreshable, .needsInteractive): best = state
+            default: break
+            }
+        }
+        return best
+    }
+
+    public static func tokenState(
+        expiresAt: Date?,
+        refreshToken: String?,
+        registrationExpiresAt: Date?,
+        now: Date
+    ) -> AWSSSOTokenState {
+        // A minute of slack: a token expiring mid-request is not a valid token.
+        if let expiresAt, expiresAt > now.addingTimeInterval(60) {
+            return .valid(expiresAt)
+        }
+        guard let refreshToken, !refreshToken.isEmpty else { return .needsInteractive }
+        if let registrationExpiresAt, registrationExpiresAt <= now { return .needsInteractive }
+        return .refreshable
     }
 
     public func credentialsExpiry(for profileName: String) -> Date? {

@@ -175,18 +175,21 @@ enum ClusterWorkspaceLayoutMode: Equatable {
     }
 }
 
-public struct TopologyServiceRelation: Identifiable, Equatable, Sendable {
-    public var id: String { service.id }
-    public let service: KubernetesResourceRow
-    public let workloads: [KubernetesResourceRow]
-    public let pods: [KubernetesResourceRow]
-    public let ingress: [KubernetesResourceRow]
-
-    public init(service: KubernetesResourceRow, workloads: [KubernetesResourceRow], pods: [KubernetesResourceRow], ingress: [KubernetesResourceRow]) {
-        self.service = service
-        self.workloads = workloads
-        self.pods = pods
-        self.ingress = ingress
-    }
+enum ClusterWorkspaceLayout {
+    /// The horizontal padding every workspace screen applies to its content.
+    static let pagePadding: CGFloat = 22
 }
 
+/// The workspace detail pane's width, measured once at the top and read by anything
+/// that needs to size itself to the page — chiefly `CTXResourceTable`, which cannot
+/// reliably measure its own frame from inside the page's scroll view.
+private struct WorkspaceContentWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    var workspaceContentWidth: CGFloat {
+        get { self[WorkspaceContentWidthKey.self] }
+        set { self[WorkspaceContentWidthKey.self] = newValue }
+    }
+}

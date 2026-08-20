@@ -305,15 +305,17 @@ struct ProfileDetailView: View {
                                 Text("Identity")
                                     .foregroundStyle(fieldLabelStyle)
                                 Spacer()
-                                if connectionIsActive && store.isActive(profile) {
+                                if connectionIsActive {
                                     HStack(spacing: 6) {
-                                        Text(store.activeIdentityInitials)
+                                        let identityText = !profile.accountID.isEmpty ? profile.accountID : (!profile.roleName.isEmpty ? profile.roleName : profile.name)
+                                        let initials = identityText.prefix(2).uppercased()
+                                        Text(store.isActive(profile) ? store.activeIdentityInitials : initials)
                                             .font(.system(size: 9, weight: .bold))
                                             .foregroundColor(Color.accentColor)
                                             .frame(width: 18, height: 18)
                                             .background(Color.accentColor.opacity(0.15), in: Circle())
                                         
-                                        Text(store.activeIdentityLabel)
+                                        Text(store.isActive(profile) ? store.activeIdentityLabel : identityText)
                                             .fontWeight(.medium)
                                     }
                                 } else {
@@ -576,20 +578,7 @@ struct ProfileDetailView: View {
     }
 
     private func extractAWSProfileName(from errorMessage: String, profile: CloudProfile) -> String {
-        if !profile.roleName.isEmpty {
-            return profile.roleName
-        }
-        let lower = errorMessage.lowercased()
-        if let range = lower.range(of: "for ") {
-            let substring = errorMessage[range.upperBound...]
-            if let spaceIdx = substring.firstIndex(of: " ") {
-                let name = String(substring[..<spaceIdx])
-                if !name.isEmpty && name != "does" && name != "the" && name != "a" {
-                    return name
-                }
-            }
-        }
-        return "aws-sso-profile"
+        return profile.name
     }
 
     /// Hands a remediation command to Terminal.app.

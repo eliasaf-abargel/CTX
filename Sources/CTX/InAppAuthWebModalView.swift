@@ -25,7 +25,7 @@ public struct InAppAuthWebModalView: View {
         self.userEmail = userEmail
         self.callbackURLScheme = callbackURLScheme
         self.onComplete = onComplete
-        
+
         // Pre-process URL with login_hint if email is present and not already in URL
         var finalURL = url
         if let email = userEmail, !email.isEmpty, email.contains("@") {
@@ -42,7 +42,7 @@ public struct InAppAuthWebModalView: View {
                 }
             }
         }
-        
+
         self.url = finalURL
         _currentURL = State(initialValue: finalURL)
     }
@@ -131,6 +131,19 @@ public struct InAppAuthWebModalView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Copy URL")
+
+                    Button {
+                        let target = currentURL ?? url
+                        #if canImport(AppKit)
+                        NSWorkspace.shared.open(target)
+                        #endif
+                    } label: {
+                        Image(systemName: "safari")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open in System Browser")
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -231,7 +244,7 @@ private struct WebViewRepresentable: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.applicationNameForUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15 CTX/1.0"
-        
+
         // Inject JS helper to auto-fill user email if provided
         if let email = userEmail, !email.isEmpty, email.contains("@") {
             let jsCode = """
@@ -261,14 +274,52 @@ private struct WebViewRepresentable: NSViewRepresentable {
             configuration.userContentController.addUserScript(userScript)
         }
 
+        // Inject JS completion observer for StrongDM, AWS SSO, and SSO success screens
+        let completionJS = """
+        (function() {
+            function checkCompletion() {
+                var text = (document.body ? document.body.innerText : '') || '';
+                var title = document.title || '';
+                var lowerText = text.toLowerCase();
+                var lowerTitle = title.toLowerCase();
+                if (lowerText.includes('authentication complete') ||
+                    lowerText.includes('you may now close this window') ||
+                    lowerText.includes('you can close this window') ||
+                    lowerText.includes('you may close this window') ||
+                    lowerText.includes('successfully authenticated') ||
+                    lowerText.includes('login successful') ||
+                    lowerText.includes('request approved') ||
+                    lowerText.includes('code verified') ||
+                    lowerText.includes('device authorized') ||
+                    lowerText.includes('successfully authorized') ||
+                    lowerText.includes('request authorized') ||
+                    lowerTitle.includes('authentication complete')) {
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ctxAuthComplete) {
+                        window.webkit.messageHandlers.ctxAuthComplete.postMessage("complete");
+                    }
+                }
+            }
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                checkCompletion();
+            } else {
+                document.addEventListener('DOMContentLoaded', checkCompletion);
+            }
+            var checkInterval = setInterval(checkCompletion, 400);
+            setTimeout(function() { clearInterval(checkInterval); }, 120000);
+        })();
+        """
+        let completionScript = WKUserScript(source: completionJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
+        configuration.userContentController.addUserScript(completionScript)
+        configuration.userContentController.add(context.coordinator, name: "ctxAuthComplete")
+
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
-        
+
         DispatchQueue.main.async {
             self.webViewBinding = webView
         }
-        
+
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -279,11 +330,28 @@ private struct WebViewRepresentable: NSViewRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject, WKNavigationDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: WebViewRepresentable
+        private var didTriggerCompletion = false
 
         init(_ parent: WebViewRepresentable) {
             self.parent = parent
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "ctxAuthComplete" {
+                triggerCompletion()
+            }
+        }
+
+        private func triggerCompletion(withURL overrideURL: URL? = nil) {
+            guard !didTriggerCompletion else { return }
+            didTriggerCompletion = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self = self else { return }
+                let targetURL = overrideURL ?? self.parent.currentURL ?? self.parent.url
+                self.parent.onComplete(.success(targetURL))
+            }
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -311,12 +379,48 @@ private struct WebViewRepresentable: NSViewRepresentable {
                 let host = currentURL.host?.lowercased() ?? ""
                 let path = currentURL.path.lowercased()
                 let isLocalHost = host == "127.0.0.1" || host == "localhost"
-                let isCallbackPath = path.contains("/callback") || path.contains("device/success") || path.contains("auth/success")
-                
+                let isCallbackPath = path.contains("/callback") ||
+                                     path.contains("device/success") ||
+                                     path.contains("auth/success") ||
+                                     path.contains("auth/complete") ||
+                                     path.contains("auth/return") ||
+                                     path.contains("auth/finished") ||
+                                     path.contains("authenticated") ||
+                                     path.contains("/success")
+
                 if isLocalHost || isCallbackPath {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                        self.parent.onComplete(.success(currentURL))
-                    }
+                    triggerCompletion(withURL: currentURL)
+                    return
+                }
+                // Nothing else to do here. The access portal is a normal hop on the
+                // way to the CLI's callback, not a stall: re-loading the authorize
+                // URL when it appears consumed a one-shot request mid-flight and
+                // showed the user a sign-in error on a login that had succeeded.
+            }
+
+            let checkJS = """
+            (function() {
+                var text = (document.body ? document.body.innerText : '') || '';
+                var title = document.title || '';
+                var lowerText = text.toLowerCase();
+                var lowerTitle = title.toLowerCase();
+                return lowerText.includes('authentication complete') ||
+                       lowerText.includes('you may now close this window') ||
+                       lowerText.includes('you can close this window') ||
+                       lowerText.includes('you may close this window') ||
+                       lowerText.includes('successfully authenticated') ||
+                       lowerText.includes('login successful') ||
+                       lowerText.includes('request approved') ||
+                       lowerText.includes('code verified') ||
+                       lowerText.includes('device authorized') ||
+                       lowerText.includes('successfully authorized') ||
+                       lowerText.includes('request authorized') ||
+                       lowerTitle.includes('authentication complete');
+            })();
+            """
+            webView.evaluateJavaScript(checkJS) { [weak self] result, _ in
+                if let isComplete = result as? Bool, isComplete {
+                    self?.triggerCompletion()
                 }
             }
         }

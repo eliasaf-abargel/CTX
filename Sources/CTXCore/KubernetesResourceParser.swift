@@ -153,6 +153,9 @@ enum KubernetesResourceParser {
             "QoS": string(status["qosClass"]),
             "Owner": ownerChain(metadata),
             "Workload": workloadLabel(metadata),
+            // Not shown as a column — the map reads it to draw Pod→PVC edges only
+            // for volumes this pod actually mounts.
+            "PVCs": claimNames(spec),
             "Labels": encodedLabels(dict(metadata["labels"])),
             // Not shown as columns — read by the telemetry panel.
             "Memory Limit": memoryLimit(spec),
@@ -206,6 +209,16 @@ enum KubernetesResourceParser {
             total += bytes
         }
         return String(Int(total))
+    }
+
+    /// The PersistentVolumeClaims this pod mounts, from `spec.volumes[]`.
+    /// Comma-joined; empty for stateless pods.
+    private static func claimNames(_ spec: [String: Any]) -> String {
+        let volumes = spec["volumes"] as? [[String: Any]] ?? []
+        return volumes.compactMap { volume -> String? in
+            let name = string(dict(volume["persistentVolumeClaim"])["claimName"])
+            return name.isEmpty ? nil : name
+        }.joined(separator: ",")
     }
 
     private static func workloadLabel(_ metadata: [String: Any]) -> String {

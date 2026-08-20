@@ -68,17 +68,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        
+
+        applyAppearance()
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.applyAppearance() }
+        }
+
         NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            if let window = notification.object as? NSWindow {
-                self?.configureWindow(window)
-            }
+            guard let window = notification.object as? NSWindow else { return }
+            Task { @MainActor in self?.configureWindow(window) }
         }
-        
+
+
         for window in NSApp.windows {
             configureWindow(window)
         }
@@ -88,17 +97,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    /// Applied app-wide so panels and alerts match the theme picker. Windows and
+    /// sheets inherit from `NSApp`, so this is the only place it needs setting.
+    @MainActor
+    private func applyAppearance() {
+        let wanted = AppAppearance.current.nsAppearance
+        guard NSApp.appearance?.name != wanted?.name else { return }
+        NSApp.appearance = wanted
+    }
+
+    @MainActor
     private func configureWindow(_ window: NSWindow) {
-        guard window.styleMask.contains(.titled) else { return }
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.styleMask.insert(.fullSizeContentView)
-        window.isMovableByWindowBackground = true
-        window.backgroundColor = .clear
-        
-        if #available(macOS 11.0, *) {
-            window.titlebarSeparatorStyle = .none
-        }
+        CTXWindowChrome.apply(to: window)
     }
 
     func userNotificationCenter(

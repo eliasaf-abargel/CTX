@@ -2,7 +2,7 @@ import Foundation
 
 public enum AWSConfigPaths {
     public static var configURL: URL {
-        if let path = UserDefaults.standard.string(forKey: "customAWSConfigPath"), !path.isEmpty {
+        if let path = UserDefaults.standard.string(forKey: CTXDefaultsKey.awsConfigPath), !path.isEmpty {
             return URL(fileURLWithPath: path)
         }
         return FileManager.default.homeDirectoryForCurrentUser
@@ -11,7 +11,7 @@ public enum AWSConfigPaths {
     }
 
     public static var credentialsURL: URL {
-        if let path = UserDefaults.standard.string(forKey: "customAWSCredentialsPath"), !path.isEmpty {
+        if let path = UserDefaults.standard.string(forKey: CTXDefaultsKey.awsCredentialsPath), !path.isEmpty {
             return URL(fileURLWithPath: path)
         }
         return FileManager.default.homeDirectoryForCurrentUser

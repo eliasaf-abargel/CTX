@@ -1,48 +1,48 @@
 <p align="center">
-  <img src="Resources/CTXIcon.svg" width="120" height="120" alt="CTX Logo" />
+  <img src="Resources/CTXIcon.svg" width="112" height="112" alt="CTX logo" />
 </p>
 
 <h1 align="center">CTX</h1>
 
 <p align="center">
-  <strong>A native macOS context switcher and Kubernetes inspection workspace.</strong>
+  <strong>Native macOS cloud context switching and Kubernetes inspection.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%2014.0%2B-blue?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/language-Swift%206-orange?style=flat-square" alt="Language" />
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
+  <img src="https://img.shields.io/badge/macOS-14%2B-blue?style=flat-square" alt="macOS 14+" />
+  <img src="https://img.shields.io/badge/Swift-5.10%2B-orange?style=flat-square" alt="Swift 5.10+" />
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT license" />
 </p>
 
-CTX is a lightweight local app for developers who switch between cloud and
-Kubernetes contexts. It discovers existing AWS, GCP, Azure, and kubeconfig
-state on your Mac, keeps the UI native, and uses your installed command-line
-tools instead of a hosted backend.
-
-The Kubernetes Cluster Workspace is inspection-focused: it reads cluster state
-through explicit `kubectl --context` commands, keeps namespace selection local
-to CTX, and does not mutate the cluster.
+CTX discovers AWS, GCP, Azure, and Kubernetes contexts from local configuration
+and uses the command-line tools already installed on your Mac. It has no hosted
+backend, account, or telemetry.
 
 ## Features
 
-- Native SwiftUI macOS app with menu bar and workspace windows.
-- AWS, GCP, Azure, and Kubernetes context discovery.
-- Kubernetes Overview with API, RBAC, namespaces, nodes, pods, workloads,
-  services, ingress, configmaps metadata, secrets metadata, and events.
-- Resource tables with local filtering, detail inspector, safe YAML inspection,
-  bounded logs, JSON/CSV export, and cached-vs-live diff.
-- Service topology map, clickable ingress hosts, and local Service Port Forward.
-- Clear diagnostics for common local issues such as missing credential plugins,
-  local proxy refusal, RBAC denial, and timeouts.
-- Local-first behavior: no CTX backend, no telemetry, and no secret value
-  display.
+- Fast context access from a native menu bar app and main window.
+- AWS, GCP, Azure, and Kubernetes profile discovery, verification, and switching.
+- Profile folders plus provider, folder, appearance, and update settings.
+- CLI discovery across common macOS install locations, with guided installation
+  when a required tool is missing.
+- Existing-session reuse and in-app sign-in when authentication is required.
+- A read-only Kubernetes workspace with Overview, Issues, resource tables,
+  bounded logs, GitOps, Helm, exports, diff, Service port forwarding, and an
+  interactive topology Map.
+- Automatic update checks with an in-app install action.
 
 ## Install
 
-Download the latest signed release from the repository's Releases page and move
-`CTX.app` to `/Applications`.
+Download `CTX.app.zip` from [GitHub Releases](https://github.com/eliasaf-abargel/CTX/releases),
+extract it, and move `CTX.app` to `/Applications`.
 
-For a local development build:
+To install the latest release with the repository script:
+
+```bash
+./script/install.sh
+```
+
+To build and run from source:
 
 ```bash
 ./script/build_and_run.sh run
@@ -50,19 +50,25 @@ For a local development build:
 
 ## Requirements
 
-- macOS 14.0 or newer.
-- Xcode 15 or newer, or a compatible Swift 6 toolchain for development.
-- `kubectl` for Kubernetes inspection.
-- Provider CLIs only for contexts that need them, for example `aws` for EKS
-  exec credential plugins or `gcloud` for GKE auth.
+- macOS 14 or newer.
+- Swift 5.10 or newer when building from source.
+- The CLI for each provider you use: `aws`, `gcloud`, `az`, or `kubectl`.
+- `helm` for full Helm release details; CTX can fall back to safe metadata.
+- `sdm` or `tsh` only for clusters that use those access brokers.
 
-When CTX is opened from Finder or the Dock, macOS may provide a smaller `PATH`
-than an interactive terminal. CTX resolves common Homebrew and system paths, but
-credential plugins still need to be installed on the machine.
+CTX never installs tools without your action.
+
+## Safety
+
+Kubernetes inspection always uses an explicit context and preserves the
+discovered kubeconfig path. CTX does not apply, patch, delete, scale, drain,
+cordon, exec, open a shell, or edit YAML.
+
+Secret and ConfigMap values are not displayed, logged, exported, or cached.
+Port forwarding is limited to explicit Service tunnels bound to `127.0.0.1`,
+with visible sessions and Stop controls.
 
 ## Development
-
-Run the full local verification stack before shipping changes:
 
 ```bash
 swift build
@@ -71,38 +77,16 @@ swift run CTXCheck
 ./script/build_and_run.sh verify
 ```
 
-Useful build script modes:
-
-```bash
-./script/build_and_run.sh run
-./script/build_and_run.sh logs
-./script/build_and_run.sh verify
-```
-
-## Kubernetes Safety Model
-
-Current Kubernetes behavior avoids cluster mutation. CTX does not run `apply`,
-`patch`, `delete`, `scale`, `drain`, `cordon`, `exec`, shell, or YAML edit
-operations. Port Forward is limited to explicit local Service tunnels with
-visible Stop controls.
-
-Secret resources are metadata-only. ConfigMap values and Secret values are not
-displayed, logged, exported, or cached as raw values.
-
-See [SECURITY.md](SECURITY.md), [CLOUD.md](CLOUD.md), and
-[KUBERNETES_WORKSPACE.md](KUBERNETES_WORKSPACE.md) for the implementation
-boundaries.
-
 ## Documentation
 
-- [CLOUD.md](CLOUD.md): cloud and Kubernetes architecture.
-- [KUBERNETES_WORKSPACE.md](KUBERNETES_WORKSPACE.md): workspace behavior.
-- [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md): native macOS UI rules.
-- [SECURITY.md](SECURITY.md): safety and privacy boundaries.
-- [ROADMAP.md](ROADMAP.md): planned product direction.
-- [CONTRIBUTING.md](CONTRIBUTING.md): contribution rules.
-- [AGENTS.md](AGENTS.md): coding-agent instructions for this repository.
+- [Cloud architecture](docs/CLOUD.md)
+- [Kubernetes workspace](docs/KUBERNETES_WORKSPACE.md)
+- [Design system](docs/DESIGN_SYSTEM.md)
+- [Security](docs/SECURITY.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Contributing](docs/CONTRIBUTING.md)
+- [Agent guide](AGENTS.md)
 
 ## License
 
-CTX is released under the MIT License.
+CTX is available under the [MIT License](LICENSE).

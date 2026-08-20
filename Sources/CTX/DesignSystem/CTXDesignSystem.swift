@@ -139,11 +139,27 @@ struct CTXIconActionButton: View {
     let title: String
     let systemImage: String
     var tint: Color = .primary
+    /// Set when the button stands for a state rather than a one-shot action. An
+    /// engaged filter has to look engaged even without a text label next to it,
+    /// which is the only thing an icon-only toolbar has left to say it with.
+    var isOn: Bool = false
     let action: () -> Void
     @State private var isHovering = false
 
     private var tooltipWidth: CGFloat {
         min(max(CGFloat(title.count) * 7 + 24, 96), 150)
+    }
+
+    private var fill: Color {
+        isOn
+            ? tint.opacity(isHovering ? 0.32 : 0.24)
+            : Color.secondary.opacity(isHovering ? 0.22 : 0.13)
+    }
+
+    private var stroke: Color {
+        isOn
+            ? tint.opacity(isHovering ? 0.6 : 0.48)
+            : Color.secondary.opacity(isHovering ? 0.35 : 0.24)
     }
 
     var body: some View {
@@ -152,10 +168,10 @@ struct CTXIconActionButton: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 28)
-                .background(Color.secondary.opacity(isHovering ? 0.22 : 0.13), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(fill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.secondary.opacity(isHovering ? 0.35 : 0.24), lineWidth: 0.75)
+                        .stroke(stroke, lineWidth: 0.75)
                 }
         }
         .buttonStyle(.plain)
@@ -453,10 +469,14 @@ struct CTXResourceCard: View {
                         .minimumScaleFactor(0.8)
                         .truncationMode(.tail)
                     if !subtitle.isEmpty {
+                        // Two lines rather than one: the subtitle is the only
+                        // place the card says *what* its number is made of, and
+                        // "123 running · 1 failing" cut to "123 running · 1 fa…"
+                        // loses the half that matters.
                         Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -464,7 +484,9 @@ struct CTXResourceCard: View {
                 Spacer(minLength: 0)
             }
         }
-        .frame(minHeight: 88)
+        // Fills its grid cell rather than hugging its content, so a card with a
+        // short subtitle sits flush with a taller neighbour instead of floating.
+        .frame(minHeight: 88, maxHeight: .infinity)
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(tint.opacity(isHovered ? 0.35 : 0.0), lineWidth: 1)
@@ -743,6 +765,25 @@ public enum AppAppearance: String, CaseIterable, Identifiable, Codable {
         case .light: return "sun.max.fill"
         case .system: return "laptopcomputer"
         }
+    }
+
+    /// SwiftUI's `preferredColorScheme` only reaches the SwiftUI hierarchy. Open
+    /// and save panels, alerts, menus and the window frame are AppKit and read
+    /// `NSApp.appearance` — unset, they follow the system while the app follows
+    /// this setting, which is why a file picker came up light over a dark app.
+    /// `nil` means "follow the system", which is what System expects.
+    public var nsAppearance: NSAppearance? {
+        switch self {
+        case .dark: return NSAppearance(named: .darkAqua)
+        case .light: return NSAppearance(named: .aqua)
+        case .system: return nil
+        }
+    }
+
+    public static let storageKey = "ctxAppAppearance"
+
+    public static var current: AppAppearance {
+        AppAppearance(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .dark
     }
 }
 

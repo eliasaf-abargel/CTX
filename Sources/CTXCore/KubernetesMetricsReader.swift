@@ -27,6 +27,17 @@ public enum MetricsAvailability: Equatable, Sendable {
     }
 }
 
+/// One pod's live resource usage, exactly as `kubectl top pods` reports it.
+public struct PodUsage: Equatable, Sendable {
+    public let cpu: String
+    public let memory: String
+
+    public init(cpu: String, memory: String) {
+        self.cpu = cpu
+        self.memory = memory
+    }
+}
+
 /// One node's live utilisation against its own allocatable capacity.
 public struct NodeUtilization: Identifiable, Equatable, Sendable {
     public var id: String { name }
@@ -71,10 +82,18 @@ public struct ClusterTelemetryMetrics: Equatable, Sendable {
     public var totalPods: Int?
     /// The node closest to saturation. A cluster averaging 40% can still have one
     /// node at 98% about to start evicting, and that node is the one worth seeing.
-    public var busiestNodeByCPU: NodeUtilization?
-    public var busiestNodeByMemory: NodeUtilization?
-    /// Pods using at least 90% of a memory limit they actually declare.
-    public var podsNearMemoryLimit: Int?
+    /// Peak values across nodes, reported as bare percentages. The node's own name
+    /// is deliberately not surfaced: on the Overview the question is how loaded the
+    /// cluster is, and an internal node hostname there is noise that also leaks
+    /// infrastructure detail onto a summary screen.
+    public var peakNodeCPUPercent: Double?
+    public var peakNodeMemoryPercent: Double?
+    public var peakNodePodPercent: Double?
+    /// The pods using at least 90% of a memory limit they actually declare, by
+    /// `namespace/name` — the same id the pod rows carry, so the list can be
+    /// filtered down to exactly these. A count alone could be shown but not acted
+    /// on: the panel said "3 pods" and clicking it opened all eighty.
+    public var podsNearMemoryLimitIDs: [String]?
     /// What the scheduler has *committed* — the sum of pod requests over allocatable.
     ///
     /// Distinct from utilisation and often far higher: a cluster running at 3% CPU
@@ -94,9 +113,10 @@ public struct ClusterTelemetryMetrics: Equatable, Sendable {
         podDensityPercent: Double? = nil,
         totalNodes: Int? = nil,
         totalPods: Int? = nil,
-        busiestNodeByCPU: NodeUtilization? = nil,
-        busiestNodeByMemory: NodeUtilization? = nil,
-        podsNearMemoryLimit: Int? = nil,
+        peakNodeCPUPercent: Double? = nil,
+        peakNodeMemoryPercent: Double? = nil,
+        peakNodePodPercent: Double? = nil,
+        podsNearMemoryLimitIDs: [String]? = nil,
         requestedCPUPercent: Double? = nil,
         requestedMemoryPercent: Double? = nil,
         allocatableCPUCores: Double? = nil,
@@ -108,15 +128,18 @@ public struct ClusterTelemetryMetrics: Equatable, Sendable {
         self.podDensityPercent = podDensityPercent
         self.totalNodes = totalNodes
         self.totalPods = totalPods
-        self.busiestNodeByCPU = busiestNodeByCPU
-        self.busiestNodeByMemory = busiestNodeByMemory
-        self.podsNearMemoryLimit = podsNearMemoryLimit
+        self.peakNodeCPUPercent = peakNodeCPUPercent
+        self.peakNodeMemoryPercent = peakNodeMemoryPercent
+        self.peakNodePodPercent = peakNodePodPercent
+        self.podsNearMemoryLimitIDs = podsNearMemoryLimitIDs
         self.requestedCPUPercent = requestedCPUPercent
         self.requestedMemoryPercent = requestedMemoryPercent
         self.allocatableCPUCores = allocatableCPUCores
         self.allocatableMemoryBytes = allocatableMemoryBytes
         self.availability = availability
     }
+
+    public var podsNearMemoryLimit: Int? { podsNearMemoryLimitIDs?.count }
 
     public var hasMetrics: Bool {
         cpuUtilizedPercent != nil || memoryUtilizedPercent != nil
@@ -126,9 +149,21 @@ public struct ClusterTelemetryMetrics: Equatable, Sendable {
     /// actually doing rather than repeating its (identical) capacity on every row.
     public var utilizationByNode: [String: NodeUtilization] = [:]
 
+    /// Live CPU and memory per pod, keyed `namespace/name`. The pod tables showed
+    /// only *requests*, so a pod that declares none rendered an empty CPU and Memory
+    /// column — which on the Issues screen meant the rows that most needed a number
+    /// were exactly the ones showing nothing.
+    public var usageByPod: [String: PodUsage] = [:]
+
     func withNodeUtilization(_ nodes: [NodeUtilization]) -> ClusterTelemetryMetrics {
         var copy = self
         copy.utilizationByNode = Dictionary(nodes.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        return copy
+    }
+
+    func withPodUsage(_ usage: [String: PodUsage]) -> ClusterTelemetryMetrics {
+        var copy = self
+        copy.usageByPod = usage
         return copy
     }
 }
@@ -138,6 +173,7 @@ public protocol KubernetesMetricsReading: Sendable {
         context: KubernetesContextProfile,
         namespace: KubernetesNamespaceSelection,
         podCount: Int?,
+        podsByNode: [String: Int],
         requests: ClusterResourceRequests,
         memoryLimitsByPodID: [String: Double]
     ) async -> ClusterTelemetryMetrics
@@ -177,6 +213,7 @@ public final class KubernetesMetricsReader: KubernetesMetricsReading {
         context: KubernetesContextProfile,
         namespace: KubernetesNamespaceSelection,
         podCount: Int?,
+        podsByNode: [String: Int],
         requests: ClusterResourceRequests,
         memoryLimitsByPodID: [String: Double]
     ) async -> ClusterTelemetryMetrics {
@@ -193,12 +230,14 @@ public final class KubernetesMetricsReader: KubernetesMetricsReading {
         let totalMemory = capacity.values.compactMap(\.memoryBytes).reduce(0, +)
         let requestedCPU = totalCPU > 0 ? min(100, requests.cpuCores / totalCPU * 100) : nil
         let requestedMemory = totalMemory > 0 ? min(100, requests.memoryBytes / totalMemory * 100) : nil
+        let peakPods = Self.peakPodDensity(podsByNode: podsByNode, capacity: capacity)
 
         guard let topOutput = topNodesResult.output else {
             return ClusterTelemetryMetrics(
                 podDensityPercent: density,
                 totalNodes: capacity.isEmpty ? nil : capacity.count,
                 totalPods: podCount,
+                peakNodePodPercent: peakPods,
                 requestedCPUPercent: requestedCPU,
                 requestedMemoryPercent: requestedMemory,
                 allocatableCPUCores: totalCPU > 0 ? totalCPU : nil,
@@ -214,9 +253,10 @@ public final class KubernetesMetricsReader: KubernetesMetricsReading {
             podDensityPercent: density,
             totalNodes: nodes.isEmpty ? nil : nodes.count,
             totalPods: podCount,
-            busiestNodeByCPU: nodes.filter { $0.cpuPercent != nil }.max { ($0.cpuPercent ?? 0) < ($1.cpuPercent ?? 0) },
-            busiestNodeByMemory: nodes.filter { $0.memoryPercent != nil }.max { ($0.memoryPercent ?? 0) < ($1.memoryPercent ?? 0) },
-            podsNearMemoryLimit: topPodsResult.output.map {
+            peakNodeCPUPercent: nodes.compactMap(\.cpuPercent).max(),
+            peakNodeMemoryPercent: nodes.compactMap(\.memoryPercent).max(),
+            peakNodePodPercent: peakPods,
+            podsNearMemoryLimitIDs: topPodsResult.output.map {
                 Self.podsNearMemoryLimit(topPodsOutput: $0, memoryLimitsByPodID: memoryLimitsByPodID)
             },
             requestedCPUPercent: requestedCPU,
@@ -226,6 +266,33 @@ public final class KubernetesMetricsReader: KubernetesMetricsReading {
             availability: .available
         )
         .withNodeUtilization(nodes)
+        .withPodUsage(topPodsResult.output.map { Self.parseTopPods($0, limits: memoryLimitsByPodID) } ?? [:])
+    }
+
+    /// Per-pod usage from the same `kubectl top pods` output the at-risk list is
+    /// derived from — one read, two answers.
+    public static func parseTopPods(_ stdout: String, limits: [String: Double]) -> [String: PodUsage] {
+        var usage: [String: PodUsage] = [:]
+        for line in stdout.split(whereSeparator: \.isNewline) {
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            let id: String
+            let cpuField: Int
+            switch fields.count {
+            case 4...:
+                id = "\(fields[0])/\(fields[1])"
+                cpuField = 2
+            case 3:
+                id = fields[0]
+                cpuField = 1
+            default:
+                continue
+            }
+            // Resolve to the canonical namespace/name so these line up with pod rows
+            // even when the output is namespace-scoped and has no NAMESPACE column.
+            let key = limit(for: id, in: limits)?.key ?? id
+            usage[key] = PodUsage(cpu: fields[cpuField], memory: fields[cpuField + 1])
+        }
+        return usage
     }
 
     // MARK: - Aggregation
@@ -248,6 +315,16 @@ public final class KubernetesMetricsReader: KubernetesMetricsReading {
         }
         guard totalAllocatable > 0 else { return nil }
         return min(100, totalUsed / totalAllocatable * 100)
+    }
+
+    /// The fullest single node, as a share of its own pod slots. A cluster at 5%
+    /// density can still have one node with no room left on it.
+    public static func peakPodDensity(podsByNode: [String: Int], capacity: [String: NodeCapacity]) -> Double? {
+        let percentages = podsByNode.compactMap { node, pods -> Double? in
+            guard let slots = capacity[node]?.podSlots, slots > 0 else { return nil }
+            return min(100, Double(pods) / Double(slots) * 100)
+        }
+        return percentages.max()
     }
 
     public static func density(podCount: Int?, allocatablePodSlots: Int?) -> Double? {
@@ -324,8 +401,8 @@ public final class KubernetesMetricsReader: KubernetesMetricsReading {
         topPodsOutput: String,
         memoryLimitsByPodID: [String: Double],
         threshold: Double = 0.9
-    ) -> Int {
-        var count = 0
+    ) -> [String] {
+        var atRisk: [String] = []
         for line in topPodsOutput.split(whereSeparator: \.isNewline) {
             let fields = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
             let id: String
@@ -342,18 +419,26 @@ public final class KubernetesMetricsReader: KubernetesMetricsReading {
             default:
                 continue
             }
-            guard let limit = limit(for: id, in: memoryLimitsByPodID), limit > 0,
+            guard let resolved = limit(for: id, in: memoryLimitsByPodID), resolved.limit > 0,
                   let used = bytes(fields[memoryField]) else { continue }
-            if used / limit >= threshold { count += 1 }
+            // The canonical key, so these ids line up with the pod rows.
+            if used / resolved.limit >= threshold { atRisk.append(resolved.key) }
         }
-        return count
+        return atRisk.sorted()
     }
 
-    private static func limit(for id: String, in limits: [String: Double]) -> Double? {
-        if let exact = limits[id] { return exact }
-        // Bare pod name against namespace-qualified keys.
+    /// Resolves a limit *and* the canonical `namespace/name` key it was found under.
+    ///
+    /// Namespace-scoped `kubectl top pods` output has no NAMESPACE column, so the id
+    /// read off the line is a bare pod name. Returning that bare name would have made
+    /// the at-risk list unusable as a filter: pod rows are keyed `namespace/name`, so
+    /// nothing would have matched and clicking the panel would have shown an empty
+    /// list on every namespace-scoped view.
+    private static func limit(for id: String, in limits: [String: Double]) -> (key: String, limit: Double)? {
+        if let exact = limits[id] { return (id, exact) }
         guard !id.contains("/") else { return nil }
-        return limits.first { $0.key.hasSuffix("/\(id)") }?.value
+        guard let match = limits.first(where: { $0.key.hasSuffix("/\(id)") }) else { return nil }
+        return (match.key, match.value)
     }
 
     // MARK: - Quantities

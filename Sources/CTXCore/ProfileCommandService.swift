@@ -19,7 +19,15 @@ public final class ProfileCommandService: Sendable {
     public func login(_ profile: CloudProfile, email: String? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
         switch profile.provider {
         case .aws:
-            return await runLogin(["aws", "sso", "login", "--profile", profile.name], onOutput: onOutput)
+            // `--no-browser` keeps Safari out of it. Without it the CLI opens the
+            // same one-shot authorize URL we render in the in-app modal, both race
+            // for the single localhost callback, and the user signs in twice.
+            let result = await runLogin(["aws", "sso", "login", "--profile", profile.name, "--no-browser"], onOutput: onOutput)
+            if result.exitCode != 0, result.output.contains("--no-browser") {
+                // ponytail: aws-cli < 2.9 has no such flag; only then fall back.
+                return await runLogin(["aws", "sso", "login", "--profile", profile.name], onOutput: onOutput)
+            }
+            return result
         case .gcp:
             var args = ["gcloud", "auth", "login", "--configuration", profile.name]
             let emailCandidate = profile.accountID.contains("@") ? profile.accountID : (profile.roleName.contains("@") ? profile.roleName : "")

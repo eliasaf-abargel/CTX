@@ -6,7 +6,7 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// Persistent, disk-backed cache of *safe metadata only* — the same
 /// `KubernetesResourceList` rows already held in memory. By construction, that
 /// type never carries Secret values, ConfigMap values, raw YAML, kubeconfig
-/// contents, or tokens (see `SECURITY.md`); Secrets/ConfigMaps are already
+/// contents, or tokens (see `docs/SECURITY.md`); Secrets/ConfigMaps are already
 /// metadata-only at the point they become a `KubernetesResourceList`, so
 /// persisting one is exactly as safe as caching it in memory already was. YAML
 /// (`KubernetesYAMLResult`) and Logs (`KubernetesLogsResult`) are never passed

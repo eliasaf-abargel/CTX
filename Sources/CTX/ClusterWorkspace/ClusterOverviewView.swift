@@ -4,6 +4,7 @@ import SwiftUI
 struct ClusterOverviewView: View {
     @ObservedObject var viewModel: ClusterWorkspaceViewModel
     @State private var expandedCard: String?
+    @State private var availableWidth: CGFloat = 1000
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -17,7 +18,7 @@ struct ClusterOverviewView: View {
 
             healthScorePanel
 
-            LazyVGrid(columns: cardColumns(minimum: 210), spacing: 12) {
+            LazyVGrid(columns: cardColumns(for: availableWidth), spacing: ClusterOverviewLayout.spacing) {
                 ForEach(viewModel.overviewMetrics) { metric in
                     Button {
                         activate(metric)
@@ -25,6 +26,7 @@ struct ClusterOverviewView: View {
                         metricCard(metric)
                     }
                     .buttonStyle(.plain)
+                    .frame(maxHeight: .infinity)
                     .help(helpText(for: metric))
                 }
             }
@@ -58,6 +60,23 @@ struct ClusterOverviewView: View {
                 .transition(.opacity)
             }
         }
+        // Fills the pane at any width; the column count adapts instead of the
+        // content sitting capped and centred with empty margins beside it.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Read from the layout directly rather than routed through a preference.
+        // A width that stays on its default is not a cosmetic problem: it puts
+        // three 170pt columns in a 580pt pane, and every title and subtitle on
+        // the screen truncates at once.
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size.width, initial: true) { _, width in
+                        guard abs(width - availableWidth) > 1 else { return }
+                        availableWidth = width
+                    }
+            }
+        )
+        .environment(\.overviewColumnWidth, availableWidth)
         .animation(.easeInOut(duration: 0.16), value: expandedCard)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isRefreshingOverview)
         .animation(.easeInOut(duration: 0.2), value: viewModel.overviewNotice != nil)
@@ -134,10 +153,11 @@ struct ClusterOverviewView: View {
         }
     }
 
+    /// Scores what CTX has actually read. The title and subtitle name the four
+    /// measured signals exactly — no claim about checks the advisor does not run.
     private var healthScorePanel: some View {
         let pods = viewModel.resourceList(for: .pods)?.rows ?? []
-        let workloads = viewModel.resourceList(for: .workloads)?.rows ?? []
-        let score = KubernetesRemediationAdvisor.calculateSecurityHealthScore(rows: pods + workloads)
+        let score = KubernetesRemediationAdvisor.workloadHygieneScore(pods: pods)
         let color: Color = score >= 85 ? .green : (score >= 60 ? .orange : .red)
 
         return CTXGlassPanel(padding: 14) {
@@ -158,11 +178,13 @@ struct ClusterOverviewView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text("Workload Security & Reliability Score")
+                        Text("Pod Hygiene Score")
                             .font(.system(size: 12, weight: .semibold))
                         CTXStatusBadge(title: score >= 85 ? "Optimal" : "Attention Recommended", systemImage: "shield.checkered", tint: color)
                     }
-                    Text("\(pods.count) pods & \(workloads.count) workloads analyzed for resource limits, security contexts, and container isolation.")
+                    Text(pods.isEmpty
+                         ? "Waiting for the pod list."
+                         : "\(pods.count) pods in \(viewModel.telemetryScopeLabel), scored on restarts, failing state, and whether they declare CPU and memory requests and a memory limit.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -172,6 +194,48 @@ struct ClusterOverviewView: View {
     }
 }
 
-func cardColumns(minimum: CGFloat) -> [GridItem] {
-    [GridItem(.adaptive(minimum: minimum, maximum: 340), spacing: 12, alignment: .top)]
+/// The Overview's single grid.
+///
+/// Everything on the screen — the three telemetry gauges and the nine metric cards —
+/// is laid out on these columns, so their edges line up vertically all the way down.
+func cardColumns(for width: CGFloat) -> [GridItem] {
+    Array(
+        repeating: GridItem(.flexible(), spacing: ClusterOverviewLayout.spacing, alignment: .top),
+        count: ClusterOverviewLayout.columnCount(for: width)
+    )
+}
+
+enum ClusterOverviewLayout {
+    static let spacing: CGFloat = 12
+
+    /// Three columns whenever the window is wide enough, then two, then one.
+    ///
+    /// Fixed counts rather than `.adaptive`, and the *same* count for the telemetry
+    /// gauges and the metric cards, because that is what makes the screen read as one
+    /// grid: every card edge lines up vertically all the way down. Three is also the
+    /// only multi-column count that divides the nine metric cards evenly, so the last
+    /// row is never a lonely leftover.
+    ///
+    /// The thresholds are the widths at which a column is still wide enough for
+    /// a card's title, number and subtitle to sit unabbreviated: roughly 300pt
+    /// of column for three, 250pt for two. Below that a single column reads
+    /// better than two cramped ones.
+    static func columnCount(for width: CGFloat) -> Int {
+        if width >= 1000 { return 3 }
+        if width >= 580 { return 2 }
+        return 1
+    }
+}
+
+/// Carries the Overview's measured width down to the telemetry grid, so both grids
+/// resolve to the same column count from a single measurement.
+private struct OverviewColumnWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1000
+}
+
+extension EnvironmentValues {
+    var overviewColumnWidth: CGFloat {
+        get { self[OverviewColumnWidthKey.self] }
+        set { self[OverviewColumnWidthKey.self] = newValue }
+    }
 }

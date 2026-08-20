@@ -23,5 +23,3 @@ DerivedData/
 credentials
 config.local.*
 secrets.*
-
-docs/

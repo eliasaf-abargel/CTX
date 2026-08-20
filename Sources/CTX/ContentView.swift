@@ -5,7 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var store: ProfileStore
     @State private var sheet: SidebarSheet?
-    @AppStorage("ctxAppAppearance") private var appAppearanceRaw: String = AppAppearance.dark.rawValue
+    @AppStorage(AppAppearance.storageKey) private var appAppearanceRaw: String = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
     private var currentAppearance: AppAppearance {
@@ -25,6 +25,7 @@ struct ContentView: View {
                 .background(colorScheme == .light ? Color(NSColor.windowBackgroundColor) : Color(white: 0.12).opacity(0.65))
         }
         .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
+        .ctxChromelessWindow()
         .preferredColorScheme(currentAppearance.colorScheme)
         .sheet(item: $sheet) { sheet in
             switch sheet {
@@ -69,6 +70,9 @@ struct ContentView: View {
             case .editFolder(let folder):
                 FolderEditorView(store: store, folder: folder)
             }
+        }
+        .sheet(item: $store.missingCLITool) { request in
+            MissingCLIToolSheet(store: store, request: request)
         }
         .sheet(item: $store.pendingFolderPrompt) { profile in
             ChooseFolderPromptView(store: store, profile: profile) {
@@ -124,16 +128,8 @@ struct DetailPane: View {
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
 
     private var activeToolbarProfiles: [CloudProfile] {
-        [
-            (.aws, store.activeAWSProfile),
-            (.gcp, store.activeGCPProfile),
-            (.azure, store.activeAzureProfile),
-            (.kubernetes, store.activeKubeContext)
-        ].compactMap { provider, name in
-            guard !name.isEmpty else { return nil }
-            guard let profile = store.profiles.first(where: { $0.provider == provider && $0.name == name }),
-                  profile.status == .connected else { return nil }
-            return profile
+        CloudProvider.allCases.compactMap { provider in
+            store.activeProfile(for: provider)
         }
     }
 

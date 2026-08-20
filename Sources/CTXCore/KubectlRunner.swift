@@ -180,19 +180,7 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
     }
 
     private func searchPaths(in environment: [String: String]) -> [String] {
-        let pathDirs = (environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return pathDirs + [
-            "\(home)/.rd/bin",
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin"
-        ]
+        CLIToolPaths.dirs(fromPathVariable: environment["PATH"]) + CLIToolPaths.searchDirs
     }
 
     private func environmentWithSearchPath(_ environment: [String: String]) -> [String: String] {

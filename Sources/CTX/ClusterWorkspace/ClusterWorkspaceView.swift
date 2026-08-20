@@ -65,7 +65,7 @@ struct ClusterWorkspaceView: View {
         _viewModel = StateObject(wrappedValue: vm)
     }
 
-    @AppStorage("ctxAppAppearance") private var appAppearanceRaw: String = AppAppearance.dark.rawValue
+    @AppStorage(AppAppearance.storageKey) private var appAppearanceRaw: String = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
     private var currentAppearance: AppAppearance {
@@ -79,6 +79,13 @@ struct ClusterWorkspaceView: View {
                 .navigationTitle("Cluster")
                 .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 310)
         } detail: {
+            // Measured here, once. The detail pane has a definite size, so a
+            // `GeometryReader` is safe at this level — unlike inside the page's
+            // scroll view, where a table measuring its own frame never resolved and
+            // silently kept its 900pt default. That default is why tables stopped
+            // short of the panel edge on a wide window *and* shed their
+            // lowest-priority columns as though space were tight.
+            GeometryReader { proxy in
             VStack(spacing: 0) {
                 ClusterWorkspaceHeader(viewModel: viewModel)
                     .padding(.horizontal, 22)
@@ -90,10 +97,17 @@ struct ClusterWorkspaceView: View {
 
                 ClusterWorkspaceContent(viewModel: viewModel)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(colorScheme == .light ? Color(NSColor.windowBackgroundColor) : Color(white: 0.12).opacity(0.65))
+            // The safe-area inset under `hiddenTitleBar` stays. Ignoring it removed
+            // the empty band in a normal window but clipped the header off the top
+            // edge in full screen, where there is no title bar to inset against.
             .navigationTitle(viewModel.title)
+            .environment(\.workspaceContentWidth, proxy.size.width)
+            }
         }
         .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
+        .ctxChromelessWindow()
         .preferredColorScheme(currentAppearance.colorScheme)
         .frame(minWidth: 680, minHeight: 480)
         .task {

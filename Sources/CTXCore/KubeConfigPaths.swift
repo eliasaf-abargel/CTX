@@ -13,7 +13,7 @@ public enum KubeConfigPaths {
     }
 
     public static var configURL: URL {
-        if let path = UserDefaults.standard.string(forKey: "customKubeconfigPath"), !path.isEmpty {
+        if let path = UserDefaults.standard.string(forKey: CTXDefaultsKey.kubeconfigPath), !path.isEmpty {
             return URL(fileURLWithPath: path)
         }
         return defaultConfigURL

@@ -32,7 +32,7 @@ public final class KubeConfigDiscoveryService: Sendable {
 
     public init(
         environment: @escaping @Sendable () -> [String: String] = { ProcessInfo.processInfo.environment },
-        customPath: @escaping @Sendable () -> String? = { UserDefaults.standard.string(forKey: "customKubeconfigPath") }
+        customPath: @escaping @Sendable () -> String? = { UserDefaults.standard.string(forKey: CTXDefaultsKey.kubeconfigPath) }
     ) {
         self.environment = environment
         self.customPath = customPath

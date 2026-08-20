@@ -44,7 +44,18 @@ struct CTXResourceTable: View {
         self.onSelect = onSelect
     }
 
-    @State private var availableWidth: CGFloat = 900
+    /// The pane width, minus the page padding either side. Supplied by the
+    /// workspace rather than measured here.
+    @Environment(\.workspaceContentWidth) private var paneWidth
+    @State private var measuredWidth: CGFloat = 0
+
+    private var availableWidth: CGFloat {
+        // Prefer the pane's own measurement; fall back to whatever this view manages
+        // to measure, and only then to a conservative default.
+        let fromPane = paneWidth - ClusterWorkspaceLayout.pagePadding * 2
+        if fromPane > 200 { return fromPane }
+        return measuredWidth > 200 ? measuredWidth : 900
+    }
     @State private var hoveredRowID: String?
     /// How many rows are currently built.
     ///
@@ -170,12 +181,12 @@ struct CTXResourceTable: View {
             }
         )
         .onPreferenceChange(TableWidthPreferenceKey.self) { newWidth in
-            // Guard against micro-changes (< 1pt) to avoid redundant resolve() calls
-            // on every layout pass — the table is pixel-aligned so sub-point diffs
-            // never change the resolved column widths anyway.
-            guard abs(newWidth - availableWidth) > 1 else { return }
-            availableWidth = newWidth
-            resolvedColumns = Self.resolve(allColumns, availableWidth: newWidth, isCompact: ClusterWorkspaceLayoutMode(width: newWidth) == .compact)
+            guard abs(newWidth - measuredWidth) > 1 else { return }
+            measuredWidth = newWidth
+            resolvedColumns = Self.resolve(allColumns, availableWidth: availableWidth, isCompact: isCompact)
+        }
+        .onChange(of: paneWidth) { _, _ in
+            resolvedColumns = Self.resolve(allColumns, availableWidth: availableWidth, isCompact: isCompact)
         }
         .onChange(of: targetSection) { _, _ in
             displayLimit = Self.initialWindow

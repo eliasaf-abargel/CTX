@@ -2,7 +2,7 @@ import Foundation
 
 public enum GCPConfigPaths {
     private static var baseDirURL: URL {
-        if let path = UserDefaults.standard.string(forKey: "customGCPConfigDirPath"), !path.isEmpty {
+        if let path = UserDefaults.standard.string(forKey: CTXDefaultsKey.gcpConfigDirPath), !path.isEmpty {
             return URL(fileURLWithPath: path)
         }
         return FileManager.default.homeDirectoryForCurrentUser

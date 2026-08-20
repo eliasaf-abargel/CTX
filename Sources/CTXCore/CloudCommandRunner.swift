@@ -39,7 +39,16 @@ public enum CloudCommandTimeout {
 }
 
 public final class CloudCommandRunner: CloudCommandRunning {
-    public init() {}
+    /// Provider logins must not pop a browser out from under the user, so by
+    /// default the child gets `BROWSER=echo` and a no-op `open` ahead of its
+    /// `PATH`. That is wrong for anything that legitimately opens things — a
+    /// Homebrew cask install runs `open` on the downloaded package and would
+    /// silently do nothing — so those callers turn it off.
+    private let suppressesBrowserLaunch: Bool
+
+    public init(suppressesBrowserLaunch: Bool = true) {
+        self.suppressesBrowserLaunch = suppressesBrowserLaunch
+    }
 
     public func run(_ arguments: [String]) async -> CommandResult {
         await run(arguments, timeout: CloudCommandTimeout.standard, onOutput: nil)
@@ -51,6 +60,7 @@ public final class CloudCommandRunner: CloudCommandRunning {
 
     public func run(_ arguments: [String], timeout: TimeInterval, onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
         let processBox = ProcessBox()
+        let suppressesBrowserLaunch = self.suppressesBrowserLaunch
         return await withTaskCancellationHandler {
             await Task.detached {
             let process = Process()
@@ -63,19 +73,21 @@ public final class CloudCommandRunner: CloudCommandRunning {
             var args = arguments
             var execPath = "/usr/bin/env"
 
-            let home = FileManager.default.homeDirectoryForCurrentUser.path
-            let searchDirs = ["\(home)/.rd/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+            let searchDirs = CLIToolPaths.searchDirs
+            let inheritedPathDirs = CLIToolPaths.dirs(fromPathVariable: ProcessInfo.processInfo.environment["PATH"])
 
             if let binaryName = arguments.first {
-                let fm = FileManager.default
-                for dir in searchDirs {
-                    let path = (dir as NSString).appendingPathComponent(binaryName)
-                    if fm.fileExists(atPath: path) {
-                        execPath = path
-                        args.removeFirst()
-                        break
-                    }
+                guard let resolved = CLIToolPaths.resolve(binaryName, extraDirs: inheritedPathDirs) else {
+                    // Saying which tool is missing beats letting `env` answer with
+                    // "No such file or directory", which is what a profile that
+                    // simply had no CLI installed used to report.
+                    return CommandResult(
+                        exitCode: 127,
+                        output: "\(binaryName) was not found on this Mac. Install the \(binaryName) CLI, then try again."
+                    )
                 }
+                execPath = resolved
+                args.removeFirst()
             }
 
             let stdinPipe = Pipe()
@@ -85,14 +97,17 @@ public final class CloudCommandRunner: CloudCommandRunning {
             process.standardOutput = pipe
             process.standardError = pipe
 
-            let interceptorDir = ensureInterceptorBinDir()
             var environment = ProcessInfo.processInfo.environment
             let existingPath = environment["PATH"] ?? ""
-            let newPath = ([interceptorDir] + searchDirs + [existingPath]).joined(separator: ":")
-            environment["PATH"] = newPath
-            environment["BROWSER"] = "echo"
-            environment["AWS_SSO_BROWSER"] = "none"
-            environment["SDM_BROWSER"] = "echo"
+            let pathDirs = suppressesBrowserLaunch
+                ? [ensureInterceptorBinDir()] + searchDirs + [existingPath]
+                : searchDirs + [existingPath]
+            environment["PATH"] = pathDirs.joined(separator: ":")
+            if suppressesBrowserLaunch {
+                environment["BROWSER"] = "echo"
+                environment["AWS_SSO_BROWSER"] = "none"
+                environment["SDM_BROWSER"] = "echo"
+            }
             process.environment = environment
 
             do {

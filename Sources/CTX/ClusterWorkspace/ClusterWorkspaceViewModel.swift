@@ -4,7 +4,13 @@ import SwiftUI
 
 @MainActor
 final class ClusterWorkspaceViewModel: ObservableObject {
-    @Published var selectedSection: ClusterWorkspaceSection = .overview
+    @Published var selectedSection: ClusterWorkspaceSection = .overview {
+        didSet {
+            if let focus = resourceFocus, focus.section != selectedSection {
+                resourceFocus = nil
+            }
+        }
+    }
     @Published private(set) var overviewSummary: KubernetesOverviewSummary
     @Published private(set) var isRefreshingOverview = false
     @Published private(set) var lastRefreshed: Date?
@@ -62,8 +68,25 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var portForwardSessions: [KubernetesPortForwardSession] = []
     @Published var portForwardIssue: KubernetesCommandDiagnostic?
     @Published var isStartingPortForward = false
-    @Published var topologyRelations: [TopologyServiceRelation] = []
-    @Published var selectedTopologyRelation: TopologyServiceRelation?
+    @Published var topologyGraph = ClusterTopologyGraph(nodes: [], edges: [])
+    @Published var topologyProjection: TopologyProjection?
+    /// A build is running. Published because an empty graph means two opposite
+    /// things — "still working" and "there is nothing here" — and the pane has
+    /// to tell them apart.
+    @Published var isBuildingTopology = false
+    /// A build has finished, been abandoned, or been ruled out since the graph
+    /// was last cleared. Until it has, an empty graph is only the absence of an
+    /// answer.
+    @Published var hasResolvedTopology = false
+    /// Changes every time the map's scope does — today, on every namespace
+    /// switch. The pane watches this instead of the selector text, because the
+    /// reset it has to react to (drop the pending search, empty the field) also
+    /// happens when the committed selector was already empty and therefore
+    /// never changes.
+    @Published var topologyScopeID = UUID()
+    @Published var topologyExpansionState = TopologyExpansionState()
+    @Published var topologySearchNodeIDs: Set<String> = []
+    @Published var topologySelectorText = ""
     @Published var showIssuesOnly = false
     @Published var gitOpsResult: GitOpsReadResult?
     @Published var gitOpsList: KubernetesResourceList?
@@ -72,6 +95,11 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var helmList: KubernetesResourceList?
     @Published var isLoadingHelm = false
     @Published var telemetry = ClusterTelemetryMetrics()
+    /// An active "show me only the rows this summary counted" filter. Cleared by the
+    /// chip above the table, and automatically whenever the scope changes underneath
+    /// it — a namespace switch or a section change would otherwise leave a filter
+    /// pinned to ids that are no longer on screen.
+    @Published var resourceFocus: ResourceFocus?
     var telemetryTask: Task<Void, Never>?
     var telemetryTimerTask: Task<Void, Never>?
     var telemetryLoadedAt: Date?
@@ -79,6 +107,8 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     var helmLoadedAt: Date?
     var gitOpsTask: Task<Void, Never>?
     var helmTask: Task<Void, Never>?
+    var topologyBuildTask: Task<Void, Never>?
+    var topologyBuildGeneration = 0
 
     var onStatusCheckFailed: ((String, String) -> Void)?
 
@@ -141,11 +171,11 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     }
 
     /// Namespace-scoped resource kinds background-fetched right after a namespace
-    /// switch (item 6): cluster-scoped kinds (Nodes, Namespaces) are deliberately
+    /// switch. Cluster-scoped kinds (Nodes, Namespaces) are deliberately
     /// excluded — they don't change with namespace, so reloading them here would be
     /// a needless live kubectl call on every switch.
     private static let namespaceScopedPrefetchKinds: [KubernetesResourceKind] = [
-        .pods, .services, .workloads, .ingress, .events
+        .pods, .services, .workloads, .ingress, .hpa, .pvc, .events
     ]
 
     deinit {
@@ -154,6 +184,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         helmTask?.cancel()
         telemetryTask?.cancel()
         telemetryTimerTask?.cancel()
+        topologyBuildTask?.cancel()
         resourceTasks.values.forEach { $0.cancel() }
         yamlTask?.cancel()
         diffTasks.values.forEach { $0.cancel() }
@@ -256,6 +287,11 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         refreshTask?.cancel()
         gitOpsTask?.cancel()
         helmTask?.cancel()
+        topologyBuildTask?.cancel()
+        isBuildingTopology = false
+        // Stopping is an answer too: nothing further is coming, so the pane
+        // must not sit on a skeleton waiting for it.
+        hasResolvedTopology = true
         isLoadingGitOps = false
         isLoadingHelm = false
         resourceTasks.values.forEach { $0.cancel() }
@@ -350,15 +386,27 @@ final class ClusterWorkspaceViewModel: ObservableObject {
 
     /// GitOps and Helm are not plain `kubectl get` kinds — they come from custom
     /// resources and (for Helm) from the `helm` CLI, so they are loaded by their own
-    /// readers and cached here as finished lists. They used to be *synthesised* on
-    /// every access: GitOps rows were guessed from any pod whose name mentioned
-    /// argocd/flux, with the repository URL, target branch and sync status invented
-    /// outright; Helm rows carried a hardcoded chart suffix and version. Both now
-    /// report only what the cluster actually says.
+    /// readers and cached here as finished lists. Both report only what the cluster
+    /// actually says — nothing on these screens is synthesised from other rows.
     func resourceList(for section: ClusterWorkspaceSection) -> KubernetesResourceList? {
         switch section {
         case .gitops: return gitOpsList
         case .helm: return helmList
+        case .pods:
+            guard var list = resourceLists[resourceKey(kind: .pods)] else { return nil }
+            // The CPU and Memory columns carry declared *requests*, so a pod that
+            // declares none showed nothing at all. Live usage is merged in where the
+            // metrics API reports it, which is what makes these columns a monitoring
+            // view rather than a copy of the manifest.
+            guard !telemetry.usageByPod.isEmpty else { return list }
+            list.rows = list.rows.map { row in
+                guard let usage = telemetry.usageByPod[row.id] else { return row }
+                var cells = row.cells
+                cells["CPU"] = usage.cpu
+                cells["Memory"] = usage.memory
+                return KubernetesResourceRow(id: row.id, cells: cells, warning: row.warning, sortValue: row.sortValue, ref: row.ref)
+            }
+            return list
         case .nodes:
             guard var list = resourceLists[resourceKey(kind: .nodes)] else { return nil }
             // Capacity is identical on every node of a managed node group, so a table
@@ -544,7 +592,8 @@ final class ClusterWorkspaceViewModel: ObservableObject {
             loadingResourceKinds.remove(kind)
             resourceTasks[kind] = nil
             logScreenLoad(kind: kind, namespace: namespace, cacheState: outcome.cacheStateBeforeFetch, list: list, started: started)
-            if kind == .services || kind == .workloads || kind == .pods || kind == .ingress {
+            if kind == .services || kind == .workloads || kind == .pods ||
+                kind == .ingress || kind == .hpa || kind == .pvc {
                 self.recalculateTopology()
             }
             completion?(list)
@@ -667,6 +716,14 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         // Immediately: close the inspector and drop the selection tied to the
         // namespace that just went away.
         selectedResources.removeAll()
+        resourceFocus = nil
+        // Pod-scoped telemetry belongs to the namespace it was read for. Without
+        // this the panel kept reporting the previous scope — switching to a
+        // six-pod namespace still showed "80 scheduled" and the cluster-wide
+        // at-risk count.
+        telemetryTask?.cancel()
+        telemetryTask = nil
+        telemetryLoadedAt = nil
         presentation = nil
         yamlResult = nil
         yamlTask?.cancel()
@@ -683,6 +740,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         overviewSummary.services = KubernetesServicesSummary(total: nil, exposed: 0, status: .notChecked)
         overviewSummary.ingress = KubernetesIngressSummary(total: nil, routed: 0, tls: 0, status: .notChecked)
         overviewSummary.events = KubernetesEventsSummary(warningCount: nil, status: .notChecked)
+        resetTopology()
         hydrateOverviewFromCachedNamespace()
 
         // Cancel in-flight namespace-scoped work for the *old* namespace so a slow

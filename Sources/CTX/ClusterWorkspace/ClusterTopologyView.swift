@@ -1,218 +1,268 @@
-import AppKit
 import CTXCore
 import SwiftUI
 
 struct ClusterTopologyView: View {
     @ObservedObject var viewModel: ClusterWorkspaceViewModel
+    @State private var scale: CGFloat = 1
+    @State private var command: TopologyMapCommand?
+    @State private var searchText = ""
+    @State private var searchTask: Task<Void, Never>?
+    @State private var selectedNodeID: String?
+    @State private var needsAttentionOnly = false
+    @State private var showsInactive = false
+
+    private var projection: TopologyProjection? { viewModel.topologyProjection }
+
+    /// Taken from the view model, not from the text field. The projection is
+    /// built for the committed selector, so filtering the drawn graph by
+    /// anything else describes a map that does not exist — including for the
+    /// frame after a namespace switch clears the selector while the field still
+    /// holds the old term.
+    private var filter: TopologyMapFilter {
+        TopologyMapFilter(
+            searchText: viewModel.topologySelectorText,
+            includesInactive: showsInactive,
+            needsAttentionOnly: needsAttentionOnly
+        )
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            CTXSectionHeader(title: "Map", subtitle: "Service relationships from loaded Kubernetes selectors")
+        // Built once per pass and handed down, so the toolbar's counts and the
+        // canvas's empty state can never describe two different maps.
+        let snapshot = TopologyMapSnapshot(
+            projected: viewModel.topologyGraph,
+            projection: projection,
+            filter: filter
+        )
 
-            ResourceSummaryPanel(
-                title: "Topological Service Map",
-                detail: "\(viewModel.topologyRelations.count) inter-service relationships discovered",
-                badgeTitle: "\(viewModel.topologyRelations.count) services",
-                systemImage: "point.topleft.down.to.point.bottomright.curvepath",
-                tint: .blue
+        return VStack(spacing: 0) {
+            TopologyToolbarView(
+                searchText: $searchText,
+                needsAttentionOnly: $needsAttentionOnly,
+                showsInactive: $showsInactive,
+                scale: scale,
+                counts: TopologyCountSummary(snapshot),
+                command: $command
             )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
 
-            if viewModel.topologyRelations.isEmpty && viewModel.isLoading(section: .services) {
-                CTXGlassPanel {
-                    ResourceSkeletonView(title: "Loading service map")
+            Divider()
+
+            TopologyResponsiveInspectorLayout(
+                isPresented: selectedNode(in: snapshot) != nil,
+                canvas: {
+                    canvas(snapshot)
+                },
+                inspector: {
+                    inspector(snapshot)
                 }
-            } else if viewModel.topologyRelations.isEmpty {
-                CTXGlassPanel {
-                    CTXEmptyStateView(title: "No services loaded", message: "The map appears after Services are available.", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                }
-            } else {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(viewModel.topologyRelations) { relation in
-                        TopologyServiceCard(
-                            service: relation.service,
-                            workloads: relation.workloads,
-                            pods: relation.pods,
-                            ingress: relation.ingress,
-                            openHost: openHost
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            viewModel.selectedTopologyRelation = relation
-                        }
-                        .help("Click to open interactive topology map")
-                    }
-                }
-            }
+            )
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
+            searchText = viewModel.topologySelectorText
             viewModel.loadTopologyResources()
         }
-        .sheet(item: $viewModel.selectedTopologyRelation) { relation in
-            InteractiveTopologyMapView(viewModel: viewModel, relation: relation)
+        // Typing is not a reason to drop the selection: the inspector describes
+        // an object, and that object is still the same one three keystrokes into
+        // a search that has not been committed yet. If the committed filter does
+        // remove it, the node-list check below clears the selection then.
+        .onChange(of: searchText) { _, value in
+            scheduleSelectorUpdate(value)
         }
-    }
-
-    private func openHost(_ host: String, tls: Bool) {
-        let scheme = tls ? "https" : "http"
-        guard let url = URL(string: "\(scheme)://\(host)") else { return }
-        NSWorkspace.shared.open(url)
-    }
-}
-
-private struct TopologyServiceCard: View {
-    let service: KubernetesResourceRow
-    let workloads: [KubernetesResourceRow]
-    let pods: [KubernetesResourceRow]
-    let ingress: [KubernetesResourceRow]
-    let openHost: (String, Bool) -> Void
-
-    var body: some View {
-        CTXGlassPanel(padding: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                relationRow
-                if !hosts.isEmpty {
-                    hostRow
-                }
+        .onChange(of: viewModel.topologyScopeID) { _, _ in
+            // The scope, not the selector: switching to a namespace while the
+            // committed selector is empty leaves the text unchanged, and the
+            // term the user half-typed for the previous namespace would
+            // otherwise stay in the field and land 180ms later.
+            searchTask?.cancel()
+            searchTask = nil
+            searchText = ""
+            selectedNodeID = nil
+        }
+        .onChange(of: viewModel.topologySelectorText) { _, value in
+            guard value != searchText else { return }
+            searchTask?.cancel()
+            searchText = value
+            selectedNodeID = nil
+        }
+        .onChange(of: snapshot.graph.nodes.map(\.id)) { _, ids in
+            if let selectedNodeID, !ids.contains(selectedNodeID) {
+                self.selectedNodeID = nil
             }
         }
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.blue)
-                .frame(width: 30, height: 30)
-                .background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(service.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text([service.namespace, service.cells["Type"], service.cells["Ports"]].compactMap(clean).joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: 8)
-            CTXStatusBadge(title: "\(pods.count) pod\(pods.count == 1 ? "" : "s")", systemImage: "circle.grid.3x3", tint: pods.isEmpty ? .secondary : .green)
+        .onDisappear {
+            searchTask?.cancel()
+        }
+        // Escape reaches here from anywhere in the pane that does not handle it
+        // first, so it still dismisses the inspector when focus is on one of the
+        // inspector's own buttons rather than on the canvas.
+        .onExitCommand {
+            selectedNodeID = nil
+        }
+        .background {
+            zoomShortcuts
         }
     }
 
-    private var relationRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                relationGroup(title: "Workloads", values: workloads.map(\.name), icon: "shippingbox", tint: .purple)
-                relationGroup(title: "Pods", values: pods.map(\.name), icon: "circle.grid.3x3", tint: .green)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                relationGroup(title: "Workloads", values: workloads.map(\.name), icon: "shippingbox", tint: .purple)
-                relationGroup(title: "Pods", values: pods.map(\.name), icon: "circle.grid.3x3", tint: .green)
-            }
+    /// Mounted by the pane rather than by the toolbar, because the toolbar shows
+    /// one of three layouts: a shortcut attached to a button in the wide layout
+    /// vanishes the moment the window narrows, and one attached to a branch
+    /// `ViewThatFits` merely measures can fire twice.
+    private var zoomShortcuts: some View {
+        HStack {
+            Button("") { command = .zoomIn }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("") { command = .zoomOut }
+                .keyboardShortcut("-", modifiers: .command)
+            Button("") { command = .fit }
+                .keyboardShortcut("0", modifiers: .command)
         }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
-    private func relationGroup(title: String, values: [String], icon: String, tint: Color) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: icon)
-                .foregroundStyle(tint)
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.secondary)
-            if values.isEmpty {
-                Text("None matched")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(values.prefix(2)), id: \.self) { val in
-                    TechBrandIconView(name: val)
-                }
-            }
-        }
-        .padding(.horizontal, 9)
-        .frame(height: 28)
-        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-    }
-
-    private var hostRow: some View {
-        HStack(spacing: 8) {
-            ForEach(hosts, id: \.host) { item in
-                Button {
-                    openHost(item.host, item.tls)
-                } label: {
-                    Label(item.host, systemImage: item.tls ? "lock.fill" : "globe")
-                        .lineLimit(1)
-                }
-                .buttonStyle(CTXSecondaryButton())
-                .help(item.tls ? "Open https://\(item.host)" : "Open http://\(item.host)")
-            }
-        }
-    }
-
-    private var hosts: [(host: String, tls: Bool)] {
-        ingress.flatMap { row in
-            (row.cells["Hosts"] ?? "")
-                .split(separator: ",")
-                .map { ($0.trimmingCharacters(in: .whitespacesAndNewlines), row.cells["TLS"] == "Yes") }
-        }
-    }
-
-    private func clean(_ value: String?) -> String? {
-        guard let value, !value.isEmpty, value != "-" else { return nil }
-        return value
-    }
-}
-
-// MARK: - Animated Connector Lines
-
-struct AnimatedConnectorLine: View {
-    let color: Color
-    var portVector: String = ":8080"
-    @State private var phase: CGFloat = 0
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(portVector)
-                .font(.system(size: 7, weight: .bold, design: .monospaced))
-                .foregroundStyle(color)
-                .padding(.horizontal, 3)
-                .padding(.vertical, 1)
-                .background(color.opacity(0.12), in: Capsule())
-
-            HStack(spacing: 0) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 5, height: 5)
-                    .shadow(color: color.opacity(0.4), radius: 2)
-
-                LineShape()
-                    .stroke(
-                        LinearGradient(colors: [color, color.opacity(0.3)], startPoint: .leading, endPoint: .trailing),
-                        style: StrokeStyle(lineWidth: 1.75, lineCap: .round, dash: [5, 4], dashPhase: phase)
+    @ViewBuilder
+    private func canvas(_ snapshot: TopologyMapSnapshot) -> some View {
+        Group {
+            switch snapshot.vacancy {
+            case .none:
+                ClusterDAGGraphView(
+                    graph: snapshot.graph,
+                    groupsByNodeID: projection?.groupsByNodeID ?? [:],
+                    onExpandGroup: { viewModel.expandTopologyGroup($0) },
+                    scale: $scale,
+                    command: $command,
+                    selectedNodeID: $selectedNodeID
+                )
+            case .awaitingProjection:
+                // The filters do match something; the projection just has not
+                // caught up. Saying "no match" here would be a lie the next
+                // frame corrects.
+                ResourceSkeletonView(
+                    title: "Bringing \(snapshot.eligibleCount) matching object\(snapshot.eligibleCount == 1 ? "" : "s") into view"
+                )
+                .padding(22)
+            case .noSearchMatch:
+                CTXEmptyStateView(
+                    title: "No match for “\(viewModel.topologySelectorText)”",
+                    message: "Try another object name, or clear the lineage search.",
+                    systemImage: "magnifyingglass"
+                )
+            case .noAttentionNeeded:
+                CTXEmptyStateView(
+                    title: "No objects need attention",
+                    message: "Clear the filter to see the full active map.",
+                    systemImage: "checkmark.circle"
+                )
+            case .allInactive:
+                CTXEmptyStateView(
+                    title: "All objects are inactive",
+                    message: "Turn on Show inactive to include completed or scaled-to-zero objects.",
+                    systemImage: "moon.zzz"
+                )
+            case .noObjects:
+                // "Nothing to map" is a claim about the namespace, so it waits
+                // until every source list is in and a build has actually
+                // published its verdict.
+                if viewModel.isTopologyPending {
+                    ResourceSkeletonView(title: "Building the service map")
+                        .padding(22)
+                } else {
+                    CTXEmptyStateView(
+                        title: "Nothing to map",
+                        message: "The map appears once Services, Workloads and Pods have loaded.",
+                        systemImage: "point.topleft.down.to.point.bottomright.curvepath"
                     )
-                    .frame(height: 2)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.45))
+    }
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundColor(color)
-            }
-            .frame(width: 48)
+    @ViewBuilder
+    private func inspector(_ snapshot: TopologyMapSnapshot) -> some View {
+        if let inspected = selectedNode(in: snapshot) {
+            TopologyNodeInspectorView(
+                node: inspected,
+                graph: snapshot.graph,
+                group: projection?.groupsByNodeID[inspected.id],
+                canCollapse: viewModel.topologyExpansionState.batchCount(for: inspected.id) > 0,
+                onSelect: { selectedNodeID = $0 },
+                onOpenInspector: { openInspector(inspected) },
+                onPortForward: inspected.kind == .service ? { openPortForward(inspected) } : nil,
+                onShowPods: projection?.groupsByNodeID[inspected.id].map { group in
+                    { showPods(group) }
+                },
+                onExpand: { viewModel.expandTopologyGroup(inspected.id) },
+                onCollapse: { viewModel.collapseTopologyGroup(inspected.id) },
+                onResetExpansion: viewModel.topologyExpansionState.batchesByGroupID.isEmpty
+                    ? nil
+                    : { viewModel.resetTopologyExpansion() },
+                onClose: { selectedNodeID = nil }
+            )
         }
-        .onAppear {
-            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                phase -= 9
-            }
+    }
+
+    private func selectedNode(in snapshot: TopologyMapSnapshot) -> TopologyGraphNode? {
+        selectedNodeID.flatMap(snapshot.graph.node)
+    }
+
+    private func openInspector(_ node: TopologyGraphNode) {
+        guard let section = node.kind.workspaceSection else { return }
+        viewModel.selectResource(node.row, in: section)
+    }
+
+    private func openPortForward(_ node: TopologyGraphNode) {
+        viewModel.selectPortForwardService(node.row)
+        viewModel.selectedSection = .portForward
+    }
+
+    private func scheduleSelectorUpdate(_ value: String) {
+        searchTask?.cancel()
+        guard value != viewModel.topologySelectorText else { return }
+        // The scope is captured, not read at commit time: a term typed for one
+        // namespace must never be applied to the next, however the reset and
+        // this sleep interleave.
+        let scope = viewModel.topologyScopeID
+        searchTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled,
+                  scope == viewModel.topologyScopeID,
+                  value != viewModel.topologySelectorText else { return }
+            viewModel.setTopologySelector(value)
         }
+    }
+
+    private func showPods(_ group: TopologyProjectedGroup) {
+        let rowIDs = Set(group.memberNodeIDs.compactMap { id -> String? in
+            guard id.hasPrefix("pod/") else { return nil }
+            return String(id.dropFirst("pod/".count))
+        })
+        guard !rowIDs.isEmpty else { return }
+        viewModel.resourceFocus = ResourceFocus(
+            section: .pods,
+            title: "\(group.hiddenCount) pods represented on the map",
+            ids: rowIDs
+        )
+        viewModel.selectedSection = .pods
     }
 }
 
-struct LineShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.width, y: rect.midY))
-        return path
+private extension TopologyGraphNodeKind {
+    var workspaceSection: ClusterWorkspaceSection? {
+        switch self {
+        case .ingress: .ingress
+        case .service: .services
+        case .workload: .workloads
+        case .pod: .pods
+        case .pvc: .storage
+        case .hpa: .hpa
+        case .podGroup, .terminalGroup, .overflow: nil
+        }
     }
 }

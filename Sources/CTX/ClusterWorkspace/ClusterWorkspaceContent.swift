@@ -29,11 +29,8 @@ struct ClusterWorkspaceContent: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .topology:
-                ScrollView {
-                    ClusterTopologyView(viewModel: viewModel)
-                        .padding(22)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                ClusterTopologyView(viewModel: viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .exports:
                 ScrollView {
                     ClusterExportsView(viewModel: viewModel)
@@ -90,6 +87,8 @@ struct ClusterWorkspaceContent: View {
             showsNamespaceColumn: showsNamespaceColumn,
             emptyMessageOverride: emptyMessageOverride,
             notice: sectionNotice,
+            focus: viewModel.resourceFocus,
+            clearFocus: { viewModel.resourceFocus = nil },
             loadIfNeeded: { viewModel.loadSelectedSection(bypassCache: false) },
             refresh: { viewModel.loadSelectedSection(bypassCache: true) },
             selectRow: { viewModel.selectResource($0, in: viewModel.selectedSection) }
