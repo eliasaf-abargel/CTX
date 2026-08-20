@@ -2091,6 +2091,10 @@ func testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown() 
         profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
         fileWatchers: ProfileFileWatcherService(),
         folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        // What this test proves is the context switch, not whether the host has
+        // kubectl. Left to the real preflight it passes on a developer Mac and
+        // fails on a CI runner without kubectl, where `login()` returns early.
+        missingCLIToolResolver: { _ in nil },
         // Mirrors real app startup: contexts are discovered before the background
         // verify pass has run, so a never-yet-verified context sits at `.unknown` —
         // exactly the state that used to make `login()` skip the real context switch.
@@ -2113,6 +2117,55 @@ func testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown() 
     }
     let commands = await runner.allCommands()
     assert(commands.contains { $0.contains("use-context") && $0.contains("team-c") }, "Connect on a never-yet-verified kube context must still run the real kubectl context switch, not just update in-app bookkeeping")
+}
+
+/// The other side of the injected preflight: a resolver that does report a missing
+/// tool must still stop the connect before any command runs, so making the switch
+/// test host-independent cannot quietly disable the preflight itself.
+@MainActor
+func testProfileStoreLoginStopsAtPreflightWhenARequiredCLIIsMissing() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-preflight-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+    try kubeconfig(context: "team-d", cluster: "team-d-cluster", user: "team-d-user", server: "https://team-d.example.com:6443")
+        .write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+
+    let suiteName = "ctx-kube-preflight-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let configURL = dir.appendingPathComponent("aws-config")
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        missingCLIToolResolver: { _ in .kubectl },
+        startsBackgroundServices: false
+    )
+
+    guard let profile = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == "team-d" }) else {
+        assertionFailure("expected discovery to find the team-d context")
+        return
+    }
+
+    store.login(profile)
+    assert(store.missingCLITool?.tool == .kubectl, "a missing required CLI must surface as an install request, not a failed login")
+    assert(store.missingCLITool?.profile.id == profile.id, "the install request must name the profile the user tried to connect")
+
+    // Long enough that a connect Task, had one been spawned, would have recorded
+    // its command by now.
+    try await Task.sleep(nanoseconds: 300_000_000)
+    let commands = await runner.allCommands()
+    assert(!commands.contains { $0.contains("use-context") }, "a blocked preflight must run no provider commands at all")
 }
 
 func testCloudFolderPreferencesStoreRoundTripsState() throws {
@@ -2507,6 +2560,7 @@ try await testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp()
 try await testProfileStorePromptsForFolderWhenCreatedWithoutOne()
 try await testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne()
 try await testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown()
+try await testProfileStoreLoginStopsAtPreflightWhenARequiredCLIIsMissing()
 @MainActor
 func testKubernetesContextStatusUpdatesOnVerificationFailureAndExpiration() async throws {
     let store = ProfileStore(startsBackgroundServices: false)

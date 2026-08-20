@@ -85,6 +85,11 @@ public struct CLITool: Sendable, Identifiable, Hashable {
     }
 }
 
+/// How the connect preflight decides a required CLI is absent. Injected so tests
+/// can drive the command flow without depending on which CLIs the host happens to
+/// have installed.
+public typealias MissingCLIToolResolving = @Sendable (CloudProfile) -> CLITool?
+
 public struct MissingCLIToolRequest: Identifiable, Sendable {
     public let tool: CLITool
     public let profile: CloudProfile

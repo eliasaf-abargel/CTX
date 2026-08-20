@@ -5,7 +5,7 @@ extension ProfileStore {
     public func login(_ profile: CloudProfile) {
         // A missing CLI is not a failed login: ask for it before anything moves to
         // Connecting, so the user sees "install this" rather than a shell error.
-        if let missing = CLITool.firstMissing(for: profile) {
+        if let missing = missingCLIToolResolver(profile) {
             missingCLITool = MissingCLIToolRequest(tool: missing, profile: profile)
             return
         }

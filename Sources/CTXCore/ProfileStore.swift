@@ -75,6 +75,7 @@ public final class ProfileStore: ObservableObject {
     internal let profilePersistence: CloudProfilePersistenceService
     internal let fileWatchers: ProfileFileWatcherService
     internal let folderPreferences: CloudFolderPreferencesStore
+    internal let missingCLIToolResolver: MissingCLIToolResolving
     internal var manuallyDisconnectedProfiles: Set<String> = []
     internal var lastExpirationWarningTime: Date?
     internal var expirationTimer: AnyCancellable?
@@ -104,6 +105,7 @@ public final class ProfileStore: ObservableObject {
         profilePersistence: CloudProfilePersistenceService? = nil,
         fileWatchers: ProfileFileWatcherService = ProfileFileWatcherService(),
         folderPreferences: CloudFolderPreferencesStore = CloudFolderPreferencesStore(),
+        missingCLIToolResolver: @escaping MissingCLIToolResolving = { CLITool.firstMissing(for: $0) },
         startsBackgroundServices: Bool = true
     ) {
         self.configURL = configURL
@@ -119,6 +121,7 @@ public final class ProfileStore: ObservableObject {
         self.profilePersistence = profilePersistence ?? CloudProfilePersistenceService(awsConfigURL: configURL)
         self.fileWatchers = fileWatchers
         self.folderPreferences = folderPreferences
+        self.missingCLIToolResolver = missingCLIToolResolver
         self.activeAWSProfile = UserDefaults.standard.string(forKey: "activeAWSProfile") ?? ""
         self.activeGCPProfile = UserDefaults.standard.string(forKey: "activeGCPProfile") ?? ""
         self.activeAzureProfile = UserDefaults.standard.string(forKey: "activeAzureProfile") ?? ""
