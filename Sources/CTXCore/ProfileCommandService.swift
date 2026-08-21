@@ -2,9 +2,19 @@ import Foundation
 
 public final class ProfileCommandService: Sendable {
     private let runner: any CloudCommandRunning
+    private let kubectl: any KubectlRunning & KubectlCommandBuilding
+    private let providerEnvironment: @Sendable () -> [String: String]
 
-    public init(runner: any CloudCommandRunning = CloudCommandRunner()) {
+    public init(
+        runner: any CloudCommandRunning = CloudCommandRunner(),
+        kubectl: any KubectlRunning & KubectlCommandBuilding = KubectlRunner(),
+        providerEnvironment: @escaping @Sendable () -> [String: String] = {
+            ProviderCommandEnvironment.overrides()
+        }
+    ) {
         self.runner = runner
+        self.kubectl = kubectl
+        self.providerEnvironment = providerEnvironment
     }
 
     public func activateGCPConfiguration(_ profile: CloudProfile) async -> CommandResult {
@@ -85,24 +95,44 @@ public final class ProfileCommandService: Sendable {
 
     public func logout(_ profile: CloudProfile) async -> CommandResult {
         switch profile.provider {
-        case .aws:
-            return await run(["aws", "sso", "logout", "--profile", profile.name])
-        case .gcp:
-            guard !profile.roleName.isEmpty else {
-                return CommandResult(exitCode: 0, output: "")
-            }
-            return await run(["gcloud", "auth", "revoke", profile.roleName])
-        case .azure:
-            return await run(["az", "logout"])
+        case .aws, .gcp, .azure:
+            return CommandResult(exitCode: 0, output: "")
         case .kubernetes:
             if profile.usesStrongDM {
                 return await run(["sdm", "disconnect", profile.name])
+            }
+            if profile.usesTeleport {
+                return await run(["tsh", "kube", "logout", profile.name])
             }
             return CommandResult(exitCode: 0, output: "")
         }
     }
 
-    public func verify(_ profile: CloudProfile, activeKubeContext: String) async -> CommandResult {
+    public func signOutFromProvider(_ profile: CloudProfile) async -> CommandResult {
+        switch profile.provider {
+        case .aws:
+            return await run(["aws", "sso", "logout"])
+        case .gcp:
+            let account = [profile.roleName, profile.accountID].first { $0.contains("@") }
+            guard let account else {
+                return CommandResult(exitCode: 2, output: "The GCP account is ambiguous.")
+            }
+            return await run([
+                "gcloud", "auth", "revoke", account,
+                "--configuration", profile.name
+            ])
+        case .azure:
+            return await run(["az", "logout"])
+        case .kubernetes:
+            return CommandResult(exitCode: 2, output: "Kubernetes has no global provider sign-out.")
+        }
+    }
+
+    public func verify(
+        _ profile: CloudProfile,
+        activeKubeContext: String,
+        kubeconfigPath: String? = nil
+    ) async -> CommandResult {
         switch profile.provider {
         case .aws:
             return await run([
@@ -111,10 +141,26 @@ public final class ProfileCommandService: Sendable {
                 "--output", "json"
             ])
         case .gcp:
-            return await run([
-                "gcloud", "auth", "print-access-token",
-                "--configuration", profile.name
+            let result = await run([
+                "gcloud", "config", "configurations", "describe", profile.name,
+                "--format=value(properties.core.account)",
+                "--quiet"
             ])
+            guard result.exitCode == 0 else { return result }
+            let account = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let expectedAccount = [profile.roleName, profile.accountID]
+                .first { $0.contains("@") }?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !account.isEmpty, account != "(unset)" else {
+                return CommandResult(exitCode: 1, output: "No account is configured for \(profile.name).")
+            }
+            guard expectedAccount.isEmpty || account.caseInsensitiveCompare(expectedAccount) == .orderedSame else {
+                return CommandResult(
+                    exitCode: 1,
+                    output: "Configuration \(profile.name) is associated with a different account."
+                )
+            }
+            return CommandResult(exitCode: 0, output: "")
         case .azure:
             let target = profile.accountID.isEmpty ? profile.name : profile.accountID
             return await run([
@@ -147,11 +193,11 @@ public final class ProfileCommandService: Sendable {
                 }
             }
 
-            let versionResult = await run([
-                "kubectl", "get", "--raw=/version",
-                "--context", profile.name,
-                "--request-timeout=10s"
-            ])
+            let versionResult = await runKubectl(
+                context: profile.name,
+                kubeconfigPath: kubeconfigPath,
+                arguments: ["get", "--raw=/version", "--request-timeout=10s"]
+            )
             if versionResult.exitCode == 0 {
                 return versionResult
             }
@@ -179,7 +225,12 @@ public final class ProfileCommandService: Sendable {
         timeout: TimeInterval = CloudCommandTimeout.standard,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async -> CommandResult {
-        let result = await runner.run(arguments, timeout: timeout, onOutput: onOutput)
+        let result = await runner.run(
+            arguments,
+            environmentOverrides: providerEnvironment(),
+            timeout: timeout,
+            onOutput: onOutput
+        )
         guard result.exitCode != 0 else { return result }
         return CommandResult(
             exitCode: result.exitCode,
@@ -189,5 +240,31 @@ public final class ProfileCommandService: Sendable {
 
     private func runLogin(_ arguments: [String], onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
         await run(arguments, timeout: CloudCommandTimeout.interactiveLogin, onOutput: onOutput)
+    }
+
+    private func runKubectl(
+        context: String,
+        kubeconfigPath: String?,
+        arguments: [String]
+    ) async -> CommandResult {
+        var commandArguments = arguments
+        var environment = providerEnvironment()
+        if let path = kubeconfigPath?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+            commandArguments.insert(contentsOf: ["--kubeconfig", path], at: 0)
+            environment["KUBECONFIG"] = path
+        }
+
+        do {
+            var command = try kubectl.inspectionCommand(context: context, arguments: commandArguments)
+            command.environmentOverrides = environment
+            let result = try await kubectl.run(command, timeout: 10)
+            let output = result.stdout + result.stderr
+            return CommandResult(
+                exitCode: result.exitCode,
+                output: result.exitCode == 0 ? output : KubernetesDiagnosticClassifier.sanitize(output)
+            )
+        } catch {
+            return CommandResult(exitCode: 127, output: error.localizedDescription)
+        }
     }
 }

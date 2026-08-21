@@ -4,31 +4,62 @@ public struct LocalProfileDiscoveryResult: Sendable {
     public var profiles: [CloudProfile]
     public var kubernetesContexts: [KubernetesContextProfile]
     public var currentKubeContext: String
+    public var currentKubeContextByPath: [String: String]
     public var activeGCPProfile: String
 
     public init(
         profiles: [CloudProfile],
         kubernetesContexts: [KubernetesContextProfile],
         currentKubeContext: String,
+        currentKubeContextByPath: [String: String] = [:],
         activeGCPProfile: String
     ) {
         self.profiles = profiles
         self.kubernetesContexts = kubernetesContexts
         self.currentKubeContext = currentKubeContext
+        self.currentKubeContextByPath = currentKubeContextByPath
         self.activeGCPProfile = activeGCPProfile
     }
 }
 
 public final class LocalProfileDiscoveryService: Sendable {
-    private let awsConfigURL: URL
+    private let awsConfigURL: @Sendable () -> URL
     private let kubeConfigDiscoveryService: KubeConfigDiscoveryService
+    private let gcpConfigurationsDirURL: @Sendable () -> URL
+    private let gcpActiveConfigURL: @Sendable () -> URL
+    private let azureProfilesDirURL: @Sendable () -> URL
 
+    /// The provider directories are supplied as closures, not values, because the
+    /// production defaults follow the overridable paths in Settings and have to be
+    /// re-read on every pass. Passing explicit ones lets a caller (a test, or a
+    /// future scoped workspace) point discovery somewhere else without reaching
+    /// into `UserDefaults.standard`.
     public init(
         awsConfigURL: URL = AWSConfigPaths.configURL,
-        kubeConfigDiscoveryService: KubeConfigDiscoveryService = KubeConfigDiscoveryService()
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService = KubeConfigDiscoveryService(),
+        gcpConfigurationsDirURL: @escaping @Sendable () -> URL = { GCPConfigPaths.configurationsDirURL },
+        gcpActiveConfigURL: @escaping @Sendable () -> URL = { GCPConfigPaths.activeConfigURL },
+        azureProfilesDirURL: @escaping @Sendable () -> URL = { AzureConfigPaths.profilesDirURL }
+    ) {
+        self.awsConfigURL = { awsConfigURL }
+        self.kubeConfigDiscoveryService = kubeConfigDiscoveryService
+        self.gcpConfigurationsDirURL = gcpConfigurationsDirURL
+        self.gcpActiveConfigURL = gcpActiveConfigURL
+        self.azureProfilesDirURL = azureProfilesDirURL
+    }
+
+    public init(
+        awsConfigURL: @escaping @Sendable () -> URL,
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService = KubeConfigDiscoveryService(),
+        gcpConfigurationsDirURL: @escaping @Sendable () -> URL = { GCPConfigPaths.configurationsDirURL },
+        gcpActiveConfigURL: @escaping @Sendable () -> URL = { GCPConfigPaths.activeConfigURL },
+        azureProfilesDirURL: @escaping @Sendable () -> URL = { AzureConfigPaths.profilesDirURL }
     ) {
         self.awsConfigURL = awsConfigURL
         self.kubeConfigDiscoveryService = kubeConfigDiscoveryService
+        self.gcpConfigurationsDirURL = gcpConfigurationsDirURL
+        self.gcpActiveConfigURL = gcpActiveConfigURL
+        self.azureProfilesDirURL = azureProfilesDirURL
     }
 
     public func discover() -> LocalProfileDiscoveryResult {
@@ -51,17 +82,18 @@ public final class LocalProfileDiscoveryService: Sendable {
             profiles: profiles,
             kubernetesContexts: kube.contexts,
             currentKubeContext: kube.currentContext,
-            activeGCPProfile: GCPConfigParser.parseActiveConfig()
+            currentKubeContextByPath: kube.currentContextByPath,
+            activeGCPProfile: GCPConfigParser.parseActiveConfig(at: gcpActiveConfigURL())
         )
     }
 
     private func awsProfiles() -> [CloudProfile] {
-        let text = (try? String(contentsOf: awsConfigURL, encoding: .utf8)) ?? ""
+        let text = (try? String(contentsOf: awsConfigURL(), encoding: .utf8)) ?? ""
         return AWSConfigParser.parse(text).filter { $0.name != "default" }
     }
 
     private func gcpProfiles() -> [CloudProfile] {
-        guard let fileURLs = try? FileManager.default.contentsOfDirectory(at: GCPConfigPaths.configurationsDirURL, includingPropertiesForKeys: nil) else {
+        guard let fileURLs = try? FileManager.default.contentsOfDirectory(at: gcpConfigurationsDirURL(), includingPropertiesForKeys: nil) else {
             return []
         }
 
@@ -75,7 +107,7 @@ public final class LocalProfileDiscoveryService: Sendable {
     }
 
     private func azureProfiles() -> [CloudProfile] {
-        guard let fileURLs = try? FileManager.default.contentsOfDirectory(at: AzureConfigPaths.profilesDirURL, includingPropertiesForKeys: nil) else {
+        guard let fileURLs = try? FileManager.default.contentsOfDirectory(at: azureProfilesDirURL(), includingPropertiesForKeys: nil) else {
             return []
         }
 

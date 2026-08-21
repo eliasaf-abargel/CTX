@@ -7,7 +7,7 @@ import SwiftUI
 struct ChooseFolderPromptView: View {
     @ObservedObject var store: ProfileStore
     let profile: CloudProfile
-    let onDone: () -> Void
+    let origin: ProfilePresentationSurface
 
     private var folders: [CloudFolder] {
         store.allFolders
@@ -20,9 +20,12 @@ struct ChooseFolderPromptView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Choose a Folder")
                     .font(.title2.weight(.semibold))
-                Text("\"\(profile.name)\" was created but isn't in a folder yet. Pick one, or skip for now.")
+                Text("Choose where to place “\(profile.name)”, or skip for now.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -37,13 +40,15 @@ struct ChooseFolderPromptView: View {
                         ForEach(folders) { folder in
                             Button {
                                 store.move(profile, to: folder)
-                                onDone()
+                                store.dismissPresentation(from: origin)
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: folder.icon.systemImage)
                                         .foregroundStyle(Color.accentColor)
                                         .frame(width: 18)
                                     Text(folder.name)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                     Spacer()
                                 }
                                 .padding(.horizontal, 10)
@@ -62,7 +67,7 @@ struct ChooseFolderPromptView: View {
             HStack {
                 Spacer()
                 Button("Skip") {
-                    onDone()
+                    store.dismissPresentation(from: origin)
                 }
                 .buttonStyle(CTXSecondaryButton())
                 .keyboardShortcut(.cancelAction)

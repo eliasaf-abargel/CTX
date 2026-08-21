@@ -3,11 +3,13 @@ import CTXCore
 import SwiftUI
 
 struct SelectProviderView: View {
-    @Binding var sheet: SidebarSheet?
+    @ObservedObject var store: ProfileStore
+    @Environment(\.dismiss) private var dismiss
+    let targetFolder: CloudFolder?
+    let origin: ProfilePresentationSurface
 
     var body: some View {
         VStack(spacing: 16) {
-            // Header
             VStack(spacing: 4) {
                 Text("New Profile")
                     .font(.title3.weight(.bold))
@@ -17,30 +19,25 @@ struct SelectProviderView: View {
             }
             .padding(.top, 4)
 
-            // List of Providers
             VStack(spacing: 8) {
                 providerButton(
                     name: "Amazon Web Services (AWS)",
-                    provider: .aws,
-                    target: .addAWSProfile
+                    provider: .aws
                 )
 
                 providerButton(
                     name: "Google Cloud Platform (GCP)",
-                    provider: .gcp,
-                    target: .addGCPProfile
+                    provider: .gcp
                 )
 
                 providerButton(
                     name: "Microsoft Azure",
-                    provider: .azure,
-                    target: .addAzureProfile
+                    provider: .azure
                 )
 
                 providerButton(
                     name: "Kubernetes (K8s)",
-                    provider: .kubernetes,
-                    target: .addKubeContext
+                    provider: .kubernetes
                 )
             }
             .padding(.top, 4)
@@ -51,7 +48,7 @@ struct SelectProviderView: View {
             HStack {
                 Spacer()
                 Button("Cancel") {
-                    sheet = nil
+                    dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
                 .controlSize(.regular)
@@ -63,11 +60,16 @@ struct SelectProviderView: View {
 
     private func providerButton(
         name: String,
-        provider: CloudProvider,
-        target: SidebarSheet
+        provider: CloudProvider
     ) -> some View {
         Button {
-            sheet = target
+            store.presentProfileEditor(
+                .add(
+                    provider: provider,
+                    targetFolder: targetFolder?.provider == provider ? targetFolder : nil
+                ),
+                from: origin
+            )
         } label: {
             HStack(spacing: 12) {
                 ProviderIcon(
@@ -81,6 +83,9 @@ struct SelectProviderView: View {
                 Text(name)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .layoutPriority(1)
 
                 Spacer()
 
@@ -98,6 +103,6 @@ struct SelectProviderView: View {
             }
         }
         .buttonStyle(.plain)
-        .focusable(false) // Prevents the blue focus ring glitch!
+        .focusable(false)
     }
 }

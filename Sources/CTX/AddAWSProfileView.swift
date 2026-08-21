@@ -17,6 +17,7 @@ extension ProfileEditorMode {
 
 struct AddAWSProfileView: View {
     @ObservedObject var store: ProfileStore
+    let origin: ProfilePresentationSurface
     @Environment(\.dismiss) private var dismiss
     let mode: AWSProfileEditorMode
     let targetFolder: CloudFolder?
@@ -28,8 +29,14 @@ struct AddAWSProfileView: View {
     @State private var defaultRegionSelection = ""
     @State private var customDefaultRegion = ""
 
-    init(store: ProfileStore, mode: AWSProfileEditorMode = .create, targetFolder: CloudFolder? = nil) {
+    init(
+        store: ProfileStore,
+        mode: AWSProfileEditorMode = .create,
+        targetFolder: CloudFolder? = nil,
+        origin: ProfilePresentationSurface = .mainWindow
+    ) {
         self.store = store
+        self.origin = origin
         self.mode = mode
         self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.aWSProfileDraft)
@@ -39,13 +46,13 @@ struct AddAWSProfileView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // Header
             VStack(alignment: .leading, spacing: 4) {
                 Text(mode.title(noun: "AWS Profile"))
                     .font(.title2.weight(.semibold))
-                Text("Configure AWS SSO settings saved to your local ~/.aws/config configuration.")
+                Text("Configure an AWS SSO profile in ~/.aws/config.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             
             Divider()
@@ -162,7 +169,6 @@ struct AddAWSProfileView: View {
 
             ProfileEditorErrorBanner(message: errorMessage)
 
-            // Footer Actions
             ProfileEditorFooter(
                 actionTitle: mode.actionTitle,
                 cancel: { dismiss() },
@@ -172,7 +178,6 @@ struct AddAWSProfileView: View {
         .padding(24)
         .frame(width: 440)
         .onAppear {
-            // SSO Region Initialization
             if draft.ssoRegion.isEmpty {
                 ssoRegionSelection = ""
             } else if AWSRegion.allCases.contains(where: { $0.id == draft.ssoRegion }) {
@@ -182,7 +187,6 @@ struct AddAWSProfileView: View {
                 customSSORegion = draft.ssoRegion
             }
             
-            // Default Region Initialization
             if draft.defaultRegion.isEmpty {
                 defaultRegionSelection = ""
             } else if AWSRegion.allCases.contains(where: { $0.id == draft.defaultRegion }) {
@@ -222,15 +226,13 @@ struct AddAWSProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addAWSProfile(draft, targetFolder: selectedFolder)
+                try store.addAWSProfile(draft, targetFolder: selectedFolder, from: origin)
             case .edit(let profile):
-                try store.updateAWSProfile(profile, draft: draft)
-                if let selectedFolder {
-                    store.move(profile, to: selectedFolder)
-                }
+                try store.updateAWSProfile(profile, draft: draft, targetFolder: selectedFolder, from: origin)
             }
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }
-    }}
+    }
+}

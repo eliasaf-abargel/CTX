@@ -211,7 +211,11 @@ public enum AWSConfigWriter {
         return output.joined(separator: "\n")
     }
 
-    public static func deleteSection(_ sectionName: String, from url: URL) throws {
+    public static func deleteSection(
+        _ sectionName: String,
+        from url: URL,
+        createsBackup: Bool = true
+    ) throws {
         let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         let sectionHeader = "[\(sectionName)]"
         
@@ -233,7 +237,9 @@ public enum AWSConfigWriter {
         }
         
         if found {
-            try backup(url)
+            if createsBackup {
+                try backup(url)
+            }
             let text = output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             try (text + "\n").write(to: url, atomically: true, encoding: .utf8)
         }

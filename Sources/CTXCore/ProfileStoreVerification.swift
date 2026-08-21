@@ -3,25 +3,30 @@ import Foundation
 
 extension ProfileStore {
     @discardableResult
-    public func verify(_ profile: CloudProfile, isManualAttempt: Bool = false) async -> Bool {
+    public func verify(
+        _ profile: CloudProfile,
+        isManualAttempt: Bool = false,
+        operationID: UUID? = nil,
+        from origin: ProfilePresentationSurface = .mainWindow
+    ) async -> Bool {
+        guard canPublishLifecycleState(for: profile.id, operationID: operationID) else { return false }
         let startedAt = Date()
-        let result = await profileCommands.verify(profile, activeKubeContext: activeKubeContext)
+        let result = await profileCommands.verify(
+            profile,
+            activeKubeContext: activeKubeContext,
+            kubeconfigPath: profile.provider == .kubernetes ? kubeconfigPath(for: profile.name) : nil
+        )
+        guard canPublishLifecycleState(for: profile.id, operationID: operationID) else { return false }
         lastCommandDuration = Date().timeIntervalSince(startedAt)
         let step = profile.provider == .kubernetes ? "verify_kubectl" : "app_connect"
         logConnectCall(step: step, kind: profile.provider.rawValue.lowercased(), profileID: profile.id, started: startedAt, outcome: result.exitCode == 0 ? "success" : "failure")
 
         let isConnected = result.exitCode == 0
+        let isManuallyDisconnected = manuallyDisconnectedProfiles.contains(profile.id)
+        let effectiveConnection = isConnected && !isManuallyDisconnected
         let oldStatus = profiles.first(where: { $0.id == profile.id })?.status ?? .unknown
 
-        let activeName: String
-        switch profile.provider {
-        case .aws: activeName = activeAWSProfile
-        case .gcp: activeName = activeGCPProfile
-        case .azure: activeName = activeAzureProfile
-        case .kubernetes: activeName = activeKubeContext
-        }
-
-        if isConnected {
+        if effectiveConnection {
             verificationErrors[profile.id] = nil
             if profile.provider == .aws {
                 if profile.name == activeAWSProfile,
@@ -30,16 +35,12 @@ extension ProfileStore {
                         awsIdentity = identity
                     }
                 }
-                await fetchAndStoreCredentials(for: profile)
             }
 
-            if !manuallyDisconnectedProfiles.contains(profile.id) && activeName.isEmpty {
-                setActive(profile, runActivation: false)
-            }
         }
 
         let newStatus: ProfileStatus
-        if isConnected && (!manuallyDisconnectedProfiles.contains(profile.id) || activeName == profile.name) {
+        if effectiveConnection {
             newStatus = .connected
             verificationErrors[profile.id] = nil
         } else {
@@ -66,11 +67,26 @@ extension ProfileStore {
             }
         }
 
-        updateStatus(profile, status: newStatus)
-        return isConnected
+        updateStatus(profile, status: newStatus, operationID: operationID)
+        if isManualAttempt, operationID == nil, !isConnected, !result.output.isEmpty {
+            report(result.output, title: "Verification Failed", from: origin)
+        }
+        return effectiveConnection
     }
 
-    internal func updateStatus(_ profile: CloudProfile, status: ProfileStatus) {
+    internal func canPublishLifecycleState(for profileID: String, operationID: UUID?) -> Bool {
+        if let operationID {
+            return isCurrentOperation(profileID: profileID, operationID: operationID)
+        }
+        return !hasProfileOperation(profileID: profileID)
+    }
+
+    internal func updateStatus(
+        _ profile: CloudProfile,
+        status: ProfileStatus,
+        operationID: UUID? = nil
+    ) {
+        guard canPublishLifecycleState(for: profile.id, operationID: operationID) else { return }
         guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else {
             return
         }
@@ -177,8 +193,15 @@ extension ProfileStore {
         showExpirationWarning = true
         notifications.sendAWSExpiration(profileName: profileName, expired: expired)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-            self.showExpirationWarning = false
+        expirationWarningTask?.cancel()
+        expirationWarningTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.showExpirationWarning = false
         }
     }
 }

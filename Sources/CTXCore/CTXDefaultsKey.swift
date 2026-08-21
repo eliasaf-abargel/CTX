@@ -1,10 +1,6 @@
 import Foundation
 
-/// The `UserDefaults` keys backing CTX's overridable config-file locations.
-///
-/// The settings UI writes these and the parsers read them, so they lived as
-/// duplicated string literals on both sides — a typo in either place silently
-/// split the pair and the override stopped taking effect.
+/// Shared `UserDefaults` keys used across CTX core and settings.
 public enum CTXDefaultsKey {
     public static let awsConfigPath = "customAWSConfigPath"
     public static let awsCredentialsPath = "customAWSCredentialsPath"
@@ -12,4 +8,5 @@ public enum CTXDefaultsKey {
     public static let azureProfilesDirPath = "customAzureProfilesDirPath"
     public static let azureCLIDirPath = "customAzureCLIDirPath"
     public static let kubeconfigPath = "customKubeconfigPath"
+    public static let manuallyDisconnectedProfileIDs = "manuallyDisconnectedProfileIDs"
 }

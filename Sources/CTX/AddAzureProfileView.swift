@@ -17,6 +17,7 @@ extension ProfileEditorMode {
 
 struct AddAzureProfileView: View {
     @ObservedObject var store: ProfileStore
+    let origin: ProfilePresentationSurface
     @Environment(\.dismiss) private var dismiss
     let mode: AzureProfileEditorMode
     let targetFolder: CloudFolder?
@@ -24,8 +25,14 @@ struct AddAzureProfileView: View {
     @State private var draft: AzureProfileDraft
     @State private var errorMessage = ""
 
-    init(store: ProfileStore, mode: AzureProfileEditorMode = .create, targetFolder: CloudFolder? = nil) {
+    init(
+        store: ProfileStore,
+        mode: AzureProfileEditorMode = .create,
+        targetFolder: CloudFolder? = nil,
+        origin: ProfilePresentationSurface = .mainWindow
+    ) {
         self.store = store
+        self.origin = origin
         self.mode = mode
         self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.azureProfileDraft)
@@ -38,9 +45,10 @@ struct AddAzureProfileView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(mode.title(noun: "Azure Subscription"))
                     .font(.title2.weight(.semibold))
-                Text("Register an Azure subscription so CTX can switch to it with `az account set`.")
+                Text("Register an Azure subscription for quick switching.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -99,12 +107,9 @@ struct AddAzureProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addAzureProfile(draft, targetFolder: selectedFolder)
+                try store.addAzureProfile(draft, targetFolder: selectedFolder, from: origin)
             case .edit(let profile):
-                try store.updateAzureProfile(profile, draft: draft)
-                if let selectedFolder {
-                    store.move(profile, to: selectedFolder)
-                }
+                try store.updateAzureProfile(profile, draft: draft, targetFolder: selectedFolder, from: origin)
             }
             dismiss()
         } catch {

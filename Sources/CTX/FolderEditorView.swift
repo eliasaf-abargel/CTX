@@ -5,12 +5,13 @@ struct FolderEditorView: View {
     @ObservedObject var store: ProfileStore
     @Environment(\.dismiss) private var dismiss
     let folder: CloudFolder?
+    let origin: ProfilePresentationSurface
+    let presentationID: UUID
     
     @State private var name: String
     @State private var provider: CloudProvider
     @State private var icon: CloudFolderIcon
     @State private var errorMessage = ""
-    @State private var showingDeleteAlert = false
 
     private var availableProviders: [CloudProvider] {
         CloudProvider.allCases
@@ -20,9 +21,16 @@ struct FolderEditorView: View {
         [.server, .cube, .tools, .database, .folder]
     }
 
-    init(store: ProfileStore, folder: CloudFolder? = nil) {
+    init(
+        store: ProfileStore,
+        folder: CloudFolder? = nil,
+        origin: ProfilePresentationSurface = .mainWindow,
+        presentationID: UUID
+    ) {
         self.store = store
         self.folder = folder
+        self.origin = origin
+        self.presentationID = presentationID
         self._name = State(initialValue: folder?.name ?? "")
         let initialProvider = folder?.provider ?? .aws
         self._provider = State(initialValue: initialProvider)
@@ -102,12 +110,16 @@ struct FolderEditorView: View {
                     Text(errorMessage)
                         .font(.callout)
                         .foregroundStyle(.red)
+                        .lineLimit(4)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .help(errorMessage)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 16)
             }
@@ -115,7 +127,13 @@ struct FolderEditorView: View {
             HStack {
                 if folder != nil {
                     Button(role: .destructive) {
-                        showingDeleteAlert = true
+                        if let folder {
+                            store.requestFolderDeletionAfterDismissingEditor(
+                                folder,
+                                editorPresentationID: presentationID,
+                                from: origin
+                            )
+                        }
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "trash")
@@ -125,6 +143,7 @@ struct FolderEditorView: View {
                     }
                     .buttonStyle(.plain)
                     .controlSize(.regular)
+                    .accessibilityLabel("Delete folder \(folder?.name ?? "")")
                 }
                 
                 Spacer()
@@ -147,17 +166,6 @@ struct FolderEditorView: View {
         }
         .frame(width: 540)
         .background(.regularMaterial)
-        .alert("Delete Folder?", isPresented: $showingDeleteAlert) {
-            Button("Delete", role: .destructive) {
-                if let folder {
-                    store.deleteFolder(folder)
-                    dismiss()
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to delete this folder? The profiles inside will not be deleted.")
-        }
     }
 
     private func save() {

@@ -23,6 +23,7 @@ jobs:
         uses: jfrog/fly-action@v1
 
       - name: Run Tests
+        timeout-minutes: 20
         run: swift run CTXCoreTests
 
       - name: Build and Package Release
@@ -79,7 +80,7 @@ jobs:
 
             url "https://github.com/eliasaf-abargel/CTX/releases/download/v#{version}/CTX.app.zip"
             name "CTX"
-            desc "Cloud Context Switcher for AWS and GCP"
+            desc "Native cloud and Kubernetes context manager"
             homepage "https://github.com/eliasaf-abargel/CTX"
 
             app "CTX.app"

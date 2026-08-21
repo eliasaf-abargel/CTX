@@ -160,7 +160,7 @@ public struct InAppAuthWebModalView: View {
 
                 // Close Button
                 Button {
-                    onComplete(.success(currentURL ?? url))
+                    onComplete(.failure(CancellationError()))
                     dismiss()
                 } label: {
                     HStack(spacing: 4) {

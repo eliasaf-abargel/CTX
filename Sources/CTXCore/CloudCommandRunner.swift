@@ -11,20 +11,37 @@ public struct CommandResult: Sendable {
 }
 
 public protocol CloudCommandRunning: Sendable {
-    func run(_ arguments: [String]) async -> CommandResult
-    func run(_ arguments: [String], onOutput: (@Sendable (String) -> Void)?) async -> CommandResult
+    /// The one method a conformer has to write, so that `environmentOverrides` —
+    /// which carries the user's configured AWS/gcloud/Azure config locations — can
+    /// never be dropped on the floor. It used to be the other way round: the
+    /// protocol defaulted the environment-aware call to the plain one, so any
+    /// runner (including every test double) silently ran provider CLIs against the
+    /// default config paths and nothing said so.
+    ///
     /// `timeout` bounds how long the subprocess may run before it is terminated.
-    /// Pass `0` for no bound. Test doubles inherit the default below and ignore it.
-    func run(_ arguments: [String], timeout: TimeInterval, onOutput: (@Sendable (String) -> Void)?) async -> CommandResult
+    /// Pass `0` for no bound; test doubles are free to ignore it.
+    func run(
+        _ arguments: [String],
+        environmentOverrides: [String: String],
+        timeout: TimeInterval,
+        onOutput: (@Sendable (String) -> Void)?
+    ) async -> CommandResult
 }
 
+/// Convenience spellings for callers that have nothing to override. Each one
+/// funnels into the single requirement above, so a conformer cannot accidentally
+/// implement one path and leave the environment-aware path behind.
 public extension CloudCommandRunning {
+    func run(_ arguments: [String]) async -> CommandResult {
+        await run(arguments, environmentOverrides: [:], timeout: CloudCommandTimeout.standard, onOutput: nil)
+    }
+
     func run(_ arguments: [String], onOutput: (@Sendable (String) -> Void)?) async -> CommandResult {
-        await run(arguments)
+        await run(arguments, environmentOverrides: [:], timeout: CloudCommandTimeout.standard, onOutput: onOutput)
     }
 
     func run(_ arguments: [String], timeout: TimeInterval, onOutput: (@Sendable (String) -> Void)?) async -> CommandResult {
-        await run(arguments, onOutput: onOutput)
+        await run(arguments, environmentOverrides: [:], timeout: timeout, onOutput: onOutput)
     }
 }
 
@@ -59,6 +76,15 @@ public final class CloudCommandRunner: CloudCommandRunning {
     }
 
     public func run(_ arguments: [String], timeout: TimeInterval, onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
+        await run(arguments, environmentOverrides: [:], timeout: timeout, onOutput: onOutput)
+    }
+
+    public func run(
+        _ arguments: [String],
+        environmentOverrides: [String: String],
+        timeout: TimeInterval,
+        onOutput: (@Sendable (String) -> Void)? = nil
+    ) async -> CommandResult {
         let processBox = ProcessBox()
         let suppressesBrowserLaunch = self.suppressesBrowserLaunch
         return await withTaskCancellationHandler {
@@ -97,7 +123,7 @@ public final class CloudCommandRunner: CloudCommandRunning {
             process.standardOutput = pipe
             process.standardError = pipe
 
-            var environment = ProcessInfo.processInfo.environment
+            var environment = ProcessInfo.processInfo.environment.merging(environmentOverrides) { _, override in override }
             let existingPath = environment["PATH"] ?? ""
             let pathDirs = suppressesBrowserLaunch
                 ? [ensureInterceptorBinDir()] + searchDirs + [existingPath]

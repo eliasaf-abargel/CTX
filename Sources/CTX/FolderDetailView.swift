@@ -5,12 +5,10 @@ import SwiftUI
 struct FolderDetailView: View {
     let folder: CloudFolder
     @ObservedObject var store: ProfileStore
-    @Binding var sheet: SidebarSheet?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                // Header Hero
                 HStack(alignment: .center, spacing: 16) {
                     Image(systemName: folder.icon.systemImage)
                         .font(.system(size: 32))
@@ -28,7 +26,7 @@ struct FolderDetailView: View {
                                 .font(.title2.weight(.semibold))
                             
                             Button {
-                                sheet = .editFolder(folder)
+                                store.presentFolderEditor(.edit(folder), from: .mainWindow)
                             } label: {
                                 Image(systemName: "pencil")
                                     .font(.system(size: 13))
@@ -45,12 +43,10 @@ struct FolderDetailView: View {
                     Spacer()
                     
                     Button {
-                        switch folder.provider {
-                        case .aws: sheet = .addAWSProfile
-                        case .gcp: sheet = .addGCPProfile
-                        case .azure: sheet = .addAzureProfile
-                        case .kubernetes: sheet = .addKubeContext
-                        }
+                        store.presentProfileEditor(
+                            .add(provider: folder.provider, targetFolder: folder),
+                            from: .mainWindow
+                        )
                     } label: {
                         Label(folder.provider == .kubernetes ? "Add Context" : "Add Profile", systemImage: "plus")
                     }
@@ -74,7 +70,7 @@ struct FolderDetailView: View {
                         
                         VStack(spacing: 12) {
                             ForEach(profiles) { profile in
-                                FolderProfileRow(profile: profile, store: store, sheet: $sheet)
+                                FolderProfileRow(profile: profile, store: store)
                             }
                         }
                     }
@@ -90,7 +86,6 @@ struct FolderDetailView: View {
 struct FolderProfileRow: View {
     let profile: CloudProfile
     @ObservedObject var store: ProfileStore
-    @Binding var sheet: SidebarSheet?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -189,25 +184,28 @@ struct FolderProfileRow: View {
                     .disabled(true)
                 } else if profile.status == .connected {
                     Button("Disconnect") {
-                        store.logout(profile)
+                        store.logout(profile, from: .mainWindow)
                     }
                     .buttonStyle(CTXSecondaryButton())
                 } else {
                     Button("Connect") {
-                        store.login(profile)
+                        store.login(profile, from: .mainWindow)
                     }
                     .buttonStyle(CTXPrimaryButton())
                 }
 
                 if !store.isActive(profile) {
                     Button("Activate") {
-                        store.setActive(profile)
+                        store.setActive(profile, from: .mainWindow)
                     }
                     .buttonStyle(CTXSecondaryButton())
                 }
 
                 Button {
-                    sheet = .editProfile(profile)
+                    store.presentProfileEditor(
+                        .edit(profile: profile, targetFolder: store.folder(for: profile)),
+                        from: .mainWindow
+                    )
                 } label: {
                     Image(systemName: "pencil")
                         .font(.system(size: 11))

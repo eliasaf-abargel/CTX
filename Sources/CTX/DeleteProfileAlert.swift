@@ -46,12 +46,12 @@ struct DeleteProfileAlert: ViewModifier {
                     do {
                         try await store.deleteKubeContext(profile)
                     } catch {
-                        store.report(error.localizedDescription)
+                        store.report(error.localizedDescription, from: .mainWindow)
                     }
                 }
             }
         } catch {
-            store.report(error.localizedDescription)
+            store.report(error.localizedDescription, from: .mainWindow)
         }
     }
 

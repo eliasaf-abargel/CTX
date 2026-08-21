@@ -25,5 +25,6 @@ struct SettingsView: View {
         // against a window with no background of its own, which is what made it
         // — and the open panel run over it — see-through.
         .background(Color(NSColor.windowBackgroundColor).ignoresSafeArea())
+        .profileLifecyclePresentationHost(store: store, surface: .settings)
     }
 }

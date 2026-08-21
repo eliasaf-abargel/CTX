@@ -4,7 +4,6 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: ProfileStore
-    @State private var sheet: SidebarSheet?
     @AppStorage(AppAppearance.storageKey) private var appAppearanceRaw: String = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
@@ -14,117 +13,22 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(
-                store: store,
-                sheet: $sheet
-            )
+            SidebarView(store: store)
             .background(colorScheme == .light ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color.black.opacity(0.25))
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 280)
         } detail: {
-            DetailPane(store: store, sheet: $sheet)
+            DetailPane(store: store)
                 .background(colorScheme == .light ? Color(NSColor.windowBackgroundColor) : Color(white: 0.12).opacity(0.65))
         }
         .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
         .ctxChromelessWindow()
         .preferredColorScheme(currentAppearance.colorScheme)
-        .sheet(item: $sheet) { sheet in
-            switch sheet {
-            case .selectProvider:
-                SelectProviderView(sheet: $sheet)
-            case .addAWSProfile:
-                AddAWSProfileView(
-                    store: store,
-                    targetFolder: store.selectedFolder?.provider == .aws ? store.selectedFolder : nil
-                )
-            case .addGCPProfile:
-                AddGCPProfileView(
-                    store: store,
-                    targetFolder: store.selectedFolder?.provider == .gcp ? store.selectedFolder : nil
-                )
-            case .addAzureProfile:
-                AddAzureProfileView(
-                    store: store,
-                    targetFolder: store.selectedFolder?.provider == .azure ? store.selectedFolder : nil
-                )
-            case .addKubeContext:
-                AddKubeContextView(
-                    store: store,
-                    targetFolder: store.selectedFolder?.provider == .kubernetes ? store.selectedFolder : nil
-                )
-            case .editProfile(let profile):
-                switch profile.provider {
-                case .aws: AddAWSProfileView(store: store, mode: .edit(profile))
-                case .gcp: AddGCPProfileView(store: store, mode: .edit(profile))
-                case .azure: AddAzureProfileView(store: store, mode: .edit(profile))
-                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile))
-                }
-            case .duplicateProfile(let profile):
-                switch profile.provider {
-                case .aws: AddAWSProfileView(store: store, mode: .duplicate(profile), targetFolder: store.folder(for: profile))
-                case .gcp: AddGCPProfileView(store: store, mode: .duplicate(profile), targetFolder: store.folder(for: profile))
-                case .azure: AddAzureProfileView(store: store, mode: .duplicate(profile), targetFolder: store.folder(for: profile))
-                case .kubernetes: AddKubeContextView(store: store, mode: .edit(profile), targetFolder: store.folder(for: profile))
-                }
-            case .addFolder:
-                FolderEditorView(store: store)
-            case .editFolder(let folder):
-                FolderEditorView(store: store, folder: folder)
-            }
-        }
-        .sheet(item: $store.missingCLITool) { request in
-            MissingCLIToolSheet(store: store, request: request)
-        }
-        .sheet(item: $store.pendingFolderPrompt) { profile in
-            ChooseFolderPromptView(store: store, profile: profile) {
-                store.pendingFolderPrompt = nil
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { store.activeInAppAuthURL != nil },
-            set: {
-                if !$0 {
-                    store.activeInAppAuthURL = nil
-                    store.activeInAppAuthEmail = nil
-                }
-            }
-        )) {
-            if let authURL = store.activeInAppAuthURL {
-                InAppAuthWebModalView(url: authURL, userEmail: store.activeInAppAuthEmail) { _ in
-                    store.activeInAppAuthURL = nil
-                    store.activeInAppAuthEmail = nil
-                }
-            }
-        }
-        .alert(
-            "Connection Failed",
-            isPresented: Binding(
-                get: { store.connectionErrorMessage != nil },
-                set: { if !$0 { store.connectionErrorMessage = nil } }
-            ),
-            presenting: store.connectionErrorMessage
-        ) { _ in
-            Button("OK", role: .cancel) {}
-        } message: { error in
-            Text(error)
-        }
-        .onChange(of: store.triggerSheet) { _, newValue in
-            if let newValue {
-                switch newValue {
-                case .addAWSProfile: sheet = .addAWSProfile
-                case .addGCPProfile: sheet = .addGCPProfile
-                case .addAzureProfile: sheet = .addAzureProfile
-                case .addKubeContext: sheet = .addKubeContext
-                }
-                store.triggerSheet = nil
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
+        .profileLifecyclePresentationHost(store: store, surface: .mainWindow)
     }
 }
 
 struct DetailPane: View {
     @ObservedObject var store: ProfileStore
-    @Binding var sheet: SidebarSheet?
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
 
     private var activeToolbarProfiles: [CloudProfile] {
@@ -209,10 +113,10 @@ struct DetailPane: View {
 
             // Main content flows BELOW the banners — never covered
             if let profile = store.selectedProfile {
-                ProfileDetailView(profile: profile, store: store, sheet: $sheet)
+                ProfileDetailView(profile: profile, store: store)
                     .navigationTitle(profile.name)
             } else if let folder = store.selectedFolder {
-                FolderDetailView(folder: folder, store: store, sheet: $sheet)
+                FolderDetailView(folder: folder, store: store)
                     .navigationTitle(folder.name)
             } else {
                 WelcomeView()
@@ -367,7 +271,7 @@ private struct ActiveConnectionRow: View {
             .help("Navigate to profile details")
 
             Button {
-                store.logout(profile)
+                store.logout(profile, from: .mainWindow)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 12))
@@ -375,6 +279,7 @@ private struct ActiveConnectionRow: View {
             }
             .buttonStyle(.plain)
             .help("Disconnect active profile")
+            .accessibilityLabel("Disconnect \(profile.name) from CTX")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

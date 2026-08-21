@@ -66,7 +66,10 @@ public enum GCPConfigParser {
     }
 
     public static func parseActiveConfig() -> String {
-        let url = GCPConfigPaths.activeConfigURL
+        parseActiveConfig(at: GCPConfigPaths.activeConfigURL)
+    }
+
+    public static func parseActiveConfig(at url: URL) -> String {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
             return ""
         }

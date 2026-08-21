@@ -71,10 +71,18 @@ struct ProvidersSettingsView: View {
 
             Section {
                 Menu {
-                    Button("AWS Profile…") { store.triggerSheet = .addAWSProfile }
-                    Button("Google Cloud Config…") { store.triggerSheet = .addGCPProfile }
-                    Button("Azure Subscription…") { store.triggerSheet = .addAzureProfile }
-                    Button("Kubernetes Context…") { store.triggerSheet = .addKubeContext }
+                    Button("AWS Profile…") {
+                        store.presentProfileEditor(.add(provider: .aws, targetFolder: nil), from: .settings)
+                    }
+                    Button("Google Cloud Config…") {
+                        store.presentProfileEditor(.add(provider: .gcp, targetFolder: nil), from: .settings)
+                    }
+                    Button("Azure Subscription…") {
+                        store.presentProfileEditor(.add(provider: .azure, targetFolder: nil), from: .settings)
+                    }
+                    Button("Kubernetes Context…") {
+                        store.presentProfileEditor(.add(provider: .kubernetes, targetFolder: nil), from: .settings)
+                    }
                 } label: {
                     Label("Connect another provider…", systemImage: "plus")
                 }
@@ -84,14 +92,12 @@ struct ProvidersSettingsView: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        // The parsers read these keys on demand, so a changed path only reaches
-        // the profile list once the store re-reads the files.
-        .onChange(of: awsConfigPath) { _, _ in store.refresh() }
-        .onChange(of: awsCredentialsPath) { _, _ in store.refresh() }
-        .onChange(of: gcpConfigDirPath) { _, _ in store.refresh() }
-        .onChange(of: azureProfilesDirPath) { _, _ in store.refresh() }
-        .onChange(of: azureCLIDirPath) { _, _ in store.refresh() }
-        .onChange(of: kubeconfigPath) { _, _ in store.refresh() }
+        .onChange(of: awsConfigPath) { _, _ in store.reloadConfiguredSources() }
+        .onChange(of: awsCredentialsPath) { _, _ in store.reloadConfiguredSources() }
+        .onChange(of: gcpConfigDirPath) { _, _ in store.reloadConfiguredSources() }
+        .onChange(of: azureProfilesDirPath) { _, _ in store.reloadConfiguredSources() }
+        .onChange(of: azureCLIDirPath) { _, _ in store.reloadConfiguredSources() }
+        .onChange(of: kubeconfigPath) { _, _ in store.reloadConfiguredSources() }
     }
 
     private func providerHeader(

@@ -17,12 +17,16 @@ struct ProfileEditorErrorBanner: View {
                 Text(message)
                     .font(.callout)
                     .foregroundStyle(.red)
+                    .lineLimit(4)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            .help(message)
         }
     }
 }
@@ -30,8 +34,6 @@ struct ProfileEditorErrorBanner: View {
 struct ProfileEditorFooter: View {
     let actionTitle: String
     var isBusy = false
-    /// The Kubernetes editor is the only one that can be incomplete enough to block
-    /// saving; the rest pass `false`.
     var isConfirmDisabled = false
     let cancel: () -> Void
     let confirm: () -> Void

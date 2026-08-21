@@ -9,10 +9,12 @@ import SwiftUI
 struct MissingCLIToolSheet: View {
     @ObservedObject var store: ProfileStore
     let request: MissingCLIToolRequest
+    let origin: ProfilePresentationSurface
 
     @State private var phase: Phase = .idle
     @State private var progressLine = ""
     @State private var copied = false
+    @State private var installTask: Task<Void, Never>?
 
     private enum Phase: Equatable {
         case idle, installing, installed
@@ -73,15 +75,16 @@ struct MissingCLIToolSheet: View {
 
             HStack(spacing: 8) {
                 Spacer()
-                Button(phase == .installed ? "Close" : "Not Now") { store.missingCLITool = nil }
+                Button(phase == .installed ? "Close" : "Not Now") {
+                    installTask?.cancel()
+                    store.dismissPresentation(from: origin)
+                }
                     .buttonStyle(CTXSecondaryButton())
                     .keyboardShortcut(.cancelAction)
 
                 if phase == .installed {
                     Button("Connect") {
-                        let profile = request.profile
-                        store.missingCLITool = nil
-                        store.login(profile)
+                        store.retryMissingCLI(request, from: origin)
                     }
                     .buttonStyle(CTXPrimaryButton())
                 } else if canBrewInstall {
@@ -96,6 +99,9 @@ struct MissingCLIToolSheet: View {
         }
         .padding(18)
         .frame(width: 420)
+        .onDisappear {
+            installTask?.cancel()
+        }
     }
 
     private var subtitle: String {
@@ -122,7 +128,8 @@ struct MissingCLIToolSheet: View {
         guard let command = tool.installCommand else { return }
         phase = .installing
         progressLine = ""
-        Task {
+        installTask?.cancel()
+        installTask = Task { @MainActor in
             // Homebrew builds can take minutes; the runner's default bound would
             // kill a perfectly healthy install. The SSO browser suppression is off
             // because a cask install legitimately runs `open` on the package it
@@ -138,9 +145,11 @@ struct MissingCLIToolSheet: View {
                     }
                 }
             )
+            guard !Task.isCancelled else { return }
             phase = result.exitCode == 0
                 ? .installed
                 : .failed(result.output.split(whereSeparator: \.isNewline).suffix(3).joined(separator: "\n"))
+            installTask = nil
         }
     }
 }

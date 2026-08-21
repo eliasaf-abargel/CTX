@@ -8,7 +8,8 @@ public enum KubernetesProfileAdapter {
             accountID: context.clusterName,
             roleName: context.userName,
             region: context.namespace,
-            token: context.token
+            kubernetesCredentialKind: context.credentialKind,
+            hasKubernetesCredentials: context.hasCredentials
         )
     }
 }

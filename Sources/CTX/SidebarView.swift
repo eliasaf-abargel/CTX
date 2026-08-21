@@ -1,44 +1,8 @@
 import CTXCore
 import SwiftUI
 
-enum SidebarSheet: Identifiable {
-    case selectProvider
-    case addAWSProfile
-    case addGCPProfile
-    case addAzureProfile
-    case addKubeContext
-    case editProfile(CloudProfile)
-    case duplicateProfile(CloudProfile)
-    case addFolder
-    case editFolder(CloudFolder)
-
-    var id: String {
-        switch self {
-        case .selectProvider:
-            "selectProvider"
-        case .addAWSProfile:
-            "addAWSProfile"
-        case .addGCPProfile:
-            "addGCPProfile"
-        case .addAzureProfile:
-            "addAzureProfile"
-        case .addKubeContext:
-            "addKubeContext"
-        case .editProfile(let profile):
-            "editProfile:\(profile.id)"
-        case .duplicateProfile(let profile):
-            "duplicateProfile:\(profile.id)"
-        case .addFolder:
-            "addFolder"
-        case .editFolder(let folder):
-            "editFolder:\(folder.id)"
-        }
-    }
-}
-
 struct SidebarView: View {
     @ObservedObject var store: ProfileStore
-    @Binding var sheet: SidebarSheet?
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
     @State private var expandedGroups: Set<String> = []
     @State private var deleteCandidate: CloudProfile? = nil
@@ -87,11 +51,14 @@ struct SidebarView: View {
                                 group: group,
                                 selectedSelection: $store.selectedSelection,
                                 isExpanded: binding(for: group.id),
-                                sheet: $sheet,
                                 deleteCandidate: $deleteCandidate,
                                 store: store,
-                                editFolder: { sheet = .editFolder($0) },
-                                deleteFolder: { store.deleteFolder($0) }
+                                editFolder: {
+                                    store.presentFolderEditor(.edit($0), from: .mainWindow)
+                                },
+                                deleteFolder: {
+                                    store.requestFolderDeletion($0, from: .mainWindow)
+                                }
                             )
                             .tag(SidebarSelection.folder(group.folder.id))
                         }
@@ -177,7 +144,7 @@ struct SidebarView: View {
                     }
 
                     Button {
-                        sheet = .addFolder
+                        store.presentFolderEditor(.add, from: .mainWindow)
                     } label: {
                         Label("New Folder", systemImage: "folder")
                     }
@@ -219,7 +186,12 @@ struct SidebarView: View {
     }
 
     private func openNewProfile() {
-        sheet = .selectProvider
+        let targetFolder: CloudFolder? = if case .folder(let folderID) = store.selectedSelection {
+            store.allFolders.first { $0.id == folderID }
+        } else {
+            nil
+        }
+        store.presentProfileEditor(.selectProvider(targetFolder: targetFolder), from: .mainWindow)
     }
 
 }
@@ -228,7 +200,6 @@ struct ProfileDisclosureGroup: View {
     let group: ProfileGroup
     @Binding var selectedSelection: SidebarSelection?
     @Binding var isExpanded: Bool
-    @Binding var sheet: SidebarSheet?
     @Binding var deleteCandidate: CloudProfile?
     @ObservedObject var store: ProfileStore
     let editFolder: (CloudFolder) -> Void

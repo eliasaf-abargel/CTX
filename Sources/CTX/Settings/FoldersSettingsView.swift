@@ -3,7 +3,6 @@ import SwiftUI
 
 struct FoldersSettingsView: View {
     @ObservedObject var store: ProfileStore
-    @State private var editingFolder: CloudFolder?
 
     var body: some View {
         Form {
@@ -20,7 +19,7 @@ struct FoldersSettingsView: View {
                         Spacer()
 
                         Button {
-                            editingFolder = folder
+                            store.presentFolderEditor(.edit(folder), from: .settings)
                         } label: {
                             Image(systemName: "pencil")
                         }
@@ -30,7 +29,7 @@ struct FoldersSettingsView: View {
                         .accessibilityLabel("Edit folder \(folder.name)")
 
                         Button {
-                            store.deleteFolder(folder)
+                            store.requestFolderDeletion(folder, from: .settings)
                         } label: {
                             Image(systemName: "trash")
                                 .foregroundStyle(.red)
@@ -57,8 +56,5 @@ struct FoldersSettingsView: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .sheet(item: $editingFolder) { folder in
-            FolderEditorView(store: store, folder: folder)
-        }
     }
 }

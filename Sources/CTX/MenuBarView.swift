@@ -197,6 +197,15 @@ struct MenuBarView: View {
             store.verifyAllProfiles()
             store.checkForUpdates()
         }
+        .onChange(of: store.presentation?.id) { _, _ in
+            guard let presentation = store.presentation,
+                  presentation.requestedOrigin == .menuBar,
+                  presentation.origin == .mainWindow else {
+                return
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "main")
+        }
     }
 
     private var header: some View {
@@ -272,9 +281,9 @@ struct MenuBarView: View {
             get: { store.isActive(profile) },
             set: { isOn in
                 if isOn {
-                    store.login(profile)
+                    store.login(profile, from: .menuBar)
                 } else if store.isActive(profile) {
-                    store.logout(profile)
+                    store.logout(profile, from: .menuBar)
                 }
             }
         )

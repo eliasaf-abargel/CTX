@@ -17,6 +17,7 @@ extension ProfileEditorMode {
 
 struct AddGCPProfileView: View {
     @ObservedObject var store: ProfileStore
+    let origin: ProfilePresentationSurface
     @Environment(\.dismiss) private var dismiss
     let mode: GCPProfileEditorMode
     let targetFolder: CloudFolder?
@@ -24,8 +25,14 @@ struct AddGCPProfileView: View {
     @State private var draft: GCPProfileDraft
     @State private var errorMessage = ""
 
-    init(store: ProfileStore, mode: GCPProfileEditorMode = .create, targetFolder: CloudFolder? = nil) {
+    init(
+        store: ProfileStore,
+        mode: GCPProfileEditorMode = .create,
+        targetFolder: CloudFolder? = nil,
+        origin: ProfilePresentationSurface = .mainWindow
+    ) {
         self.store = store
+        self.origin = origin
         self.mode = mode
         self.targetFolder = targetFolder
         self._draft = State(initialValue: mode.gCPProfileDraft)
@@ -35,13 +42,13 @@ struct AddGCPProfileView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // Header
             VStack(alignment: .leading, spacing: 4) {
                 Text(mode.title(noun: "GCP Configuration"))
                     .font(.title2.weight(.semibold))
-                Text("Configure GCP settings saved to your local gcloud configuration file config_\(draft.name.isEmpty ? "<name>" : draft.name).")
+                Text("Configure a local gcloud profile.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             
             Divider()
@@ -79,7 +86,6 @@ struct AddGCPProfileView: View {
 
             ProfileEditorErrorBanner(message: errorMessage)
 
-            // Footer Actions
             ProfileEditorFooter(
                 actionTitle: mode.actionTitle,
                 cancel: { dismiss() },
@@ -101,12 +107,9 @@ struct AddGCPProfileView: View {
         do {
             switch mode {
             case .create, .duplicate:
-                try store.addGCPProfile(draft, targetFolder: selectedFolder)
+                try store.addGCPProfile(draft, targetFolder: selectedFolder, from: origin)
             case .edit(let profile):
-                try store.updateGCPProfile(profile, draft: draft)
-                if let selectedFolder {
-                    store.move(profile, to: selectedFolder)
-                }
+                try store.updateGCPProfile(profile, draft: draft, targetFolder: selectedFolder, from: origin)
             }
             dismiss()
         } catch {

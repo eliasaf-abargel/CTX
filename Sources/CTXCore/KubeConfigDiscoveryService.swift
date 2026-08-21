@@ -3,15 +3,18 @@ import Foundation
 public struct KubeConfigDiscoveryResult: Sendable {
     public var contexts: [KubernetesContextProfile]
     public var currentContext: String
+    public var currentContextByPath: [String: String]
     public var errors: [KubeConfigDiscoveryError]
 
     public init(
         contexts: [KubernetesContextProfile],
         currentContext: String = "",
+        currentContextByPath: [String: String] = [:],
         errors: [KubeConfigDiscoveryError] = []
     ) {
         self.contexts = contexts
         self.currentContext = currentContext
+        self.currentContextByPath = currentContextByPath
         self.errors = errors
     }
 }
@@ -46,6 +49,7 @@ public final class KubeConfigDiscoveryService: Sendable {
         var contextsByName: [String: KubernetesContextProfile] = [:]
         var errors: [KubeConfigDiscoveryError] = []
         var firstCurrentContext = ""
+        var currentContextByPath: [String: String] = [:]
 
         for url in deduplicated(paths) {
             guard FileManager.default.fileExists(atPath: url.path) else {
@@ -57,6 +61,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                 if firstCurrentContext.isEmpty {
                     firstCurrentContext = parsed.currentContext
                 }
+                currentContextByPath[url.path] = parsed.currentContext
                 for context in parsed.contexts {
                     if contextsByName[context.contextName] == nil {
                         contextsByName[context.contextName] = context
@@ -77,6 +82,7 @@ public final class KubeConfigDiscoveryService: Sendable {
         return KubeConfigDiscoveryResult(
             contexts: contexts,
             currentContext: firstCurrentContext,
+            currentContextByPath: currentContextByPath,
             errors: errors
         )
     }
@@ -98,8 +104,8 @@ public final class KubeConfigDiscoveryService: Sendable {
     private func parse(_ text: String, path: String) -> KubeConfigDiscoveryResult {
         var currentContext = ""
         var contexts: [String: KubeContextRecord] = [:]
-        var clusters: [String: String] = [:]
-        var users: [String: String] = [:]
+        var clusters: [String: KubeClusterRecord] = [:]
+        var users: [String: KubeCredentialMetadata] = [:]
 
         var section = ""
         var currentContextName = ""
@@ -108,8 +114,10 @@ public final class KubeConfigDiscoveryService: Sendable {
         var currentNamespace = ""
         var currentClusterName = ""
         var currentServer = ""
+        var currentSkipTLSVerification = false
         var currentUserName = ""
-        var currentUserToken = ""
+        var currentCredentialKind: KubernetesCredentialKind = .none
+        var currentUserHasCredentials = false
 
         func commitContext() {
             guard !currentContextName.isEmpty else { return }
@@ -127,16 +135,24 @@ public final class KubeConfigDiscoveryService: Sendable {
 
         func commitCluster() {
             guard !currentClusterName.isEmpty else { return }
-            clusters[currentClusterName] = currentServer
+            clusters[currentClusterName] = KubeClusterRecord(
+                server: currentServer,
+                skipTLSVerification: currentSkipTLSVerification
+            )
             currentClusterName = ""
             currentServer = ""
+            currentSkipTLSVerification = false
         }
 
         func commitUser() {
             guard !currentUserName.isEmpty else { return }
-            users[currentUserName] = currentUserToken
+            users[currentUserName] = KubeCredentialMetadata(
+                kind: currentCredentialKind,
+                isPresent: currentUserHasCredentials
+            )
             currentUserName = ""
-            currentUserToken = ""
+            currentCredentialKind = .none
+            currentUserHasCredentials = false
         }
 
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
@@ -213,6 +229,11 @@ public final class KubeConfigDiscoveryService: Sendable {
                     currentClusterName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("server:") {
                     currentServer = value(after: "server:", in: trimmed)
+                } else if trimmed.hasPrefix("insecure-skip-tls-verify:") {
+                    currentSkipTLSVerification = value(
+                        after: "insecure-skip-tls-verify:",
+                        in: trimmed
+                    ).lowercased() == "true"
                 }
             case "users":
                 if trimmed.hasPrefix("- name:") {
@@ -222,7 +243,24 @@ public final class KubeConfigDiscoveryService: Sendable {
                     commitUser()
                     currentUserName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("token:") {
-                    currentUserToken = value(after: "token:", in: trimmed)
+                    currentCredentialKind = .bearerToken
+                    currentUserHasCredentials = !value(after: "token:", in: trimmed).isEmpty
+                } else if trimmed.hasPrefix("tokenFile:") || trimmed.hasPrefix("token-file:") {
+                    currentCredentialKind = .tokenFile
+                    currentUserHasCredentials = true
+                } else if trimmed.hasPrefix("exec:") || trimmed.hasPrefix("command:") {
+                    currentCredentialKind = .execPlugin
+                    currentUserHasCredentials = true
+                } else if trimmed.hasPrefix("client-certificate")
+                    || trimmed.hasPrefix("client-key") {
+                    currentCredentialKind = .clientCertificate
+                    currentUserHasCredentials = true
+                } else if trimmed.hasPrefix("username:") || trimmed.hasPrefix("password:") {
+                    currentCredentialKind = .basicAuth
+                    currentUserHasCredentials = true
+                } else if trimmed.hasPrefix("auth-provider:") {
+                    currentCredentialKind = .authProvider
+                    currentUserHasCredentials = true
                 }
             default:
                 continue
@@ -234,13 +272,15 @@ public final class KubeConfigDiscoveryService: Sendable {
         commitUser()
 
         let profiles = contexts.values.map { record in
-            let server = clusters[record.cluster] ?? ""
+            let cluster = clusters[record.cluster] ?? KubeClusterRecord()
+            let server = cluster.server
             let environment = EnvironmentDetector.detect(contextName: record.name, clusterName: record.cluster)
             let provider = KubernetesProviderDetector.detect(
                 contextName: record.name,
                 clusterName: record.cluster,
                 serverURL: server
             )
+            let credential = users[record.user] ?? KubeCredentialMetadata()
             return KubernetesContextProfile(
                 contextName: record.name,
                 clusterName: record.cluster,
@@ -251,11 +291,17 @@ public final class KubeConfigDiscoveryService: Sendable {
                 environmentDetection: environment,
                 isCurrent: record.name == currentContext,
                 clusterMetadata: ClusterMetadata(id: record.cluster.isEmpty ? record.name : record.cluster, name: record.cluster, serverURL: server),
-                token: users[record.user] ?? ""
+                credentialKind: credential.kind,
+                hasCredentials: credential.isPresent,
+                skipTLSVerification: cluster.skipTLSVerification
             )
         }
 
-        return KubeConfigDiscoveryResult(contexts: profiles, currentContext: currentContext)
+        return KubeConfigDiscoveryResult(
+            contexts: profiles,
+            currentContext: currentContext,
+            currentContextByPath: [path: currentContext]
+        )
     }
 
     private func deduplicated(_ urls: [URL]) -> [URL] {
@@ -285,4 +331,14 @@ private struct KubeContextRecord {
     var cluster: String
     var user: String
     var namespace: String
+}
+
+private struct KubeCredentialMetadata {
+    var kind: KubernetesCredentialKind = .none
+    var isPresent = false
+}
+
+private struct KubeClusterRecord {
+    var server = ""
+    var skipTLSVerification = false
 }

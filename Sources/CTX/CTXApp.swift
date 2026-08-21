@@ -47,12 +47,12 @@ struct CTXApp: App {
 
                 if let profile = store.selectedProfile {
                     Button("Connect Selected Profile") {
-                        store.login(profile)
+                        store.login(profile, from: .mainWindow)
                     }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
 
                     Button("Verify Selected Profile") {
-                        Task { await store.verify(profile, isManualAttempt: true) }
+                        Task { await store.verify(profile, isManualAttempt: true, from: .mainWindow) }
                     }
                     .keyboardShortcut("v", modifiers: [.command, .shift])
                 }

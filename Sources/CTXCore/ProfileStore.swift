@@ -1,19 +1,17 @@
 import Combine
 import Foundation
-#if canImport(AppKit)
-import AppKit
-#endif
 
-public enum ActiveSheetType: String, Sendable {
-    case addAWSProfile
-    case addGCPProfile
-    case addAzureProfile
-    case addKubeContext
+private final class SendableUserDefaults: @unchecked Sendable {
+    let value: UserDefaults
+
+    init(_ value: UserDefaults) {
+        self.value = value
+    }
 }
 
 @MainActor
 public final class ProfileStore: ObservableObject {
-    @Published public var triggerSheet: ActiveSheetType? = nil
+    @Published public internal(set) var presentation: ProfilePresentation?
     @Published public internal(set) var profiles: [CloudProfile] = [] {
         didSet { rebuildGroupedProfiles() }
     }
@@ -40,16 +38,7 @@ public final class ProfileStore: ObservableObject {
         didSet { rebuildFolders() }
     }
     @Published public var showExpirationWarning = false
-    @Published public var connectionErrorMessage: String? = nil
     @Published public var verificationErrors: [String: String] = [:]
-    /// Set right after a profile/context is created outside of any folder context
-    /// (e.g. via the sidebar's global "+" button) so the UI can ask which folder it
-    /// belongs in, instead of silently leaving it in the generic default folder.
-    @Published public var activeInAppAuthURL: URL? = nil
-    /// Set when a connect is blocked because the provider's CLI isn't on the Mac.
-    @Published public var missingCLITool: MissingCLIToolRequest? = nil
-    @Published public var activeInAppAuthEmail: String? = nil
-    @Published public var pendingFolderPrompt: CloudProfile? = nil
     @Published public var expirationWarningMessage = ""
     @Published public var updateAvailable = false
     @Published public var latestVersionString = ""
@@ -61,6 +50,7 @@ public final class ProfileStore: ObservableObject {
     @Published public internal(set) var awsIdentity = ""
     /// Expiry of the active AWS SSO session, used for the live countdown in the toolbar.
     @Published public internal(set) var activeAWSExpiresAt: Date?
+    @Published public internal(set) var availableAWSRoles: [String: [String]] = [:]
 
     internal let configURL: URL
     internal let runner: any CloudCommandRunning
@@ -76,6 +66,9 @@ public final class ProfileStore: ObservableObject {
     internal let fileWatchers: ProfileFileWatcherService
     internal let folderPreferences: CloudFolderPreferencesStore
     internal let missingCLIToolResolver: MissingCLIToolResolving
+    /// Where the active-profile selections are remembered. Injectable so a test can
+    /// run against a scratch suite instead of the user's real preferences.
+    internal let defaults: UserDefaults
     internal var manuallyDisconnectedProfiles: Set<String> = []
     internal var lastExpirationWarningTime: Date?
     internal var expirationTimer: AnyCancellable?
@@ -83,9 +76,14 @@ public final class ProfileStore: ObservableObject {
     internal var isCheckingSessionExpiration = false
     internal var verificationTask: Task<Void, Never>?
     internal var pendingVerificationRequest = false
-    internal var gcpManuallyClearedByUser = false
     internal var refreshDebounceTask: Task<Void, Never>?
     internal var gcpActiveConfigDebounceTask: Task<Void, Never>?
+    internal var expirationWarningTask: Task<Void, Never>?
+    internal var profileOperations: [String: ProfileLifecycleOperation] = [:]
+    internal var pendingKubeContextActivation: KubeContextActivationIntent?
+    internal var deferredPresentation: DeferredProfilePresentation?
+    internal let brokerPollDelay: @Sendable () async throws -> Void
+    internal let backgroundServicesEnabled: Bool
 
     @Published public internal(set) var allFolders: [CloudFolder] = []
     @Published public internal(set) var groupedProfiles: [ProfileGroup] = []
@@ -96,7 +94,8 @@ public final class ProfileStore: ObservableObject {
         configURL: URL = AWSConfigPaths.configURL,
         runner: any CloudCommandRunning = CloudCommandRunner(),
         kubeConfigMutations: KubeConfigMutationService? = nil,
-        kubeConfigDiscoveryService: KubeConfigDiscoveryService = KubeConfigDiscoveryService(),
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService? = nil,
+        localProfileDiscovery: LocalProfileDiscoveryService? = nil,
         profileCommands: ProfileCommandService? = nil,
         updateService: CTXUpdateService? = nil,
         awsSessionExpirations: AWSSessionExpirationService = AWSSessionExpirationService(),
@@ -106,27 +105,75 @@ public final class ProfileStore: ObservableObject {
         fileWatchers: ProfileFileWatcherService = ProfileFileWatcherService(),
         folderPreferences: CloudFolderPreferencesStore = CloudFolderPreferencesStore(),
         missingCLIToolResolver: @escaping MissingCLIToolResolving = { CLITool.firstMissing(for: $0) },
+        brokerPollDelay: @escaping @Sendable () async throws -> Void = {
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+        },
+        defaults: UserDefaults = .standard,
         startsBackgroundServices: Bool = true
     ) {
+        let sendableDefaults = SendableUserDefaults(defaults)
+        let resolvedKubeDiscovery = kubeConfigDiscoveryService ?? KubeConfigDiscoveryService(
+            customPath: {
+                sendableDefaults.value.string(forKey: CTXDefaultsKey.kubeconfigPath)
+            }
+        )
+        let providerEnvironment: @Sendable () -> [String: String] = {
+            ProviderCommandEnvironment.overrides(defaults: sendableDefaults.value)
+        }
         self.configURL = configURL
         self.runner = runner
-        self.kubeConfigMutations = kubeConfigMutations ?? KubeConfigMutationService(runner: runner)
-        self.kubeConfigDiscoveryService = kubeConfigDiscoveryService
-        self.localProfileDiscovery = LocalProfileDiscoveryService(awsConfigURL: configURL, kubeConfigDiscoveryService: kubeConfigDiscoveryService)
-        self.profileCommands = profileCommands ?? ProfileCommandService(runner: runner)
+        self.kubeConfigMutations = kubeConfigMutations ?? KubeConfigMutationService(
+            providerEnvironment: providerEnvironment
+        )
+        self.kubeConfigDiscoveryService = resolvedKubeDiscovery
+        self.localProfileDiscovery = localProfileDiscovery
+            ?? LocalProfileDiscoveryService(
+                awsConfigURL: {
+                    Self.configuredURL(
+                        defaultsKey: CTXDefaultsKey.awsConfigPath,
+                        fallback: configURL,
+                        defaults: sendableDefaults.value
+                    )
+                },
+                kubeConfigDiscoveryService: resolvedKubeDiscovery
+            )
+        self.profileCommands = profileCommands ?? ProfileCommandService(
+            runner: runner,
+            providerEnvironment: providerEnvironment
+        )
         self.updateService = updateService ?? CTXUpdateService(runner: runner)
         self.awsSessionExpirations = awsSessionExpirations
         self.notifications = notifications
-        self.awsCredentials = awsCredentials ?? AWSCredentialService(configURL: configURL)
+        self.awsCredentials = awsCredentials ?? AWSCredentialService(
+            configURLProvider: {
+                Self.configuredURL(
+                    defaultsKey: CTXDefaultsKey.awsConfigPath,
+                    fallback: configURL,
+                    defaults: sendableDefaults.value
+                )
+            },
+            credentialsURLProvider: {
+                Self.configuredURL(
+                    defaultsKey: CTXDefaultsKey.awsCredentialsPath,
+                    fallback: AWSConfigPaths.credentialsURL,
+                    defaults: sendableDefaults.value
+                )
+            }
+        )
         self.profilePersistence = profilePersistence ?? CloudProfilePersistenceService(awsConfigURL: configURL)
         self.fileWatchers = fileWatchers
         self.folderPreferences = folderPreferences
         self.missingCLIToolResolver = missingCLIToolResolver
-        self.activeAWSProfile = UserDefaults.standard.string(forKey: "activeAWSProfile") ?? ""
-        self.activeGCPProfile = UserDefaults.standard.string(forKey: "activeGCPProfile") ?? ""
-        self.activeAzureProfile = UserDefaults.standard.string(forKey: "activeAzureProfile") ?? ""
-        self.activeKubeContext = UserDefaults.standard.string(forKey: "activeKubeContext") ?? ""
-        self.gcpManuallyClearedByUser = UserDefaults.standard.bool(forKey: "gcpManuallyClearedByUser")
+        self.brokerPollDelay = brokerPollDelay
+        self.backgroundServicesEnabled = startsBackgroundServices
+        self.defaults = defaults
+        self.manuallyDisconnectedProfiles = Set(
+            defaults.stringArray(forKey: CTXDefaultsKey.manuallyDisconnectedProfileIDs) ?? []
+        )
+        self.activeAWSProfile = defaults.string(forKey: "activeAWSProfile") ?? ""
+        self.activeGCPProfile = defaults.string(forKey: "activeGCPProfile") ?? ""
+        self.activeAzureProfile = defaults.string(forKey: "activeAzureProfile") ?? ""
+        self.activeKubeContext = defaults.string(forKey: "activeKubeContext") ?? ""
         let folderState = folderPreferences.load()
         self.customFolders = folderState.customFolders
         self.folderCustomizations = folderState.folderCustomizations
@@ -165,259 +212,23 @@ public final class ProfileStore: ObservableObject {
         return nil
     }
 
+    nonisolated static func configuredURL(
+        defaultsKey: String,
+        fallback: URL,
+        defaults: UserDefaults
+    ) -> URL {
+        guard let path = defaults.string(forKey: defaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !path.isEmpty else {
+            return fallback
+        }
+        return URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
+    }
+
     public var selectedFolder: CloudFolder? {
         if case .folder(let folderID) = selectedSelection {
             return allFolders.first { $0.id == folderID }
         }
         return nil
-    }
-
-    public func activeProfile(for provider: CloudProvider) -> CloudProfile? {
-        let name: String
-        switch provider {
-        case .aws: name = activeAWSProfile
-        case .gcp: name = activeGCPProfile
-        case .azure: name = activeAzureProfile
-        case .kubernetes: name = activeKubeContext
-        }
-
-        if !name.isEmpty, let p = profiles.first(where: { $0.provider == provider && $0.name == name }), p.status == .connected {
-            return p
-        }
-        return profiles.first(where: { $0.provider == provider && $0.status == .connected })
-    }
-
-    public func isActive(_ profile: CloudProfile) -> Bool {
-        if let active = activeProfile(for: profile.provider) {
-            return active.id == profile.id
-        }
-        switch profile.provider {
-        case .aws:
-            return activeAWSProfile == profile.name
-        case .gcp:
-            return activeGCPProfile == profile.name
-        case .azure:
-            return activeAzureProfile == profile.name
-        case .kubernetes:
-            return activeKubeContext == profile.name
-        }
-    }
-
-    public func setActive(_ profile: CloudProfile) {
-        setActive(profile, runActivation: true)
-    }
-
-    internal func setActive(_ profile: CloudProfile, runActivation: Bool) {
-        if case .profile(let pId) = selectedSelection, pId == profile.id {
-            // Already selected
-        } else {
-            selectedSelection = .profile(profile.id)
-        }
-        switch profile.provider {
-        case .aws:
-            let wasActive = activeAWSProfile == profile.name
-            if !wasActive {
-                activeAWSProfile = profile.name
-                UserDefaults.standard.set(profile.name, forKey: "activeAWSProfile")
-                lastMessage = "Active AWS_PROFILE=\(profile.name)"
-            }
-
-            if wasActive && profile.status == .connected {
-                checkAllSessionsExpiration()
-                return
-            }
-
-            Task { [weak self] in
-                guard let self else { return }
-                do {
-                    try self.awsCredentials.syncDefaultProfile(from: profile.name)
-                } catch {
-                    await MainActor.run {
-                        self.lastMessage = "Failed to sync default credentials: \(error.localizedDescription)"
-                    }
-                }
-                await MainActor.run {
-                    self.checkAllSessionsExpiration()
-                }
-            }
-        case .gcp:
-            let wasActive = activeGCPProfile == profile.name
-            if !wasActive {
-                activeGCPProfile = profile.name
-                UserDefaults.standard.set(profile.name, forKey: "activeGCPProfile")
-                lastMessage = "Active GCP configuration=\(profile.name)"
-            }
-            gcpManuallyClearedByUser = false
-            UserDefaults.standard.set(false, forKey: "gcpManuallyClearedByUser")
-            guard runActivation else { return }
-            if wasActive && profile.status == .connected { return }
-
-            Task {
-                let startedAt = Date()
-                let result = await profileCommands.activateGCPConfiguration(profile)
-                lastCommandDuration = Date().timeIntervalSince(startedAt)
-                if result.exitCode == 0 {
-                    lastMessage = "Activated GCP configuration \(profile.name)"
-                } else {
-                    lastMessage = "Failed to activate GCP configuration: \(result.output)"
-                }
-                await verify(profile)
-            }
-        case .azure:
-            let wasActive = activeAzureProfile == profile.name
-            if !wasActive {
-                activeAzureProfile = profile.name
-                UserDefaults.standard.set(profile.name, forKey: "activeAzureProfile")
-                lastMessage = "Active Azure subscription=\(profile.name)"
-            }
-            guard runActivation else { return }
-            if wasActive && profile.status == .connected { return }
-
-            Task {
-                let startedAt = Date()
-                let result = await profileCommands.activateAzureSubscription(profile)
-                lastCommandDuration = Date().timeIntervalSince(startedAt)
-                if result.exitCode == 0 {
-                    lastMessage = "Activated Azure subscription \(profile.name)"
-                } else {
-                    lastMessage = "Failed to activate Azure subscription: \(result.output)"
-                }
-                await verify(profile)
-            }
-        case .kubernetes:
-            let wasActive = activeKubeContext == profile.name
-            if !wasActive {
-                activeKubeContext = profile.name
-                UserDefaults.standard.set(profile.name, forKey: "activeKubeContext")
-                lastMessage = "Active kube context=\(profile.name)"
-            }
-            guard runActivation else { return }
-            if wasActive && profile.status == .connected { return }
-
-            Task {
-                let startedAt = Date()
-                let result = await kubeConfigMutations.useContext(profile.name, kubeconfigPath: kubeconfigPath(for: profile.name))
-                lastCommandDuration = Date().timeIntervalSince(startedAt)
-                if result.exitCode == 0 {
-                    lastMessage = "Switched kube context to \(profile.name)"
-                } else {
-                    lastMessage = "Failed to switch context: \(result.output)"
-                }
-                verifyAllProfiles()
-            }
-        }
-    }
-
-    public func clearActive(for provider: CloudProvider) {
-        switch provider {
-        case .aws:
-            activeAWSProfile = ""
-            UserDefaults.standard.removeObject(forKey: "activeAWSProfile")
-            awsIdentity = ""
-            activeAWSExpiresAt = nil
-            lastMessage = "No active AWS profile"
-            do {
-                try awsCredentials.clearDefaultProfile()
-            } catch {
-                // Ignore clearing errors
-            }
-        case .gcp:
-            gcpManuallyClearedByUser = true
-            UserDefaults.standard.set(true, forKey: "gcpManuallyClearedByUser")
-            activeGCPProfile = ""
-            UserDefaults.standard.removeObject(forKey: "activeGCPProfile")
-            lastMessage = "No active GCP configuration"
-        case .azure:
-            activeAzureProfile = ""
-            UserDefaults.standard.removeObject(forKey: "activeAzureProfile")
-            lastMessage = "No active Azure subscription"
-        case .kubernetes:
-            activeKubeContext = ""
-            UserDefaults.standard.removeObject(forKey: "activeKubeContext")
-            lastMessage = "No active kube context"
-        }
-        showExpirationWarning = false
-    }
-
-    public func clearActive() {
-        clearActive(for: .aws)
-    }
-
-    public func report(_ message: String) {
-        lastMessage = message
-    }
-
-    // MARK: - Active identity
-
-    public var activeIdentityLabel: String {
-        if !activeGCPProfile.isEmpty,
-           let gcp = profiles.first(where: { $0.provider == .gcp && $0.name == activeGCPProfile }),
-           !gcp.roleName.isEmpty {
-            return gcp.roleName
-        }
-        if !awsIdentity.isEmpty {
-            return awsIdentity
-        }
-        if !activeAWSProfile.isEmpty,
-           let aws = profiles.first(where: { $0.provider == .aws && $0.name == activeAWSProfile }) {
-            return aws.accountID.isEmpty ? aws.name : "\(aws.name) · \(aws.accountID)"
-        }
-        let fullName = NSFullUserName()
-        return fullName.isEmpty ? NSUserName() : fullName
-    }
-
-    public var activeIdentityInitials: String {
-        let label = activeIdentityLabel
-        let base = label.contains("@") ? String(label.split(separator: "@").first ?? "") : label
-        let parts = base
-            .split(whereSeparator: { $0 == "." || $0 == " " || $0 == "-" || $0 == "_" })
-            .filter { !$0.isEmpty }
-        if parts.count >= 2 {
-            return (parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
-        }
-        return String(base.prefix(2)).uppercased()
-    }
-
-    public var hasActiveConnectedProfile: Bool {
-        profiles.contains { profile in
-            isActive(profile) && profile.status == .connected
-        }
-    }
-
-    public var isCloudIdentityActive: Bool {
-        if !activeAWSProfile.isEmpty,
-           let aws = profiles.first(where: { $0.provider == .aws && $0.name == activeAWSProfile }),
-           aws.status == .connected {
-            return true
-        }
-        if !activeGCPProfile.isEmpty,
-           let gcp = profiles.first(where: { $0.provider == .gcp && $0.name == activeGCPProfile }),
-           gcp.status == .connected {
-            return true
-        }
-        if !activeAzureProfile.isEmpty,
-           let azure = profiles.first(where: { $0.provider == .azure && $0.name == activeAzureProfile }),
-           azure.status == .connected {
-            return true
-        }
-        if !activeKubeContext.isEmpty,
-           let kube = profiles.first(where: { $0.provider == .kubernetes && $0.name == activeKubeContext }),
-           kube.status == .connected {
-            return true
-        }
-        return false
-    }
-
-    public var activeIdentityStatusLabel: String {
-        var connectedLabels: [String] = []
-        if activeProfile(for: .aws) != nil { connectedLabels.append("AWS") }
-        if activeProfile(for: .gcp) != nil { connectedLabels.append("GCP") }
-        if activeProfile(for: .azure) != nil { connectedLabels.append("Azure") }
-        if activeProfile(for: .kubernetes) != nil { connectedLabels.append("K8s") }
-
-        if !connectedLabels.isEmpty {
-            return connectedLabels.joined(separator: " · ") + " Connected"
-        }
-        return "Local User"
     }
 }

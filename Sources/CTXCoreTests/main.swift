@@ -114,6 +114,65 @@ func testKubeConfigDiscoverySingleFile() throws {
     assert(result.contexts[0].isCurrent)
 }
 
+func testKubernetesBearerTokensNeverEnterSharedProfileState() throws {
+    let sentinel = "CTX_SENTINEL_BEARER_SECRET_7f34"
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-secret-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let path = dir.appendingPathComponent("config")
+    try """
+    apiVersion: v1
+    clusters:
+    - name: secure-cluster
+      cluster:
+        server: https://secure.example.com
+    contexts:
+    - name: secure-context
+      context:
+        cluster: secure-cluster
+        user: secure-user
+    current-context: secure-context
+    users:
+    - name: secure-user
+      user:
+        token: \(sentinel)
+    """.write(to: path, atomically: true, encoding: .utf8)
+
+    let result = KubeConfigDiscoveryService(environment: { [:] }, customPath: { nil })
+        .discover(paths: [path])
+    guard let context = result.contexts.first else {
+        assertionFailure("expected the secure context to be discovered")
+        return
+    }
+    assert(context.credentialKind == .bearerToken)
+    assert(context.hasCredentials)
+    assert(!String(reflecting: context).contains(sentinel))
+
+    let cloudProfile = KubernetesProfileAdapter.cloudProfile(from: context)
+    assert(cloudProfile.kubernetesCredentialKind == .bearerToken)
+    assert(cloudProfile.hasKubernetesCredentials)
+    assert(!String(reflecting: cloudProfile).contains(sentinel))
+
+    let contextJSON = String(decoding: try JSONEncoder().encode(context), as: UTF8.self)
+    let cloudJSON = String(decoding: try JSONEncoder().encode(cloudProfile), as: UTF8.self)
+    assert(!contextJSON.contains(sentinel))
+    assert(!cloudJSON.contains(sentinel))
+    assert(!contextJSON.contains("\"token\""))
+    assert(!cloudJSON.contains("\"token\""))
+
+    let legacyCloudJSON = """
+    {"provider":"Kubernetes","name":"legacy-context","token":"\(sentinel)"}
+    """
+    let decodedLegacy = try JSONDecoder().decode(CloudProfile.self, from: Data(legacyCloudJSON.utf8))
+    let reencodedLegacy = String(decoding: try JSONEncoder().encode(decodedLegacy), as: UTF8.self)
+    assert(decodedLegacy.kubernetesCredentialKind == .bearerToken)
+    assert(decodedLegacy.hasKubernetesCredentials)
+    assert(!String(reflecting: decodedLegacy).contains(sentinel))
+    assert(!reencodedLegacy.contains(sentinel))
+    assert(!reencodedLegacy.contains("\"token\""))
+}
+
 func testKubeConfigDiscoveryHandlesNameAfterNestedClusterOrContextKey() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-name-after-nested-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -741,9 +800,12 @@ func testResourceRefreshCoordinatorCancelDropsInFlightRequest() async {
     // Wait for the fetch to genuinely be in-flight (reader invoked and parked)
     // before cancelling — a fixed sleep here would race actor/thread-pool
     // scheduling and could pass or fail depending on machine load.
-    while await reader.callCount == 0 {
-        await Task.yield()
+    let deadline = ContinuousClock.now + .seconds(1)
+    while await reader.callCount == 0, ContinuousClock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(1))
     }
+    let callCount = await reader.callCount
+    precondition(callCount > 0, "Timed out waiting for the resource read to start")
     await coordinator.cancel(contextID: context.id, namespace: .namespace("old-namespace"))
     await reader.release()
     _ = await task.value
@@ -1411,22 +1473,58 @@ func testInspectionYAMLAvailabilityMatrix() {
 }
 
 func testKubeConfigMutationServiceAddsContextWithDefaults() async throws {
-    let runner = RecordingCloudRunner()
-    let service = KubeConfigMutationService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
 
-    try await service.addContext(name: "dev", server: "https://127.0.0.1:6443", cluster: "", user: "", namespace: "apps", token: "demo-token")
+    try await service.addContext(name: "dev", server: "https://127.0.0.1:6443", cluster: "", user: "", namespace: "apps", credential: .bearerToken("demo-token"))
 
-    let commands = await runner.allCommands()
+    let commands = kubectl.commands.map(\.arguments)
     assert(commands == [
-        ["kubectl", "config", "set-cluster", "dev-cluster", "--server=https://127.0.0.1:6443", "--insecure-skip-tls-verify=true"],
-        ["kubectl", "config", "set-credentials", "dev-user", "--token=demo-token"],
-        ["kubectl", "config", "set-context", "dev", "--cluster=dev-cluster", "--user=dev-user", "--namespace=apps"]
+        ["config", "set-cluster", "dev-cluster", "--server=https://127.0.0.1:6443", "--insecure-skip-tls-verify=false"],
+        ["config", "set-credentials", "dev-user", "--token=demo-token"],
+        ["config", "set-context", "dev", "--cluster=dev-cluster", "--user=dev-user", "--namespace=apps"]
     ])
 }
 
+func testKubeConfigMutationServiceRequiresExplicitInsecureTLS() async throws {
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    try await service.addContext(
+        name: "self-signed",
+        server: "https://cluster.example.com",
+        cluster: "self-signed-cluster",
+        user: "",
+        namespace: "",
+        credential: .bearerToken(nil),
+        skipTLSVerification: true
+    )
+
+    assert(kubectl.commands.first?.arguments.contains("--insecure-skip-tls-verify=true") == true)
+}
+
+func testKubeConfigMutationServiceNamespaceEditPreservesTLSPolicy() async throws {
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    try await service.updateContext(
+        oldName: "secure",
+        newName: "secure",
+        server: "https://cluster.example.com",
+        cluster: "secure-cluster",
+        user: "secure-user",
+        namespace: "new-namespace",
+        credentialUpdate: .preserveExisting
+    )
+
+    let clusterCommand = kubectl.commands.first { $0.arguments.contains("set-cluster") }
+    assert(clusterCommand != nil)
+    assert(clusterCommand?.arguments.contains(where: { $0.hasPrefix("--insecure-skip-tls-verify") }) == false)
+}
+
 func testKubeConfigMutationServiceTargetsGivenKubeconfigPath() async throws {
-    let runner = RecordingCloudRunner()
-    let service = KubeConfigMutationService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
 
     // A caller scoped to a non-default kubeconfig (Settings > custom path, or a
     // multi-file KUBECONFIG) must have every mutation explicitly targeted at that
@@ -1438,17 +1536,44 @@ func testKubeConfigMutationServiceTargetsGivenKubeconfigPath() async throws {
         cluster: "",
         user: "",
         namespace: "apps",
-        token: "demo-token",
+        credential: .bearerToken("demo-token"),
         kubeconfigPath: "/tmp/custom-kubeconfig"
     )
 
-    let commands = await runner.allCommands()
-    assert(commands.allSatisfy { $0.count > 2 && $0[1] == "--kubeconfig" && $0[2] == "/tmp/custom-kubeconfig" }, "every kubectl call must be scoped to the caller's kubeconfig path")
+    assert(kubectl.commands.allSatisfy {
+        Array($0.arguments.prefix(2)) == ["--kubeconfig", "/tmp/custom-kubeconfig"]
+            && $0.environmentOverrides["KUBECONFIG"] == "/tmp/custom-kubeconfig"
+    }, "every kubectl call must be scoped to the caller's kubeconfig path")
+}
+
+func testKubeConfigMutationServiceDuplicatesOnlyTheContextRecord() async throws {
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    try await service.duplicateContext(
+        sourceName: " source ",
+        newName: " source-copy ",
+        cluster: "shared-cluster",
+        user: "shared-user",
+        namespace: "apps",
+        kubeconfigPath: "/tmp/team-kubeconfig"
+    )
+
+    let commands = kubectl.commands.map(\.arguments)
+    assert(commands == [[
+        "--kubeconfig", "/tmp/team-kubeconfig",
+        "config", "set-context", "source-copy",
+        "--cluster=shared-cluster",
+        "--user=shared-user",
+        "--namespace=apps"
+    ]])
+    let forbiddenMutations = ["rename-context", "set-cluster", "set-credentials", "delete-context", "unset"]
+    assert(commands.flatMap { $0 }.allSatisfy { !forbiddenMutations.contains($0) })
 }
 
 func testKubeConfigMutationServiceAddsEKSExecCredential() async throws {
-    let runner = RecordingCloudRunner()
-    let service = KubeConfigMutationService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
 
     try await service.addContext(
         name: "example-eks",
@@ -1459,11 +1584,11 @@ func testKubeConfigMutationServiceAddsEKSExecCredential() async throws {
         credential: .awsEKS(region: "us-east-1", profile: "ops-admin")
     )
 
-    let commands = await runner.allCommands()
+    let commands = kubectl.commands.map(\.arguments)
     assert(commands == [
-        ["kubectl", "config", "set-cluster", "example-eks", "--server=https://example.us-east-1.eks.amazonaws.com", "--insecure-skip-tls-verify=true"],
+        ["config", "set-cluster", "example-eks", "--server=https://example.us-east-1.eks.amazonaws.com", "--insecure-skip-tls-verify=false"],
         [
-            "kubectl", "config", "set-credentials", "example-eks-user",
+            "config", "set-credentials", "example-eks-user",
             "--exec-command=aws",
             "--exec-api-version=client.authentication.k8s.io/v1beta1",
             "--exec-interactive-mode=Never",
@@ -1476,13 +1601,13 @@ func testKubeConfigMutationServiceAddsEKSExecCredential() async throws {
             "--exec-arg=--profile",
             "--exec-arg=ops-admin"
         ],
-        ["kubectl", "config", "set-context", "example-eks", "--cluster=example-eks", "--user=example-eks-user", "--namespace=default"]
+        ["config", "set-context", "example-eks", "--cluster=example-eks", "--user=example-eks-user", "--namespace=default"]
     ])
 }
 
 func testKubeConfigMutationServiceAddsInternalProxyWithoutUser() async throws {
-    let runner = RecordingCloudRunner()
-    let service = KubeConfigMutationService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
 
     try await service.addContext(
         name: "internal-prod",
@@ -1493,31 +1618,320 @@ func testKubeConfigMutationServiceAddsInternalProxyWithoutUser() async throws {
         credential: .internalProxy
     )
 
-    let commands = await runner.allCommands()
+    let commands = kubectl.commands.map(\.arguments)
     assert(commands == [
-        ["kubectl", "config", "set-cluster", "internal-prod", "--server=https://127.0.0.1:8443", "--insecure-skip-tls-verify=true"],
-        ["kubectl", "config", "set-context", "internal-prod", "--cluster=internal-prod", "--namespace=default"]
+        ["config", "set-cluster", "internal-prod", "--server=https://127.0.0.1:8443", "--insecure-skip-tls-verify=false"],
+        ["config", "set-context", "internal-prod", "--cluster=internal-prod", "--namespace=default"]
     ])
 }
 
 func testKubeConfigMutationServiceUpdateClearsNamespaceWhenEmpty() async throws {
-    let runner = RecordingCloudRunner()
-    let service = KubeConfigMutationService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
 
-    try await service.updateContext(oldName: "old", newName: "new", server: "http://127.0.0.1:8080", cluster: "cluster-a", user: "user-a", namespace: "", token: nil)
+    try await service.updateContext(oldName: "old", newName: "new", server: "http://127.0.0.1:8080", cluster: "cluster-a", user: "user-a", namespace: "", credentialUpdate: .preserveExisting)
 
-    let commands = await runner.allCommands()
+    let commands = kubectl.commands.map(\.arguments)
     assert(commands == [
-        ["kubectl", "config", "rename-context", "old", "new"],
-        ["kubectl", "config", "set-cluster", "cluster-a", "--server=http://127.0.0.1:8080"],
-        ["kubectl", "config", "set-context", "new", "--cluster=cluster-a", "--user=user-a", "--namespace="]
+        ["config", "rename-context", "old", "new"],
+        ["config", "set-cluster", "cluster-a", "--server=http://127.0.0.1:8080"],
+        ["config", "set-context", "new", "--cluster=cluster-a", "--user=user-a", "--namespace="]
     ])
 }
 
+func testKubeConfigMutationServicePreservesCredentialsUnlessExplicitlyReplaced() async throws {
+    let sentinel = "CTX_SENTINEL_REPLACEMENT_TOKEN_91c2"
+    let preservingKubectl = ScriptedKubectl()
+    let preservingService = KubeConfigMutationService(kubectl: preservingKubectl)
+
+    try await preservingService.updateContext(
+        oldName: "secure",
+        newName: "secure",
+        server: "https://secure.example.com",
+        cluster: "secure-cluster",
+        user: "secure-user",
+        namespace: "apps",
+        credentialUpdate: .preserveExisting
+    )
+
+    assert(!preservingKubectl.commands.contains { $0.arguments.contains("set-credentials") })
+    assert(!preservingKubectl.commands.contains { $0.arguments.contains("unset") })
+    assert(!preservingKubectl.commands.description.contains(sentinel))
+
+    let replacingKubectl = ScriptedKubectl()
+    let replacingService = KubeConfigMutationService(kubectl: replacingKubectl)
+    try await replacingService.updateContext(
+        oldName: "secure",
+        newName: "secure",
+        server: "https://secure.example.com",
+        cluster: "secure-cluster",
+        user: "secure-user",
+        namespace: "apps",
+        credentialUpdate: .replace(.bearerToken(sentinel))
+    )
+
+    let credentialCommands = replacingKubectl.commands.filter { $0.arguments.contains("set-credentials") }
+    assert(credentialCommands.count == 1)
+    assert(credentialCommands[0].arguments == [
+        "config", "set-credentials", "secure-user", "--token=\(sentinel)"
+    ])
+}
+
+/// CTX never reads a stored credential, so the editor has to state intent instead
+/// of diffing values: adding a token to a context that has none and replacing the
+/// token on a context that has one are different acts. The edit form used to
+/// collapse both into a "Replace existing bearer token" toggle it only rendered
+/// when a credential already existed — a context with none could never be given
+/// one from the UI.
+func testKubeContextEditorAllowsAddingATokenWhenThereIsNoCredential() {
+    assert(KubeContextBearerTokenIntent.showsTokenField(hasExistingCredential: false, isReplacementRequested: false))
+    assert(!KubeContextBearerTokenIntent.showsTokenField(hasExistingCredential: true, isReplacementRequested: false))
+    assert(KubeContextBearerTokenIntent.showsTokenField(hasExistingCredential: true, isReplacementRequested: true))
+
+    let sentinel = "CTX_SENTINEL_EDITOR_TOKEN_4f7a"
+    assert(KubeContextBearerTokenIntent.credentialUpdate(
+        hasExistingCredential: false,
+        isReplacementRequested: false,
+        token: "  \(sentinel)  "
+    ) == .replace(.bearerToken(sentinel)))
+
+    // Nothing typed is not an instruction to change anything — including for a
+    // context that has no credential, where the rest of the edit must still save.
+    assert(KubeContextBearerTokenIntent.credentialUpdate(
+        hasExistingCredential: false,
+        isReplacementRequested: false,
+        token: "   "
+    ) == .preserveExisting)
+    assert(KubeContextBearerTokenIntent.credentialUpdate(
+        hasExistingCredential: true,
+        isReplacementRequested: true,
+        token: ""
+    ) == .preserveExisting)
+
+    assert(KubeContextBearerTokenIntent.credentialUpdate(
+        hasExistingCredential: true,
+        isReplacementRequested: true,
+        token: sentinel
+    ) == .replace(.bearerToken(sentinel)))
+
+    // A token typed and then abandoned by switching the toggle back off is not a
+    // replacement request.
+    assert(KubeContextBearerTokenIntent.credentialUpdate(
+        hasExistingCredential: true,
+        isReplacementRequested: false,
+        token: sentinel
+    ) == .preserveExisting)
+}
+
+/// A replacement must never begin by erasing what it is replacing. Unsetting the
+/// user first meant a failed write left the context with no credential at all —
+/// and, because a duplicated context points at the same user entry as its source,
+/// took the source's credential down with it. Cleanup of the field the previous
+/// auth method left behind happens only once the new one is on disk.
+func testKubeConfigMutationServiceReplacesCredentialsWithoutErasingFirst() async throws {
+    let sentinel = "CTX_SENTINEL_REPLACEMENT_TOKEN_91c2"
+    let kubectl = ScriptedKubectl()
+    kubectl.outputForCommand = { command in
+        command.arguments.contains("view")
+            ? .success(#"{"users":[{"name":"shared-user","user":{"exec":{"command":"aws"}}}]}"#)
+            : nil
+    }
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    try await service.updateContext(
+        oldName: "secure",
+        newName: "secure",
+        server: "https://secure.example.com",
+        cluster: "secure-cluster",
+        user: "shared-user",
+        namespace: "apps",
+        credentialUpdate: .replace(.bearerToken(sentinel))
+    )
+
+    let commands = kubectl.commands.map(\.arguments)
+    assert(!commands.contains(["config", "unset", "users.shared-user"]), "the user entry must never be deleted wholesale")
+
+    guard let writeIndex = commands.firstIndex(where: { $0.contains("set-credentials") }),
+          let contextIndex = commands.firstIndex(where: { $0.contains("set-context") }),
+          let cleanupIndex = commands.firstIndex(where: { $0.contains("unset") })
+    else {
+        assertionFailure("expected a write, a context update and a cleanup, got \(commands)")
+        return
+    }
+    assert(commands[writeIndex] == ["config", "set-credentials", "shared-user", "--token=\(sentinel)"])
+    assert(commands[cleanupIndex] == ["config", "unset", "users.shared-user.exec"])
+    assert(writeIndex < cleanupIndex, "the stale field was cleared before the replacement was on disk")
+    assert(contextIndex < cleanupIndex, "cleanup must be last, so failing it cannot half-apply the edit")
+
+    // Nothing to clean up means nothing is touched beyond the replacement itself.
+    let cleanKubectl = ScriptedKubectl()
+    cleanKubectl.outputForCommand = { command in
+        command.arguments.contains("view") ? .success("") : nil
+    }
+    try await KubeConfigMutationService(kubectl: cleanKubectl).updateContext(
+        oldName: "secure",
+        newName: "secure",
+        server: "https://secure.example.com",
+        cluster: "secure-cluster",
+        user: "shared-user",
+        namespace: "apps",
+        credentialUpdate: .replace(.bearerToken(sentinel))
+    )
+    assert(!cleanKubectl.commands.contains { $0.arguments.contains("unset") })
+}
+
+func testKubeConfigMutationServiceKeepsCredentialsWhenTheReplacementWriteFails() async {
+    let sentinel = "CTX_SENTINEL_REPLACEMENT_TOKEN_91c2"
+    let kubectl = ScriptedKubectl()
+    kubectl.outputForCommand = { command in
+        command.arguments.contains("set-credentials") ? .failure(stderr: "forbidden") : nil
+    }
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    do {
+        try await service.updateContext(
+            oldName: "secure",
+            newName: "secure",
+            server: "https://secure.example.com",
+            cluster: "secure-cluster",
+            user: "shared-user",
+            namespace: "apps",
+            credentialUpdate: .replace(.bearerToken(sentinel))
+        )
+        assertionFailure("expected the failed credential write to surface")
+    } catch {
+        assert(error.localizedDescription.contains("Failed to update credentials"))
+        assert(!error.localizedDescription.contains(sentinel))
+    }
+
+    let commands = kubectl.commands.map(\.arguments)
+    assert(!commands.contains { $0.contains("unset") }, "a failed replacement must leave the existing credential in place")
+    assert(commands.filter { $0.contains("set-credentials") }.count == 1)
+}
+
+/// A static token shadows an exec plugin — client-go skips the plugin whenever an
+/// Authorization header is already supplied — so switching a user to EKS has to
+/// clear the token it is replacing. That happens in the same `set-credentials`
+/// write, which is either applied whole or not at all.
+func testKubeConfigMutationServiceReplacesEKSCredentialInASingleWrite() async throws {
+    let kubectl = ScriptedKubectl()
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    try await service.updateContext(
+        oldName: "example-eks",
+        newName: "example-eks",
+        server: "https://example.us-east-1.eks.amazonaws.com",
+        cluster: "example-eks",
+        user: "example-eks-user",
+        namespace: "default",
+        credentialUpdate: .replace(.awsEKS(region: "us-east-1", profile: "ops-admin"))
+    )
+
+    let credentialCommands = kubectl.commands.map(\.arguments).filter { $0.contains("set-credentials") }
+    assert(credentialCommands.count == 1)
+    assert(credentialCommands[0] == [
+        "config", "set-credentials", "example-eks-user",
+        "--token=",
+        "--exec-command=aws",
+        "--exec-api-version=client.authentication.k8s.io/v1beta1",
+        "--exec-interactive-mode=Never",
+        "--exec-arg=eks",
+        "--exec-arg=get-token",
+        "--exec-arg=--cluster-name",
+        "--exec-arg=example-eks",
+        "--exec-arg=--region",
+        "--exec-arg=us-east-1",
+        "--exec-arg=--profile",
+        "--exec-arg=ops-admin"
+    ])
+    assert(!kubectl.commands.contains { $0.arguments.contains("unset") })
+}
+
+func testKubeConfigMutationServiceReportsAStaleFieldItCouldNotClear() async {
+    let sentinel = "CTX_SENTINEL_REPLACEMENT_TOKEN_91c2"
+    let kubectl = ScriptedKubectl()
+    kubectl.outputForCommand = { command in
+        if command.arguments.contains("view") {
+            return .success(#"{"users":[{"name":"shared-user","user":{"exec":{"command":"aws"}}}]}"#)
+        }
+        if command.arguments.contains("unset") { return .failure(stderr: "kubeconfig is read-only") }
+        return nil
+    }
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    do {
+        try await service.updateContext(
+            oldName: "secure",
+            newName: "secure",
+            server: "https://secure.example.com",
+            cluster: "secure-cluster",
+            user: "shared-user",
+            namespace: "apps",
+            credentialUpdate: .replace(.bearerToken(sentinel))
+        )
+        assertionFailure("expected the failed cleanup to be reported")
+    } catch let error as KubeConfigMutationError {
+        guard case .staleCredentialField(let message) = error else {
+            assertionFailure("expected a stale-field error, got \(error)")
+            return
+        }
+        // The user has to be told the token *did* save, or they will retype it.
+        assert(message.contains("saved"))
+        assert(!message.contains(sentinel))
+    } catch {
+        assertionFailure("expected a KubeConfigMutationError, got \(error)")
+    }
+
+    assert(kubectl.commands.map(\.arguments).contains([
+        "config", "set-credentials", "shared-user", "--token=\(sentinel)"
+    ]), "the replacement itself must still have been written")
+}
+
+func testKubeConfigMutationServiceUsesExactNamesForJSONLookupsAndEscapedUnset() async throws {
+    let clusterName = #"prod.cluster"west"#
+    let userName = "team.user"
+    let configJSON = #"""
+    {
+      "clusters": [
+        {"name":"prod.cluster","cluster":{"server":"https://wrong.example.com"}},
+        {"name":"prod.cluster\"west","cluster":{"server":"https://right.example.com"}}
+      ],
+      "users": [
+        {"name":"team","user":{"exec":{"command":"wrong"}}},
+        {"name":"team.user","user":{"exec":{"command":"aws"}}}
+      ]
+    }
+    """#
+    let kubectl = ScriptedKubectl()
+    kubectl.outputForCommand = { command in
+        command.arguments.contains("view") ? .success(configJSON) : nil
+    }
+    let service = KubeConfigMutationService(kubectl: kubectl)
+
+    let server = await service.resolveServer(for: clusterName)
+    try await service.updateContext(
+        oldName: "edge",
+        newName: "edge",
+        server: server,
+        cluster: clusterName,
+        user: userName,
+        namespace: "",
+        credentialUpdate: .replace(.bearerToken("replacement"))
+    )
+
+    assert(server == "https://right.example.com")
+    assert(kubectl.commands.contains {
+        $0.arguments == ["config", "unset", #"users.team\.user.exec"#]
+    })
+    assert(!kubectl.commands.contains {
+        $0.arguments == ["config", "unset", "users.team.exec"]
+    })
+}
+
 func testKubeConfigMutationServiceRedactsSensitiveFailureOutput() async {
-    let runner = RecordingCloudRunner()
-    await runner.setDefault(CommandResult(exitCode: 1, output: "bearer demo-token failed"))
-    let service = KubeConfigMutationService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    kubectl.defaultOutput = .failure(stderr: "bearer demo-token failed")
+    let service = KubeConfigMutationService(kubectl: kubectl)
 
     do {
         try await service.deleteContext("prod")
@@ -1531,7 +1945,8 @@ func testKubeConfigMutationServiceRedactsSensitiveFailureOutput() async {
 
 func testProfileCommandServiceBuildsProviderCommands() async {
     let runner = RecordingCloudRunner()
-    let service = ProfileCommandService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    let service = ProfileCommandService(runner: runner, kubectl: kubectl)
     let aws = CloudProfile(provider: .aws, name: "dev")
     let gcp = CloudProfile(provider: .gcp, name: "dev", roleName: "dev@example.com")
     let azure = CloudProfile(provider: .azure, name: "dev", accountID: "sub-123", roleName: "tenant-123")
@@ -1546,6 +1961,9 @@ func testProfileCommandServiceBuildsProviderCommands() async {
     _ = await service.logout(aws)
     _ = await service.logout(gcp)
     _ = await service.logout(azure)
+    _ = await service.signOutFromProvider(aws)
+    _ = await service.signOutFromProvider(gcp)
+    _ = await service.signOutFromProvider(azure)
     _ = await service.verify(aws, activeKubeContext: "")
     _ = await service.verify(gcp, activeKubeContext: "")
     _ = await service.verify(azure, activeKubeContext: "")
@@ -1560,15 +1978,162 @@ func testProfileCommandServiceBuildsProviderCommands() async {
         ["gcloud", "auth", "login", "--configuration", "dev", "--account", "dev@example.com"],
         ["az", "login", "--tenant", "tenant-123"],
         ["az", "account", "set", "--subscription", "sub-123"],
-        ["aws", "sso", "logout", "--profile", "dev"],
-        ["gcloud", "auth", "revoke", "dev@example.com"],
+        ["aws", "sso", "logout"],
+        ["gcloud", "auth", "revoke", "dev@example.com", "--configuration", "dev"],
         ["az", "logout"],
         ["aws", "sts", "get-caller-identity", "--profile", "dev", "--output", "json"],
-        ["gcloud", "auth", "print-access-token", "--configuration", "dev"],
+        ["gcloud", "config", "configurations", "describe", "dev", "--format=value(properties.core.account)", "--quiet"],
         ["az", "account", "show", "--subscription", "sub-123", "--output", "json"],
-        ["kubectl", "get", "--raw=/version", "--context", "dev-context", "--request-timeout=10s"],
         ["aws", "configure", "export-credentials", "--profile", "dev", "--output", "json"]
     ])
+    assert(kubectl.commands.map(\.arguments) == [
+        ["--context", "dev-context", "get", "--raw=/version", "--request-timeout=10s"]
+    ])
+}
+
+func testProfileCommandServiceReadsProviderPathsPerCommand() async {
+    let suiteName = "ctx-provider-environment-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set("/configs/aws", forKey: CTXDefaultsKey.awsConfigPath)
+    defaults.set("/configs/credentials", forKey: CTXDefaultsKey.awsCredentialsPath)
+    defaults.set("/configs/gcloud", forKey: CTXDefaultsKey.gcpConfigDirPath)
+    defaults.set("/configs/azure", forKey: CTXDefaultsKey.azureCLIDirPath)
+
+    let runner = RecordingCloudRunner()
+    let service = ProfileCommandService(
+        runner: runner,
+        providerEnvironment: {
+            ProviderCommandEnvironment.overrides(defaults: UserDefaults(suiteName: suiteName)!)
+        }
+    )
+    let profile = CloudProfile(provider: .aws, name: "dev")
+
+    _ = await service.verify(profile, activeKubeContext: "")
+    defaults.set("/configs/aws-updated", forKey: CTXDefaultsKey.awsConfigPath)
+    _ = await service.verify(profile, activeKubeContext: "")
+    _ = await service.exportAWSCredentials(for: profile)
+    _ = await service.signOutFromProvider(profile)
+    _ = await service.signOutFromProvider(
+        CloudProfile(provider: .gcp, name: "dev", roleName: "developer@example.com")
+    )
+    _ = await service.signOutFromProvider(
+        CloudProfile(provider: .azure, name: "dev", accountID: "subscription-123")
+    )
+
+    let environments = await runner.allEnvironmentOverrides()
+    assert(environments.count == 6)
+    assert(environments[0]["AWS_CONFIG_FILE"] == "/configs/aws")
+    assert(environments[0]["AWS_SHARED_CREDENTIALS_FILE"] == "/configs/credentials")
+    assert(environments[0]["CLOUDSDK_CONFIG"] == "/configs/gcloud")
+    assert(environments[0]["AZURE_CONFIG_DIR"] == "/configs/azure")
+    assert(environments[1]["AWS_CONFIG_FILE"] == "/configs/aws-updated")
+    assert(environments[2]["AWS_CONFIG_FILE"] == "/configs/aws-updated")
+    assert(environments[2]["AWS_SHARED_CREDENTIALS_FILE"] == "/configs/credentials")
+    for environment in environments.dropFirst(3) {
+        assert(environment["AWS_CONFIG_FILE"] == "/configs/aws-updated")
+        assert(environment["AWS_SHARED_CREDENTIALS_FILE"] == "/configs/credentials")
+        assert(environment["CLOUDSDK_CONFIG"] == "/configs/gcloud")
+        assert(environment["AZURE_CONFIG_DIR"] == "/configs/azure")
+    }
+}
+
+@MainActor
+func testProfileStoreReloadsLiveAWSPathAndSharesCommandDefaults() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ctx-live-aws-path-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let initialConfig = directory.appendingPathComponent("initial-config")
+    let updatedConfig = directory.appendingPathComponent("updated-config")
+    try "[default]\nregion = keep-me\n[profile initial]\nsso_region = us-east-1\n".write(
+        to: initialConfig,
+        atomically: true,
+        encoding: .utf8
+    )
+    try "[default]\nregion = remove-me\n[profile updated]\nsso_region = us-west-2\n".write(
+        to: updatedConfig,
+        atomically: true,
+        encoding: .utf8
+    )
+    let suiteName = "ctx-live-aws-path-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let credentialsURL = directory.appendingPathComponent("credentials")
+    try "[default]\naws_access_key_id = REMOVE\naws_secret_access_key = remove\n".write(
+        to: credentialsURL,
+        atomically: true,
+        encoding: .utf8
+    )
+    defaults.set(credentialsURL.path, forKey: CTXDefaultsKey.awsCredentialsPath)
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: initialConfig,
+        runner: runner,
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        defaults: defaults,
+        startsBackgroundServices: false
+    )
+    assert(store.profiles.contains { $0.provider == .aws && $0.name == "initial" })
+
+    defaults.set(updatedConfig.path, forKey: CTXDefaultsKey.awsConfigPath)
+    store.reloadConfiguredSources()
+    try await Task.sleep(nanoseconds: 400_000_000)
+
+    guard let updated = store.profiles.first(where: { $0.provider == .aws && $0.name == "updated" }) else {
+        assertionFailure("updated AWS config path was not rediscovered")
+        return
+    }
+    _ = await store.verify(updated)
+    let environments = await runner.allEnvironmentOverrides()
+    assert(environments.last?["AWS_CONFIG_FILE"] == updatedConfig.path)
+    assert(environments.last?["AWS_SHARED_CREDENTIALS_FILE"] == credentialsURL.path)
+
+    store.clearActive(for: .aws)
+    let updatedText = try String(contentsOf: updatedConfig, encoding: .utf8)
+    let initialText = try String(contentsOf: initialConfig, encoding: .utf8)
+    let credentialsText = try String(contentsOf: credentialsURL, encoding: .utf8)
+    assert(!updatedText.contains("[default]"))
+    assert(initialText.contains("[default]"), "injected defaults must not mutate the fallback config")
+    assert(!credentialsText.contains("[default]"))
+}
+
+func testKubernetesVerificationPreservesContextPathAndProviderEnvironment() async {
+    let runner = RecordingCloudRunner()
+    let kubectl = ScriptedKubectl()
+    let service = ProfileCommandService(
+        runner: runner,
+        kubectl: kubectl,
+        providerEnvironment: {
+            [
+                "AWS_CONFIG_FILE": "/configs/aws",
+                "AWS_SHARED_CREDENTIALS_FILE": "/configs/credentials",
+                "CLOUDSDK_CONFIG": "/configs/gcloud",
+                "AZURE_CONFIG_DIR": "/configs/azure"
+            ]
+        }
+    )
+
+    let result = await service.verify(
+        CloudProfile(provider: .kubernetes, name: "prod-context"),
+        activeKubeContext: "prod-context",
+        kubeconfigPath: "/configs/kube/prod"
+    )
+
+    assert(result.exitCode == 0)
+    assert(kubectl.commands.count == 1)
+    let command = kubectl.commands[0]
+    assert(Array(command.arguments.prefix(2)) == ["--context", "prod-context"])
+    assert(command.arguments.contains("--kubeconfig"))
+    assert(command.arguments.contains("/configs/kube/prod"))
+    assert(command.environmentOverrides["KUBECONFIG"] == "/configs/kube/prod")
+    assert(command.environmentOverrides["AWS_CONFIG_FILE"] == "/configs/aws")
+    assert(command.environmentOverrides["AWS_SHARED_CREDENTIALS_FILE"] == "/configs/credentials")
+    assert(command.environmentOverrides["CLOUDSDK_CONFIG"] == "/configs/gcloud")
+    assert(command.environmentOverrides["AZURE_CONFIG_DIR"] == "/configs/azure")
+    let cloudCommands = await runner.allCommands()
+    assert(cloudCommands == [], "kubectl verification must not use CloudCommandRunner")
 }
 
 func testProfileCommandServiceRedactsFailedOutput() async {
@@ -1595,7 +2160,12 @@ func testProfileCommandServiceStrongDMLoginAndVerify() async {
             commands
         }
 
-        func run(_ arguments: [String]) async -> CommandResult {
+        func run(
+            _ arguments: [String],
+            environmentOverrides: [String: String],
+            timeout: TimeInterval,
+            onOutput: (@Sendable (String) -> Void)?
+        ) async -> CommandResult {
             commands.append(arguments)
             if !results.isEmpty {
                 return results.removeFirst()
@@ -1625,12 +2195,16 @@ func testProfileCommandServiceStrongDMLoginAndVerify() async {
     // Test logout
     let logoutResult = await service.logout(sdmKube)
     assert(logoutResult.exitCode == 0)
+    let teleport = CloudProfile(provider: .kubernetes, name: "teleport-context", roleName: "tsh-user")
+    let teleportLogout = await service.logout(teleport)
+    assert(teleportLogout.exitCode == 0)
 
     let commands = await runner.allCommands()
     assert(commands == [
         ["sdm", "status"],
         ["sdm", "connect", "sdm-context"],
-        ["sdm", "disconnect", "sdm-context"]
+        ["sdm", "disconnect", "sdm-context"],
+        ["tsh", "kube", "logout", "teleport-context"]
     ])
 }
 
@@ -1757,6 +2331,92 @@ func testAWSCredentialServiceParsesIdentityAndCredentials() throws {
     assert(exported.secretAccessKey == "secret")
     assert(exported.sessionToken == "token")
     assert(exported.expiration == "2026-07-04T12:34:56Z")
+}
+
+func testAWSCredentialServiceRemovesOnlyCTXExportedTemporarySections() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ctx-credential-cleanup-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let configURL = directory.appendingPathComponent("config")
+    let credentialsURL = directory.appendingPathComponent("credentials")
+    try """
+    [profile tracked]
+    sso_session = tracked
+    [profile legacy]
+    sso_start_url = https://example.awsapps.com/start
+    [profile unrelated-session]
+    region = us-east-1
+    """.write(to: configURL, atomically: true, encoding: .utf8)
+    try """
+    [static]
+    aws_access_key_id = STATIC
+    aws_secret_access_key = static-secret
+    [legacy]
+    aws_access_key_id = LEGACY
+    aws_secret_access_key = legacy-secret
+    aws_session_token = legacy-token
+    aws_session_expiration = 2026-08-20T20:00:00Z
+    [unrelated-session]
+    aws_access_key_id = OTHER
+    aws_secret_access_key = other-secret
+    aws_session_token = other-token
+    aws_session_expiration = 2026-08-20T20:00:00Z
+    """.write(to: credentialsURL, atomically: true, encoding: .utf8)
+    let service = AWSCredentialService(configURL: configURL, credentialsURL: credentialsURL)
+
+    _ = try service.storeExportedCredentials(
+        #"{"AccessKeyId":"TRACKED","SecretAccessKey":"tracked-secret","SessionToken":"tracked-token"}"#,
+        profileName: "tracked",
+        isActiveProfile: true
+    )
+    try service.clearExportedTemporaryCredentials()
+
+    let credentials = try String(contentsOf: credentialsURL, encoding: .utf8)
+    assert(!credentials.contains("[tracked]"))
+    assert(!credentials.contains("[default]"))
+    assert(!credentials.contains("[legacy]"))
+    assert(credentials.contains("[static]"))
+    assert(credentials.contains("[unrelated-session]"))
+    assert(!FileManager.default.fileExists(
+        atPath: credentialsURL.appendingPathExtension("ctx-exported-profiles.json").path
+    ))
+    let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+    assert(!files.contains { $0.contains("ctx-backup") }, "credential cleanup must not copy secrets into backups")
+}
+
+func testAWSCredentialCleanupPreservesReplacedLongLivedKeys() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ctx-credential-replaced-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let configURL = directory.appendingPathComponent("config")
+    let credentialsURL = directory.appendingPathComponent("credentials")
+    try "[profile tracked]\nsso_session = tracked\n".write(
+        to: configURL,
+        atomically: true,
+        encoding: .utf8
+    )
+    let service = AWSCredentialService(configURL: configURL, credentialsURL: credentialsURL)
+    _ = try service.storeExportedCredentials(
+        #"{"AccessKeyId":"TEMP","SecretAccessKey":"temporary","SessionToken":"session"}"#,
+        profileName: "tracked",
+        isActiveProfile: false
+    )
+    try """
+    [tracked]
+    aws_access_key_id = LONG_LIVED
+    aws_secret_access_key = preserved-secret
+    """.write(to: credentialsURL, atomically: true, encoding: .utf8)
+
+    try service.clearExportedTemporaryCredentials()
+
+    let credentials = try String(contentsOf: credentialsURL, encoding: .utf8)
+    assert(credentials.contains("[tracked]"))
+    assert(credentials.contains("LONG_LIVED"))
+    assert(!FileManager.default.fileExists(
+        atPath: credentialsURL.appendingPathExtension("ctx-exported-profiles.json").path
+    ))
 }
 
 func testCloudProfilePersistenceServiceWritesAWSProfile() throws {
@@ -1913,9 +2573,11 @@ func testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp() asyn
     defer { defaults.removePersistentDomain(forName: suiteName) }
 
     let runner = RecordingCloudRunner()
+    let kubectl = ScriptedKubectl()
     let store = ProfileStore(
         configURL: configURL,
         runner: runner,
+        kubeConfigMutations: KubeConfigMutationService(kubectl: kubectl),
         kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
         profileCommands: ProfileCommandService(runner: runner),
         updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
@@ -1939,6 +2601,270 @@ func testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp() asyn
 
     assert(store.folderOverrides["Kubernetes:internal-dev"] == targetFolder.id)
     assert(CloudFolderPreferencesStore(defaults: defaults).load().folderOverrides["Kubernetes:internal-dev"] == targetFolder.id)
+}
+
+@MainActor
+func testProfileStoreDuplicatesKubeContextWithoutMutatingSourceAndInheritsFolder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-duplicate-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+    try kubeconfig(
+        context: "source",
+        cluster: "shared-cluster",
+        user: "shared-user",
+        namespace: "apps",
+        server: "https://cluster.example.com"
+    ).write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+
+    let suiteName = "ctx-kube-duplicate-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let runner = RecordingCloudRunner()
+    let kubectl = ScriptedKubectl()
+    kubectl.onRun = { command in
+        guard command.arguments.contains("set-context") else { return }
+        let duplicatedConfig = """
+        apiVersion: v1
+        kind: Config
+        current-context: source
+        clusters:
+        - name: shared-cluster
+          cluster:
+            server: https://cluster.example.com
+        contexts:
+        - name: source
+          context:
+            cluster: shared-cluster
+            user: shared-user
+            namespace: apps
+        - name: source-copy
+          context:
+            cluster: shared-cluster
+            user: shared-user
+            namespace: apps
+        users:
+        - name: shared-user
+          user: {}
+        """
+        try! duplicatedConfig.write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+    }
+    let store = ProfileStore(
+        configURL: dir.appendingPathComponent("aws-config"),
+        runner: runner,
+        kubeConfigMutations: KubeConfigMutationService(kubectl: kubectl),
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: dir.appendingPathComponent("aws-config"), credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: dir.appendingPathComponent("aws-config")),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+    let source = store.profiles.first { $0.provider == .kubernetes && $0.name == "source" }!
+    let sourceSnapshot = source
+    let sourceContextSnapshot = store.kubernetesContexts.first { $0.contextName == "source" }!
+    let folder = CloudFolder.builtIn(provider: .kubernetes, environment: .development)
+    store.move(source, to: folder)
+
+    assert(store.suggestedKubeContextDuplicateName(for: source) == "source-copy")
+    try await store.duplicateKubeContext(source, newName: " source-copy ")
+
+    let duplicate = store.profiles.first { $0.provider == .kubernetes && $0.name == "source-copy" }!
+    assert(duplicate.id != source.id)
+    assert(duplicate.accountID == source.accountID)
+    assert(duplicate.roleName == source.roleName)
+    assert(duplicate.region == source.region)
+    assert(store.profiles.contains(sourceSnapshot))
+    assert(store.kubernetesContexts.contains(sourceContextSnapshot))
+    assert(store.folderOverrides[duplicate.id] == folder.id)
+    assert(store.suggestedKubeContextDuplicateName(for: source) == "source-copy-2")
+    let duplicateCommands = kubectl.commands.filter { $0.arguments.contains("set-context") }
+    assert(duplicateCommands.count == 1)
+    assert(Array(duplicateCommands[0].arguments.prefix(2)) == ["--kubeconfig", kubeconfigURL.path])
+}
+
+@MainActor
+func testKubeDuplicateRediscoveryMissDoesNotPersistFolderOverride() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ctx-kube-duplicate-miss-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let kubeconfigURL = directory.appendingPathComponent("kubeconfig")
+    try kubeconfig(
+        context: "source",
+        cluster: "shared",
+        user: "shared-user",
+        server: "https://cluster.example.com"
+    ).write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+    let suiteName = "ctx-kube-duplicate-miss-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let runner = RecordingCloudRunner()
+    let discovery = KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path })
+    let store = ProfileStore(
+        configURL: directory.appendingPathComponent("config"),
+        runner: runner,
+        kubeConfigMutations: KubeConfigMutationService(kubectl: ScriptedKubectl()),
+        kubeConfigDiscoveryService: discovery,
+        localProfileDiscovery: LocalProfileDiscoveryService(
+            awsConfigURL: directory.appendingPathComponent("config"),
+            kubeConfigDiscoveryService: discovery
+        ),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        defaults: defaults,
+        startsBackgroundServices: false
+    )
+    let source = store.profiles.first { $0.name == "source" }!
+    let folder = CloudFolder.builtIn(provider: .kubernetes, environment: .development)
+
+    do {
+        try await store.duplicateKubeContext(source, newName: "missing-copy", targetFolder: folder)
+        assertionFailure("expected rediscovery miss")
+    } catch ProfileStoreMutationError.rediscoveryMiss {
+        // Expected.
+    }
+
+    assert(store.folderOverrides["Kubernetes:missing-copy"] == nil)
+    assert(CloudFolderPreferencesStore(defaults: defaults).load().folderOverrides["Kubernetes:missing-copy"] == nil)
+}
+
+@MainActor
+func testProfileStoreMigratesFolderMappingAfterSuccessfulCloudRename() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-cloud-rename-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let suiteName = "ctx-cloud-rename-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let configURL = dir.appendingPathComponent("aws-config")
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+    var draft = AWSProfileDraft()
+    draft.name = "source"
+    draft.ssoStartURL = "https://example.awsapps.com/start"
+    draft.ssoRegion = "us-east-1"
+    draft.accountID = "123456789012"
+    draft.roleName = "Developer"
+    draft.defaultRegion = "us-west-2"
+    let folder = CloudFolder.builtIn(provider: .aws, environment: .data)
+    try store.addAWSProfile(draft, targetFolder: folder)
+    let source = store.profiles.first { $0.provider == .aws && $0.name == "source" }!
+
+    draft.name = " renamed "
+    try store.updateAWSProfile(source, draft: draft)
+
+    assert(store.folderOverrides["AWS:renamed"] == folder.id)
+    assert(store.folderOverrides["AWS:source"] == nil)
+    let persisted = CloudFolderPreferencesStore(defaults: defaults).load().folderOverrides
+    assert(persisted["AWS:renamed"] == folder.id)
+    assert(persisted["AWS:source"] == nil)
+}
+
+@MainActor
+func testProfileStoreRetainsFolderMappingWhenCloudPersistenceFails() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-cloud-failure-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let suiteName = "ctx-cloud-failure-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let configURL = dir.appendingPathComponent("aws-config")
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+    var draft = AWSProfileDraft()
+    draft.name = "source"
+    draft.ssoStartURL = "https://example.awsapps.com/start"
+    draft.ssoRegion = "us-east-1"
+    draft.accountID = "123456789012"
+    draft.roleName = "Developer"
+    draft.defaultRegion = "us-west-2"
+    let folder = CloudFolder.builtIn(provider: .aws, environment: .data)
+    try store.addAWSProfile(draft, targetFolder: folder)
+    let source = store.profiles.first { $0.provider == .aws && $0.name == "source" }!
+    try FileManager.default.removeItem(at: configURL)
+    try FileManager.default.createDirectory(at: configURL, withIntermediateDirectories: false)
+    draft.name = "renamed"
+
+    do {
+        try store.updateAWSProfile(source, draft: draft)
+        assertionFailure("Expected persistence failure")
+    } catch {
+        assert(store.folderOverrides[source.id] == folder.id)
+        assert(CloudFolderPreferencesStore(defaults: defaults).load().folderOverrides[source.id] == folder.id)
+    }
+}
+
+@MainActor
+func testProfileStoreRetainsFolderMappingWhenKubeRediscoveryMissesRename() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-kube-rename-miss-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let kubeconfigURL = dir.appendingPathComponent("kubeconfig")
+    try kubeconfig(context: "source", cluster: "source-cluster", user: "source-user", server: "https://cluster.example.com")
+        .write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+    let suiteName = "ctx-kube-rename-miss-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let runner = RecordingCloudRunner()
+    let store = ProfileStore(
+        configURL: dir.appendingPathComponent("aws-config"),
+        runner: runner,
+        kubeConfigMutations: KubeConfigMutationService(kubectl: ScriptedKubectl()),
+        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(configURL: dir.appendingPathComponent("aws-config"), credentialsURL: dir.appendingPathComponent("aws-credentials")),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: dir.appendingPathComponent("aws-config")),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        startsBackgroundServices: false
+    )
+    let source = store.profiles.first { $0.provider == .kubernetes && $0.name == "source" }!
+    let folder = CloudFolder.builtIn(provider: .kubernetes, environment: .development)
+    store.move(source, to: folder)
+
+    do {
+        try await store.updateKubeContext(
+            source,
+            newName: " renamed ",
+            server: "https://cluster.example.com",
+            cluster: "source-cluster",
+            user: "source-user",
+            namespace: "",
+            credentialUpdate: .preserveExisting
+        )
+        assertionFailure("Expected rediscovery miss")
+    } catch {
+        assert(error as? ProfileStoreMutationError == .rediscoveryMiss(provider: .kubernetes, name: "renamed"))
+        assert(store.folderOverrides[source.id] == folder.id)
+        assert(store.folderOverrides["Kubernetes:renamed"] == nil)
+        assert(CloudFolderPreferencesStore(defaults: defaults).load().folderOverrides[source.id] == folder.id)
+    }
 }
 
 @MainActor
@@ -1969,8 +2895,12 @@ func testProfileStorePromptsForFolderWhenCreatedWithoutOne() async throws {
         folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
         startsBackgroundServices: false
     )
+    func pendingFolder() -> CloudProfile? {
+        guard case .pendingFolderAssignment(let profile) = store.presentation?.route else { return nil }
+        return profile
+    }
 
-    assert(store.pendingFolderPrompt == nil, "no prompt before anything is created")
+    assert(pendingFolder() == nil, "no prompt before anything is created")
 
     var aws = AWSProfileDraft()
     aws.name = "unfiled-profile"
@@ -1987,12 +2917,12 @@ func testProfileStorePromptsForFolderWhenCreatedWithoutOne() async throws {
     // take well over a second on a loaded machine. A tight deadline here fails as a
     // wrong-kubeconfig assertion rather than as the timeout it actually is.
     let deadline = Date().addingTimeInterval(10)
-    while store.pendingFolderPrompt == nil, Date() < deadline {
+    while pendingFolder() == nil, Date() < deadline {
         try await Task.sleep(nanoseconds: 10_000_000)
     }
-    assert(store.pendingFolderPrompt?.name == "unfiled-profile", "must offer a folder for a profile created outside any folder")
+    assert(pendingFolder()?.name == "unfiled-profile", "must offer a folder for a profile created outside any folder")
 
-    store.pendingFolderPrompt = nil
+    store.dismissPresentation(from: .mainWindow)
 
     var filed = AWSProfileDraft()
     filed.name = "filed-profile"
@@ -2005,7 +2935,18 @@ func testProfileStorePromptsForFolderWhenCreatedWithoutOne() async throws {
     // Created with an explicit targetFolder — must not prompt again.
     try store.addAWSProfile(filed, targetFolder: CloudFolder.builtIn(provider: .aws, environment: .data))
     try await Task.sleep(nanoseconds: 300_000_000)
-    assert(store.pendingFolderPrompt == nil, "must not prompt when a folder was already chosen at creation time")
+    assert(pendingFolder() == nil, "must not prompt when a folder was already chosen at creation time")
+
+    store.presentProfileEditor(.selectProvider(targetFolder: nil), from: .mainWindow)
+    var guarded = aws
+    guarded.name = "guarded-unfiled-profile"
+    try store.addAWSProfile(guarded)
+    store.report("newer route", from: .mainWindow)
+    try await Task.sleep(nanoseconds: 100_000_000)
+    guard case .pendingFolderAssignment = store.presentation?.route else {
+        return
+    }
+    assertionFailure("a deferred folder prompt must not overwrite a newer route")
 }
 
 @MainActor
@@ -2031,9 +2972,11 @@ func testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne() asyn
 
     let configURL = dir.appendingPathComponent("aws-config")
     let runner = RecordingCloudRunner()
+    let kubectl = ScriptedKubectl()
     let store = ProfileStore(
         configURL: configURL,
         runner: runner,
+        kubeConfigMutations: KubeConfigMutationService(kubectl: kubectl),
         kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { env }, customPath: { nil }),
         profileCommands: ProfileCommandService(runner: runner),
         updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
@@ -2050,19 +2993,13 @@ func testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne() asyn
     }
 
     store.logout(profile)
-    // Generous: this waits on a detached Task scheduling a subprocess call, which can
-    // take well over a second on a loaded machine. A tight deadline here fails as a
-    // wrong-kubeconfig assertion rather than as the timeout it actually is.
-    let deadline = Date().addingTimeInterval(10)
-    while (await runner.allCommands()).isEmpty, Date() < deadline {
-        try await Task.sleep(nanoseconds: 10_000_000)
+    await waitForLifecycleCondition("ordinary Kubernetes disconnect") {
+        store.profiles.first(where: { $0.id == profile.id })?.status != .disconnecting
     }
-    let commands = await runner.allCommands()
-    assert(Array(commands.first?.dropFirst(1).prefix(2) ?? []) == ["--kubeconfig", secondary.path], "logout must target the file the context actually lives in, not the primary KUBECONFIG entry")
+    assert(kubectl.commands.isEmpty, "ordinary Kubernetes disconnect must not mutate current-context")
 
     _ = await store.resolveKubeServer(for: "team-b-cluster", contextName: "team-b")
-    let resolveCommands = await runner.allCommands()
-    assert(Array(resolveCommands.last?.dropFirst(1).prefix(2) ?? []) == ["--kubeconfig", secondary.path], "resolving the server for an existing context's edit form must target that context's own file, not the primary KUBECONFIG entry")
+    assert(Array(kubectl.commands.last?.arguments.prefix(2) ?? []) == ["--kubeconfig", secondary.path], "resolving the server for an existing context's edit form must target that context's own file, not the primary KUBECONFIG entry")
 }
 
 @MainActor
@@ -2081,9 +3018,11 @@ func testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown() 
 
     let configURL = dir.appendingPathComponent("aws-config")
     let runner = RecordingCloudRunner()
+    let kubectl = ScriptedKubectl()
     let store = ProfileStore(
         configURL: configURL,
         runner: runner,
+        kubeConfigMutations: KubeConfigMutationService(kubectl: kubectl),
         kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
         profileCommands: ProfileCommandService(runner: runner),
         updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
@@ -2112,11 +3051,12 @@ func testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown() 
     // take well over a second on a loaded machine. A tight deadline here fails as a
     // wrong-kubeconfig assertion rather than as the timeout it actually is.
     let deadline = Date().addingTimeInterval(10)
-    while !(await runner.allCommands()).contains(where: { $0.contains("use-context") }), Date() < deadline {
+    while !kubectl.commands.contains(where: { $0.arguments.contains("use-context") }), Date() < deadline {
         try await Task.sleep(nanoseconds: 10_000_000)
     }
-    let commands = await runner.allCommands()
-    assert(commands.contains { $0.contains("use-context") && $0.contains("team-c") }, "Connect on a never-yet-verified kube context must still run the real kubectl context switch, not just update in-app bookkeeping")
+    assert(kubectl.commands.contains {
+        $0.arguments.contains("use-context") && $0.arguments.contains("team-c")
+    }, "Connect on a never-yet-verified kube context must still run the real kubectl context switch, not just update in-app bookkeeping")
 }
 
 /// The other side of the injected preflight: a resolver that does report a missing
@@ -2138,9 +3078,11 @@ func testProfileStoreLoginStopsAtPreflightWhenARequiredCLIIsMissing() async thro
 
     let configURL = dir.appendingPathComponent("aws-config")
     let runner = RecordingCloudRunner()
+    let kubectl = ScriptedKubectl()
     let store = ProfileStore(
         configURL: configURL,
         runner: runner,
+        kubeConfigMutations: KubeConfigMutationService(kubectl: kubectl),
         kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { kubeconfigURL.path }),
         profileCommands: ProfileCommandService(runner: runner),
         updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
@@ -2158,14 +3100,17 @@ func testProfileStoreLoginStopsAtPreflightWhenARequiredCLIIsMissing() async thro
     }
 
     store.login(profile)
-    assert(store.missingCLITool?.tool == .kubectl, "a missing required CLI must surface as an install request, not a failed login")
-    assert(store.missingCLITool?.profile.id == profile.id, "the install request must name the profile the user tried to connect")
+    guard case .missingCLI(let request) = store.presentation?.route else {
+        assertionFailure("a missing required CLI must surface as an install request")
+        return
+    }
+    assert(request.tool == .kubectl, "the install request must identify kubectl")
+    assert(request.profile.id == profile.id, "the install request must name the profile the user tried to connect")
 
     // Long enough that a connect Task, had one been spawned, would have recorded
     // its command by now.
     try await Task.sleep(nanoseconds: 300_000_000)
-    let commands = await runner.allCommands()
-    assert(!commands.contains { $0.contains("use-context") }, "a blocked preflight must run no provider commands at all")
+    assert(!kubectl.commands.contains { $0.arguments.contains("use-context") }, "a blocked preflight must run no kubectl commands at all")
 }
 
 func testCloudFolderPreferencesStoreRoundTripsState() throws {
@@ -2292,6 +3237,7 @@ actor CountingResourceReader: KubernetesResourceReading {
 
 actor RecordingCloudRunner: CloudCommandRunning {
     private var commands: [[String]] = []
+    private var environmentOverrides: [[String: String]] = []
     private var defaultResult = CommandResult(exitCode: 0, output: "")
 
     func setDefault(_ result: CommandResult) {
@@ -2302,13 +3248,23 @@ actor RecordingCloudRunner: CloudCommandRunning {
         commands
     }
 
-    func run(_ arguments: [String]) async -> CommandResult {
+    func allEnvironmentOverrides() -> [[String: String]] {
+        environmentOverrides
+    }
+
+    func run(
+        _ arguments: [String],
+        environmentOverrides: [String: String],
+        timeout: TimeInterval,
+        onOutput: (@Sendable (String) -> Void)?
+    ) async -> CommandResult {
         commands.append(arguments)
+        self.environmentOverrides.append(environmentOverrides)
         return defaultResult
     }
 }
 
-final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, KubectlProcessStarting, @unchecked Sendable {
+final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, KubectlConfigurationCommandBuilding, KubectlProcessStarting, @unchecked Sendable {
     enum Output {
         case success(String)
         case failure(stderr: String)
@@ -2322,6 +3278,12 @@ final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, KubectlProc
     var defaultOutput: Output = .success(emptyItems())
     var error: Error?
     var processToStart: FakeKubectlProcess = FakeKubectlProcess()
+    var onRun: ((KubectlCommand) -> Void)?
+    /// Scripts a reply from the whole command rather than the flag-stripped key
+    /// `outputs` is indexed by — needed when what matters is the verb (`unset`,
+    /// `set-credentials`) rather than the arguments around it. Returning `nil`
+    /// falls through to `outputs`/`defaultOutput`.
+    var outputForCommand: ((KubectlCommand) -> Output?)?
     /// Simulates a real subprocess taking measurable time — needed to create a
     /// window in which a caller can be cancelled mid-flight, or to prove a
     /// genuinely-fast command isn't held up by anything on CTX's side.
@@ -2333,11 +3295,17 @@ final class ScriptedKubectl: KubectlRunning, KubectlCommandBuilding, KubectlProc
         return KubectlCommand(executablePath: "/mock/kubectl", arguments: ["--context", context] + arguments)
     }
 
+    func configurationCommand(arguments: [String]) throws -> KubectlCommand {
+        if let error { throw error }
+        return KubectlCommand(executablePath: "/mock/kubectl", arguments: arguments)
+    }
+
     func run(_ command: KubectlCommand, timeout: TimeInterval) async throws -> KubectlResult {
         let key = command.arguments.dropFirst(2).filter { $0 != "--kubeconfig" && !$0.hasPrefix("/") }.joined(separator: " ")
         let output = queue.sync { () -> Output in
             commands.append(command)
-            return outputs[key] ?? defaultOutput
+            onRun?(command)
+            return outputForCommand?(command) ?? outputs[key] ?? defaultOutput
         }
         if delayNanoseconds > 0 {
             try? await Task.sleep(nanoseconds: delayNanoseconds)
@@ -2460,6 +3428,686 @@ func kubeconfig(
     """
 }
 
+@MainActor
+func testRapidConnectsRunOneEffectiveCommandFlow() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(profileNames: ["alpha"], runner: runner)
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let profile = store.profiles.first!
+
+    store.login(profile)
+    await runner.waitForCommandCount(1)
+    store.login(profile)
+    let commands = await runner.allCommands()
+    assert(commands.filter { Array($0.prefix(3)) == ["aws", "sso", "login"] }.count == 1)
+
+    await runner.releaseCommand(0, result: CommandResult(exitCode: 0, output: "login complete"))
+    await runner.waitForCommandCount(2)
+    await runner.releaseCommand(1, result: CommandResult(exitCode: 1, output: "not authenticated"))
+}
+
+@MainActor
+func testDisconnectSupersedesLateConnectResult() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(profileNames: ["alpha"], runner: runner)
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let profile = store.profiles.first!
+
+    store.login(profile)
+    await runner.waitForCommandCount(1)
+    store.logout(profile)
+    await runner.releaseCommand(0, result: CommandResult(exitCode: 0, output: "late login success"))
+    await waitForLifecycleCondition("disconnect superseding a late connect") {
+        store.profiles.first?.status != .disconnecting
+    }
+
+    let commands = await runner.allCommands()
+    assert(!commands.contains { $0.starts(with: ["aws", "sso", "logout"]) })
+    assert(store.profiles.first?.status == .needsLogin)
+    assert(store.activeAWSProfile.isEmpty)
+}
+
+@MainActor
+func testCancelledAWSActivationCannotRestoreClearedDefaultProfile() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha"],
+        runner: runner
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let profile = store.profiles.first!
+
+    store.setActive(profile)
+    store.clearActive(for: .aws)
+    await Task.yield()
+
+    let config = try String(contentsOf: directory.appendingPathComponent("config"), encoding: .utf8)
+    assert(!config.contains("[default]"), "cancelled activation recreated the cleared AWS default profile")
+    assert(store.activeAWSProfile.isEmpty)
+}
+
+@MainActor
+func testAWSActivationNeverExportsOrWritesDefaultCredentials() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha", "beta"],
+        runner: runner,
+        activeAWSProfile: "alpha"
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let beta = store.profiles.first { $0.name == "beta" }!
+
+    store.setActive(beta)
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(
+        0,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
+    )
+    await waitForLifecycleCondition("AWS activation verification") {
+        store.profiles.first(where: { $0.id == beta.id })?.status == .connected
+    }
+
+    let commands = await runner.allCommands()
+    assert(commands == [["aws", "sts", "get-caller-identity", "--profile", "beta", "--output", "json"]])
+    let credentialsURL = directory.appendingPathComponent("credentials")
+    let credentials = (try? String(contentsOf: credentialsURL, encoding: .utf8)) ?? ""
+    assert(!credentials.contains("[default]"))
+    assert(!credentials.contains("[beta]"))
+}
+
+@MainActor
+func testAWSActiveProfileChangeSupersedesInFlightExportBeforeWrite() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha", "beta"],
+        runner: runner,
+        activeAWSProfile: "alpha"
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let alpha = store.profiles.first { $0.name == "alpha" }!
+    let beta = store.profiles.first { $0.name == "beta" }!
+
+    let verification = Task {
+        await store.verify(alpha, isManualAttempt: true)
+    }
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(
+        0,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
+    )
+    let verified = await verification.value
+    assert(verified)
+
+    store.exportAWSCredentials(alpha)
+    await runner.waitForCommandCount(2)
+    store.setActive(beta)
+    await runner.waitForCommandCount(3)
+    await runner.releaseCommand(
+        1,
+        result: CommandResult(
+            exitCode: 0,
+            output: #"{"AccessKeyId":"STALE","SecretAccessKey":"stale-secret","SessionToken":"stale-token","Expiration":"2026-08-20T20:00:00Z"}"#
+        )
+    )
+    await runner.releaseCommand(2, result: CommandResult(exitCode: 1, output: "not authenticated"))
+    await Task.yield()
+    await Task.yield()
+
+    let credentials = (try? String(
+        contentsOf: directory.appendingPathComponent("credentials"),
+        encoding: .utf8
+    )) ?? ""
+    assert(store.activeAWSProfile == "beta")
+    assert(!credentials.contains("[alpha]"))
+    assert(!credentials.contains("[default]"))
+}
+
+@MainActor
+func testAWSGlobalSignOutCancelsOtherOperationsAndCleansExports() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha", "beta"],
+        runner: runner,
+        activeAWSProfile: "beta"
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let alpha = store.profiles.first { $0.name == "alpha" }!
+    let beta = store.profiles.first { $0.name == "beta" }!
+
+    let verification = Task {
+        await store.verify(beta, isManualAttempt: true)
+    }
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(
+        0,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
+    )
+    let verified = await verification.value
+    assert(verified)
+
+    store.exportAWSCredentials(beta)
+    await runner.waitForCommandCount(2)
+    store.requestProviderSignOut(alpha)
+    guard case .providerSignOutConfirmation(let confirmation) = store.presentation?.route else {
+        assertionFailure("expected AWS sign-out confirmation")
+        return
+    }
+    store.confirmProviderSignOut(confirmation, from: .mainWindow)
+    await runner.waitForCommandCount(3)
+    await runner.releaseCommand(2, result: CommandResult(exitCode: 0, output: "signed out"))
+    await runner.releaseCommand(
+        1,
+        result: CommandResult(
+            exitCode: 0,
+            output: #"{"AccessKeyId":"STALE","SecretAccessKey":"stale-secret","SessionToken":"stale-token"}"#
+        )
+    )
+    while !store.activeAWSProfile.isEmpty
+        || store.profiles.contains(where: { $0.provider == .aws && $0.status != .needsLogin }) {
+        await Task.yield()
+    }
+
+    let credentials = (try? String(
+        contentsOf: directory.appendingPathComponent("credentials"),
+        encoding: .utf8
+    )) ?? ""
+    assert(!credentials.contains("[beta]"))
+    assert(!credentials.contains("[default]"))
+    let commands = await runner.allCommands()
+    assert(commands.contains(["aws", "sso", "logout"]))
+}
+
+@MainActor
+func testProfileOperationsRemainIndependent() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha", "beta"],
+        runner: runner
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let alpha = store.profiles.first { $0.name == "alpha" }!
+    let beta = store.profiles.first { $0.name == "beta" }!
+    var publications: [[String: ProfileStatus]] = []
+    let cancellable = store.$profiles.dropFirst().sink { profiles in
+        publications.append(Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0.status) }))
+    }
+    defer { cancellable.cancel() }
+
+    store.login(alpha)
+    store.login(beta)
+    await runner.waitForCommandCount(2)
+    let commands = await runner.allCommands()
+    assert(commands.contains { $0.contains("alpha") })
+    assert(commands.contains { $0.contains("beta") })
+
+    let alphaLoginIndex = commands.firstIndex { $0.contains("alpha") }!
+    let betaLoginIndex = commands.firstIndex { $0.contains("beta") }!
+    await runner.releaseCommand(alphaLoginIndex, result: CommandResult(exitCode: 1, output: "alpha failed"))
+    await runner.releaseCommand(betaLoginIndex, result: CommandResult(exitCode: 0, output: "beta login succeeded"))
+    await runner.waitForCommandCount(3)
+    var allCommands = await runner.allCommands()
+    let betaVerifyIndex = allCommands.firstIndex {
+        $0.starts(with: ["aws", "sts", "get-caller-identity"]) && $0.contains("beta")
+    }!
+    await runner.releaseCommand(
+        betaVerifyIndex,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012","Arn":"arn:aws:sts::123456789012:assumed-role/Developer/beta"}"#)
+    )
+    await runner.waitForCommandCount(4)
+    allCommands = await runner.allCommands()
+    let betaExportIndex = allCommands.firstIndex {
+        $0.starts(with: ["aws", "configure", "export-credentials"]) && $0.contains("beta")
+    }!
+    await runner.releaseCommand(
+        betaExportIndex,
+        result: CommandResult(
+            exitCode: 0,
+            output: #"{"AccessKeyId":"AKIATEST","SecretAccessKey":"secret","SessionToken":"token"}"#
+        )
+    )
+    await waitForLifecycleCondition("superseding AWS login completion") {
+        store.profiles.first(where: { $0.id == beta.id })?.status == .connected
+    }
+
+    assert(store.profiles.first(where: { $0.id == alpha.id })?.status == .needsLogin)
+    assert(store.profiles.first(where: { $0.id == beta.id })?.status == .connected)
+    assert(store.verificationErrors[beta.id] == nil)
+    assert(store.awsIdentity == "beta")
+    assert(publications.contains { $0[alpha.id] == .needsLogin })
+    assert(!publications.contains { $0[beta.id] == .needsLogin })
+}
+
+@MainActor
+func testVerificationNeverExportsAWSCredentials() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha", "beta"],
+        runner: runner,
+        activeAWSProfile: "alpha"
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let profile = store.profiles.first { $0.name == "beta" }!
+
+    let manual = Task {
+        await store.verify(profile, isManualAttempt: true)
+    }
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(
+        0,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
+    )
+    let manualResult = await manual.value
+    assert(manualResult)
+
+    store.verifyAllProfiles()
+    await runner.waitForCommandCount(3)
+    await runner.releaseCommand(
+        1,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
+    )
+    await runner.releaseCommand(
+        2,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
+    )
+    await waitForLifecycleCondition("background verification completion") {
+        store.lastVerifiedAt != nil
+    }
+
+    let commands = await runner.allCommands()
+    assert(commands.filter { $0.starts(with: ["aws", "configure", "export-credentials"]) }.isEmpty)
+}
+
+@MainActor
+func testAWSLoginExportsExactlyOnce() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha"],
+        runner: runner
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let profile = store.profiles.first!
+
+    store.login(profile)
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(0, result: CommandResult(exitCode: 0, output: "login complete"))
+    await runner.waitForCommandCount(2)
+    await runner.releaseCommand(
+        1,
+        result: CommandResult(
+            exitCode: 0,
+            output: #"{"Account":"123456789012","Arn":"arn:aws:sts::123456789012:assumed-role/Developer/alpha"}"#
+        )
+    )
+    await runner.waitForCommandCount(3)
+    await runner.releaseCommand(
+        2,
+        result: CommandResult(
+            exitCode: 0,
+            output: #"{"AccessKeyId":"AKIATEST","SecretAccessKey":"secret","SessionToken":"token"}"#
+        )
+    )
+    await waitForLifecycleCondition("AWS login credential export") {
+        store.profiles.first?.status == .connected
+    }
+
+    let commands = await runner.allCommands()
+    assert(commands.filter { $0.starts(with: ["aws", "configure", "export-credentials"]) }.count == 1)
+}
+
+@MainActor
+func testExplicitAWSExportSurfacesWriteFailure() async throws {
+    let runner = LifecycleGateRunner()
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ctx-export-failure-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (store, storeDirectory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha"],
+        runner: runner,
+        activeAWSProfile: "alpha",
+        credentialsURL: directory
+    )
+    defer {
+        try? FileManager.default.removeItem(at: storeDirectory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let profile = store.profiles.first!
+
+    let verification = Task { await store.verify(profile, isManualAttempt: true) }
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(
+        0,
+        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
+    )
+    _ = await verification.value
+
+    store.exportAWSCredentials(profile)
+    await runner.waitForCommandCount(2)
+    await runner.releaseCommand(
+        1,
+        result: CommandResult(
+            exitCode: 0,
+            output: #"{"AccessKeyId":"AKIATEST","SecretAccessKey":"private-secret","SessionToken":"private-token"}"#
+        )
+    )
+    await waitForLifecycleCondition("credential write failure presentation") {
+        store.presentation != nil
+    }
+
+    let commands = await runner.allCommands()
+    assert(commands.filter { $0.starts(with: ["aws", "configure", "export-credentials"]) }.count == 1)
+    guard case .operationError(let error) = store.presentation?.route else {
+        assertionFailure("credential write failure must be visible")
+        return
+    }
+    assert(!error.message.contains("private-secret"))
+    assert(!error.message.contains("private-token"))
+}
+
+@MainActor
+func testProviderSignOutRequiresMatchingConfirmationAndPreservesFailureState() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha"],
+        runner: runner,
+        activeAWSProfile: "alpha"
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let profile = store.profiles.first!
+    let previousStatus = profile.status
+
+    store.requestProviderSignOut(profile, from: .settings)
+    guard case .providerSignOutConfirmation(let confirmation) = store.presentation?.route else {
+        assertionFailure("provider sign-out must use a typed confirmation")
+        return
+    }
+    assert(confirmation.warning.contains("clears all cached AWS SSO sessions"))
+    assert(confirmation.warning.contains("temporary credential sections"))
+    assert(confirmation.warning.contains("including default"))
+    store.confirmProviderSignOut(confirmation, from: .mainWindow)
+    let commandsBeforeConfirmation = await runner.allCommands()
+    assert(commandsBeforeConfirmation.isEmpty)
+
+    store.confirmProviderSignOut(confirmation, from: .settings)
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(
+        0,
+        result: CommandResult(exitCode: 1, output: "token=private-value provider rejected logout")
+    )
+    await waitForLifecycleCondition("failed provider sign-out") {
+        store.profiles.first?.status != .disconnecting
+    }
+
+    assert(store.activeAWSProfile == "alpha")
+    assert(store.profiles.first?.status == previousStatus)
+    guard case .operationError(let error) = store.presentation?.route else {
+        assertionFailure("failed provider sign-out must route an error")
+        return
+    }
+    assert(!error.message.contains("private-value"))
+    store.requestProviderSignOut(profile)
+    guard case .providerSignOutConfirmation(let retryConfirmation) = store.presentation?.route else {
+        assertionFailure("expected retry confirmation")
+        return
+    }
+    store.confirmProviderSignOut(retryConfirmation, from: .mainWindow)
+    await runner.waitForCommandCount(2)
+    await runner.releaseCommand(1, result: CommandResult(exitCode: 0, output: "signed out"))
+    await waitForLifecycleCondition("successful provider sign-out") {
+        store.activeAWSProfile.isEmpty
+    }
+
+    assert(store.profiles.first?.status == .needsLogin)
+    let commands = await runner.allCommands()
+    assert(commands == [["aws", "sso", "logout"], ["aws", "sso", "logout"]])
+}
+
+@MainActor
+func testProviderSignOutWarningContractsIdentifyScope() async throws {
+    let runner = LifecycleGateRunner()
+    let (store, directory, defaults, suiteName) = try makeLifecycleStore(
+        profileNames: ["alpha"],
+        runner: runner
+    )
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let gcp = CloudProfile(
+        provider: .gcp,
+        name: "dev",
+        accountID: "project-id",
+        roleName: "developer@example.com"
+    )
+    store.requestProviderSignOut(gcp)
+    guard case .providerSignOutConfirmation(let gcpConfirmation) = store.presentation?.route else {
+        assertionFailure("expected GCP confirmation")
+        return
+    }
+    assert(gcpConfirmation.warning.contains("developer@example.com"))
+    assert(gcpConfirmation.warning.contains("configurations sharing that account"))
+    store.confirmProviderSignOut(gcpConfirmation, from: .mainWindow)
+    await runner.waitForCommandCount(1)
+    await runner.releaseCommand(0, result: CommandResult(exitCode: 0, output: "revoked"))
+
+    let azure = CloudProfile(provider: .azure, name: "dev", accountID: "subscription-123")
+    store.requestProviderSignOut(azure)
+    guard case .providerSignOutConfirmation(let azureConfirmation) = store.presentation?.route else {
+        assertionFailure("expected Azure confirmation")
+        return
+    }
+    assert(azureConfirmation.warning.contains("subscription-123"))
+    assert(azureConfirmation.warning.contains("account cache globally"))
+    store.confirmProviderSignOut(azureConfirmation, from: .mainWindow)
+    await runner.waitForCommandCount(2)
+    await runner.releaseCommand(1, result: CommandResult(exitCode: 0, output: "signed out"))
+
+    let ambiguous = CloudProfile(provider: .gcp, name: "ambiguous")
+    store.requestProviderSignOut(ambiguous)
+    guard case .operationError(let error) = store.presentation?.route else {
+        assertionFailure("ambiguous GCP sign-out must explain why it cannot run")
+        return
+    }
+    assert(error.message.contains("cannot determine"))
+    let commands = await runner.allCommands()
+    assert(commands == [
+        ["gcloud", "auth", "revoke", "developer@example.com", "--configuration", "dev"],
+        ["az", "logout"]
+    ])
+}
+
+@MainActor
+func testGCPProviderSignOutClearsOnlyProfilesWithExactAccount() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ctx-gcp-signout-\(UUID().uuidString)")
+    let configurationsURL = directory.appendingPathComponent("configurations")
+    try FileManager.default.createDirectory(at: configurationsURL, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let profiles = [
+        ("shared-a", "shared@example.com", "project-a"),
+        ("shared-b", "SHARED@example.com", "project-b"),
+        ("different", "different@example.com", "project-c")
+    ]
+    for (name, account, project) in profiles {
+        try """
+        [core]
+        account = \(account)
+        project = \(project)
+        """.write(
+            to: configurationsURL.appendingPathComponent("config_\(name)"),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+    let suiteName = "ctx-gcp-signout-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set("shared-a", forKey: "activeGCPProfile")
+    let activeConfigURL = directory.appendingPathComponent("active_config")
+    try "different\n".write(to: activeConfigURL, atomically: true, encoding: .utf8)
+    let runner = RecordingCloudRunner()
+    let kubeDiscovery = KubeConfigDiscoveryService(
+        environment: { [:] },
+        customPath: { directory.appendingPathComponent("missing-kubeconfig").path }
+    )
+    let configURL = directory.appendingPathComponent("aws-config")
+    let store = ProfileStore(
+        configURL: configURL,
+        runner: runner,
+        kubeConfigDiscoveryService: kubeDiscovery,
+        localProfileDiscovery: LocalProfileDiscoveryService(
+            awsConfigURL: configURL,
+            kubeConfigDiscoveryService: kubeDiscovery,
+            gcpConfigurationsDirURL: { configurationsURL },
+            gcpActiveConfigURL: { activeConfigURL },
+            azureProfilesDirURL: { directory.appendingPathComponent("missing-azure") }
+        ),
+        profileCommands: ProfileCommandService(runner: runner),
+        updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+        awsCredentials: AWSCredentialService(
+            configURL: configURL,
+            credentialsURL: directory.appendingPathComponent("credentials")
+        ),
+        profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+        fileWatchers: ProfileFileWatcherService(),
+        folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        defaults: defaults,
+        startsBackgroundServices: false
+    )
+    assert(store.activeGCPProfile == "shared-a", "external gcloud state overrode the CTX-selected profile")
+    let requested = store.profiles.first { $0.name == "shared-a" }!
+
+    store.requestProviderSignOut(requested)
+    guard case .providerSignOutConfirmation(let confirmation) = store.presentation?.route else {
+        assertionFailure("expected GCP sign-out confirmation")
+        return
+    }
+    store.confirmProviderSignOut(confirmation, from: .mainWindow)
+    await waitForLifecycleCondition("GCP provider sign-out") {
+        store.profiles.first(where: { $0.name == "shared-a" })?.status == .needsLogin
+    }
+
+    assert(store.profiles.first(where: { $0.name == "shared-b" })?.status == .needsLogin)
+    let disconnectedIDs = Set(
+        defaults.stringArray(forKey: CTXDefaultsKey.manuallyDisconnectedProfileIDs) ?? []
+    )
+    assert(disconnectedIDs.contains(store.profiles.first { $0.name == "shared-a" }!.id))
+    assert(disconnectedIDs.contains(store.profiles.first { $0.name == "shared-b" }!.id))
+    assert(!disconnectedIDs.contains(store.profiles.first { $0.name == "different" }!.id))
+    assert(store.activeGCPProfile.isEmpty)
+    let commands = await runner.allCommands()
+    let revokeCommands = commands.filter { $0.starts(with: ["gcloud", "auth", "revoke"]) }
+    assert(revokeCommands == [
+        ["gcloud", "auth", "revoke", "shared@example.com", "--configuration", "shared-a"]
+    ])
+}
+
+@MainActor
+func testBrokerDisconnectFailuresPreserveStateAndSanitizeErrors() async throws {
+    let cases = [
+        (
+            context: "sdm-context",
+            user: "sdm-" + "user",
+            expected: ["sdm", "disconnect", "sdm-context"]
+        ),
+        (
+            context: "teleport-context",
+            user: "teleport-user",
+            expected: ["tsh", "kube", "logout", "teleport-context"]
+        )
+    ]
+    for testCase in cases {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ctx-broker-disconnect-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let kubeconfigURL = directory.appendingPathComponent("kubeconfig")
+        try kubeconfig(
+            context: testCase.context,
+            cluster: "broker-cluster",
+            user: testCase.user,
+            server: "https://cluster.example.com"
+        ).write(to: kubeconfigURL, atomically: true, encoding: .utf8)
+        let suiteName = "ctx-broker-disconnect-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let runner = RecordingCloudRunner()
+        await runner.setDefault(
+            CommandResult(exitCode: 1, output: "token=private-value disconnect rejected")
+        )
+        let configURL = directory.appendingPathComponent("aws-config")
+        let kubeDiscovery = KubeConfigDiscoveryService(
+            environment: { [:] },
+            customPath: { kubeconfigURL.path }
+        )
+        let store = ProfileStore(
+            configURL: configURL,
+            runner: runner,
+            kubeConfigDiscoveryService: kubeDiscovery,
+            profileCommands: ProfileCommandService(runner: runner),
+            updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
+            awsCredentials: AWSCredentialService(
+                configURL: configURL,
+                credentialsURL: directory.appendingPathComponent("credentials")
+            ),
+            profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
+            fileWatchers: ProfileFileWatcherService(),
+            folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+            defaults: defaults,
+            startsBackgroundServices: false
+        )
+        let profile = store.profiles.first { $0.name == testCase.context }!
+        let previousStatus = profile.status
+        let previousActiveContext = store.activeKubeContext
+
+        store.logout(profile)
+        await waitForLifecycleCondition("broker disconnect failure presentation") {
+            store.presentation != nil
+        }
+
+        let commands = await runner.allCommands()
+        assert(commands == [testCase.expected])
+        assert(store.profiles.first(where: { $0.id == profile.id })?.status == previousStatus)
+        assert(store.activeKubeContext == previousActiveContext)
+        guard case .operationError(let error) = store.presentation?.route else {
+            assertionFailure("broker disconnect failure must be presented")
+            continue
+        }
+        assert(error.title == "Disconnect Failed")
+        assert(!error.message.contains("private-value"))
+    }
+}
+
 testProviderLabelsStayCloudSpecific()
 testEnvironmentInferencePrefersSpecificProfileSignals()
 testBuiltInFolderIdentityIsStable()
@@ -2468,6 +4116,7 @@ testKubernetesContextProfileMapsToCloudProfile()
 testEnvironmentDetection()
 testKubernetesProviderDetection()
 try testKubeConfigDiscoverySingleFile()
+try testKubernetesBearerTokensNeverEnterSharedProfileState()
 try testKubeConfigDiscoveryHandlesNameAfterNestedClusterOrContextKey()
 try testKubeConfigDiscoveryUsesKubeconfigMultipath()
 try testKubeConfigDiscoveryCustomPathOverridesKubeconfig()
@@ -2539,12 +4188,25 @@ await testInspectionYAMLOmitsNamespaceForClusterScopedResources()
 await testInspectionYAMLDoesNotRequestSecretOrConfigMapValues()
 testInspectionYAMLAvailabilityMatrix()
 try await testKubeConfigMutationServiceAddsContextWithDefaults()
+try await testKubeConfigMutationServiceRequiresExplicitInsecureTLS()
+try await testKubeConfigMutationServiceNamespaceEditPreservesTLSPolicy()
 try await testKubeConfigMutationServiceTargetsGivenKubeconfigPath()
+try await testKubeConfigMutationServiceDuplicatesOnlyTheContextRecord()
 try await testKubeConfigMutationServiceAddsEKSExecCredential()
 try await testKubeConfigMutationServiceAddsInternalProxyWithoutUser()
 try await testKubeConfigMutationServiceUpdateClearsNamespaceWhenEmpty()
+try await testKubeConfigMutationServicePreservesCredentialsUnlessExplicitlyReplaced()
+testKubeContextEditorAllowsAddingATokenWhenThereIsNoCredential()
+try await testKubeConfigMutationServiceReplacesCredentialsWithoutErasingFirst()
+await testKubeConfigMutationServiceKeepsCredentialsWhenTheReplacementWriteFails()
+try await testKubeConfigMutationServiceReplacesEKSCredentialInASingleWrite()
+await testKubeConfigMutationServiceReportsAStaleFieldItCouldNotClear()
+try await testKubeConfigMutationServiceUsesExactNamesForJSONLookupsAndEscapedUnset()
 await testKubeConfigMutationServiceRedactsSensitiveFailureOutput()
 await testProfileCommandServiceBuildsProviderCommands()
+await testProfileCommandServiceReadsProviderPathsPerCommand()
+try await testProfileStoreReloadsLiveAWSPathAndSharesCommandDefaults()
+await testKubernetesVerificationPreservesContextPathAndProviderEnvironment()
 await testProfileCommandServiceRedactsFailedOutput()
 await testProfileCommandServiceStrongDMLoginAndVerify()
 try testCTXUpdateServiceParsesReleaseAndComparesVersions()
@@ -2553,14 +4215,57 @@ try testAWSCredentialsFileAuditFlagsConfigKeysThatOverrideTheConfigFile()
 try testCLIToolRequirementsCoverEachProfileShape()
 try testAWSSSOTokenStateDistinguishesInteractiveLoginFromSilentRefresh()
 try testAWSCredentialServiceParsesIdentityAndCredentials()
+try testAWSCredentialServiceRemovesOnlyCTXExportedTemporarySections()
+try testAWSCredentialCleanupPreservesReplacedLongLivedKeys()
 try testCloudProfilePersistenceServiceWritesAWSProfile()
 try await testProfileStoreAddsAWSProfileIntoVisibleStateImmediately()
 try testProfileStoreAddsCloudProfilesIntoTargetFolders()
 try await testProfileStoreKeepsKubeContextTargetFolderBeforeDiscoveryCatchesUp()
+try await testProfileStoreDuplicatesKubeContextWithoutMutatingSourceAndInheritsFolder()
+try await testKubeDuplicateRediscoveryMissDoesNotPersistFolderOverride()
+try testProfileStoreMigratesFolderMappingAfterSuccessfulCloudRename()
+try testProfileStoreRetainsFolderMappingWhenCloudPersistenceFails()
+try await testProfileStoreRetainsFolderMappingWhenKubeRediscoveryMissesRename()
 try await testProfileStorePromptsForFolderWhenCreatedWithoutOne()
 try await testProfileStoreTargetsContextsOwnKubeconfigFileNotJustThePrimaryOne()
 try await testProfileStoreLoginActuallySwitchesKubeContextEvenWhenStatusWasUnknown()
 try await testProfileStoreLoginStopsAtPreflightWhenARequiredCLIIsMissing()
+try await testRapidConnectsRunOneEffectiveCommandFlow()
+try await testDisconnectSupersedesLateConnectResult()
+try await testCancelledAWSActivationCannotRestoreClearedDefaultProfile()
+try await testAWSActivationNeverExportsOrWritesDefaultCredentials()
+try await testAWSActiveProfileChangeSupersedesInFlightExportBeforeWrite()
+try await testAWSGlobalSignOutCancelsOtherOperationsAndCleansExports()
+try await testProfileOperationsRemainIndependent()
+try await testVerificationNeverExportsAWSCredentials()
+try await testAWSLoginExportsExactlyOnce()
+try await testExplicitAWSExportSurfacesWriteFailure()
+try await testProviderSignOutRequiresMatchingConfirmationAndPreservesFailureState()
+try await testProviderSignOutWarningContractsIdentifyScope()
+try await testGCPProviderSignOutClearsOnlyProfilesWithExactAccount()
+try await testBrokerDisconnectFailuresPreserveStateAndSanitizeErrors()
+try await testMissingCLIRetryPublicationIsGenerationGated()
+try testPresentationRoutesAreOriginFilteredAndReportIsTyped()
+try await testPresentationConsumptionUsesExactRouteID()
+try await testAuthDismissPreservesNewerOperationError()
+try await testAuthCancellationStopsTheOwningConnectOperation()
+try await testProviderSelectionSwapsEditorInsideTheOpenSheet()
+try await testAWSExportRequiresExactActiveConnectedProfile()
+try await testVerificationDoesNotSelectProfileWithoutCTXIntent()
+try await testManualDisconnectRemainsAuthoritativeAfterRestart()
+try await testManualDisconnectSurvivesProfileRename()
+try testMenuPresentationFallsBackToMainWindow()
+try await testMenuProviderSignOutConfirmsOnHostAndRetainsOrigin()
+try testLifecycleSanitizerRedactsAWSAndAuthorizationSecrets()
+try await testFolderEditorDeleteSequenceDoesNotClobberNewerRoute()
+try await testAsyncLifecycleFailureRetainsOrigin()
+try await testKubeActivationIgnoresStaleDiscoveryAndConfirmsSuccess()
+try await testKubeActivationFailureAndSupersessionClearPendingState()
+try await testDisconnectCancelsOwnedPendingKubeActivation()
+try await testMissingKubeProfileCancelsAndRevertsOwnedActivation()
+try await testLocalKubeDisconnectSurvivesRefreshAndVerification()
+try await testMultiFileActivationConfirmsAgainstTargetedKubeconfig()
+try await testBrokerPollingStopsWhenLifecycleOperationIsCancelled()
 @MainActor
 func testKubernetesContextStatusUpdatesOnVerificationFailureAndExpiration() async throws {
     let store = ProfileStore(startsBackgroundServices: false)
@@ -2590,6 +4295,31 @@ func testCloudCommandRunnerTerminatesAHangingProcess() async throws {
     assert(result.exitCode == 124, "expected timeout exit code, got \(result.exitCode)")
     assert(result.output.contains("timed out"), "timeout should be visible in the output")
     assert(elapsed < 10, "runner should return near the timeout, took \(elapsed)s")
+}
+
+func testCloudCommandRunnerMergesOverridesWithSafetyEnvironment() async throws {
+    let result = await CloudCommandRunner().run(
+        [
+            "sh", "-c",
+            "printf '%s\\n%s\\n%s\\n%s' \"$AWS_CONFIG_FILE\" \"$BROWSER\" \"$AWS_SSO_BROWSER\" \"$PATH\""
+        ],
+        environmentOverrides: [
+            "AWS_CONFIG_FILE": "/configs/aws",
+            "BROWSER": "unsafe-browser",
+            "AWS_SSO_BROWSER": "unsafe-sso-browser",
+            "PATH": "/custom/bin"
+        ],
+        timeout: 2,
+        onOutput: nil
+    )
+
+    assert(result.exitCode == 0)
+    let lines = result.output.components(separatedBy: .newlines)
+    assert(lines[0] == "/configs/aws")
+    assert(lines[1] == "echo")
+    assert(lines[2] == "none")
+    assert(lines[3].contains("/custom/bin"))
+    assert(lines[3].contains("/opt/homebrew/bin"))
 }
 
 /// Cancelling the task must actually kill the subprocess, not just abandon it.
@@ -3263,6 +4993,7 @@ try testHelmReleaseSecretLabelsKeepOnlyTheCurrentRevision()
 try await testHelmSecretFallbackNeverRequestsSecretValues()
 
 try await testCloudCommandRunnerTerminatesAHangingProcess()
+try await testCloudCommandRunnerMergesOverridesWithSafetyEnvironment()
 try await testCloudCommandRunnerCancellationTerminatesTheSubprocess()
 try await testProfileFileWatcherSurvivesAtomicReplacement()
 try testShellCommandSafetyRejectsInjection()
@@ -3334,13 +5065,25 @@ func testGroupedProfilesStayInSyncWithEveryMutation() throws {
     store.move(prod, to: payments)
     assert(grouped("Payments") == ["shop-prod"])
 
-    store.deleteFolder(payments)
+    store.requestFolderDeletion(payments, from: .settings)
+    assert(store.allFolders.contains { $0.id == payments.id }, "requesting deletion must not mutate folders")
+    guard let deletion = store.presentation else {
+        assertionFailure("folder deletion must publish a confirmation route")
+        return
+    }
+    store.consumePresentation(id: deletion.id, from: .mainWindow)
+    assert(store.presentation?.id == deletion.id, "a non-originating surface must not consume the route")
+    store.confirmFolderDeletion(payments, from: .mainWindow)
+    assert(store.allFolders.contains { $0.id == payments.id }, "a non-originating surface must not confirm deletion")
+    assert(store.presentation?.id == deletion.id, "wrong-origin confirmation must preserve the request")
+    store.confirmFolderDeletion(payments, from: .settings)
     assert(!store.allFolders.contains { $0.id == payments.id })
     assert(grouped("Production") == ["shop-prod"], "profile must fall back to its inferred folder: \(grouped("Production"))")
 
     // Hiding a built-in folder removes it from both views.
     let production = store.allFolders.first { $0.provider == .aws && $0.name == "Production" }!
-    store.deleteFolder(production)
+    store.requestFolderDeletion(production, from: .mainWindow)
+    store.confirmFolderDeletion(production, from: .mainWindow)
     assert(!store.allFolders.contains { $0.id == production.id })
     assert(!store.groupedProfiles.contains { $0.folder.id == production.id })
     _ = production
@@ -3442,17 +5185,33 @@ func testUnchangedRediscoveryDoesNotRepublishProfiles() async throws {
     let suiteName = "ctx-idem-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    // Everything the store reads or writes is scoped to this temporary directory
+    // and to `defaults`: the developer's own kubeconfig, gcloud and Azure state —
+    // and their remembered active profiles — must survive a test run untouched.
+    let kubeConfigDiscoveryService = KubeConfigDiscoveryService(
+        environment: { [:] },
+        customPath: { dir.appendingPathComponent("missing-kubeconfig").path }
+    )
     let runner = RecordingCloudRunner()
     let store = ProfileStore(
         configURL: configURL,
         runner: runner,
-        kubeConfigDiscoveryService: KubeConfigDiscoveryService(environment: { [:] }, customPath: { nil }),
+        kubeConfigDiscoveryService: kubeConfigDiscoveryService,
+        localProfileDiscovery: LocalProfileDiscoveryService(
+            awsConfigURL: configURL,
+            kubeConfigDiscoveryService: kubeConfigDiscoveryService,
+            gcpConfigurationsDirURL: { dir.appendingPathComponent("missing-gcloud") },
+            gcpActiveConfigURL: { dir.appendingPathComponent("missing-gcloud/active_config") },
+            azureProfilesDirURL: { dir.appendingPathComponent("missing-azure") }
+        ),
         profileCommands: ProfileCommandService(runner: runner),
         updateService: CTXUpdateService(runner: runner, currentVersion: { "0.1.0" }),
         awsCredentials: AWSCredentialService(configURL: configURL, credentialsURL: dir.appendingPathComponent("creds")),
         profilePersistence: CloudProfilePersistenceService(awsConfigURL: configURL),
         fileWatchers: ProfileFileWatcherService(),
         folderPreferences: CloudFolderPreferencesStore(defaults: defaults),
+        defaults: defaults,
         startsBackgroundServices: false
     )
 
@@ -3462,14 +5221,18 @@ func testUnchangedRediscoveryDoesNotRepublishProfiles() async throws {
     try await Task.sleep(nanoseconds: 900_000_000)
 
     var publishCount = 0
-    let cancellable = store.$profiles.dropFirst().sink { _ in publishCount += 1 }
+    var publications: [[String]] = []
+    let cancellable = store.$profiles.dropFirst().sink { profiles in
+        publishCount += 1
+        publications.append(profiles.map { "\($0.id)=\($0.status.rawValue)" })
+    }
     defer { cancellable.cancel() }
 
     // Second pass: nothing on disk changed and verification returns what it
     // returned last time, so the whole cycle must be a no-op.
     store.refresh()
     try await Task.sleep(nanoseconds: 900_000_000)
-    assert(publishCount == 0, "an unchanged rediscovery republished \(publishCount) times")
+    assert(publishCount == 0, "an unchanged rediscovery republished \(publishCount) times: \(publications)")
 
     // A real change still comes through.
     try "[profile shop-prod]\nsso_account_id = 123456789012\n\n[profile shop-dev]\nsso_account_id = 210987654321\n"
@@ -3477,9 +5240,6 @@ func testUnchangedRediscoveryDoesNotRepublishProfiles() async throws {
     store.refresh()
     try await Task.sleep(nanoseconds: 900_000_000)
     assert(publishCount >= 1, "a real change must republish")
-    // Scoped to this test's own config file: GCP and Azure discovery, and the
-    // default kubeconfig, are not injectable, so the store also sees whatever the
-    // machine running the tests happens to have.
     let discovered = store.profiles.filter { $0.name.hasPrefix("shop-") }.map(\.name).sorted()
     assert(discovered == ["shop-dev", "shop-prod"], "got \(discovered)")
 }

@@ -54,6 +54,10 @@ public protocol KubectlCommandBuilding: Sendable {
     func inspectionCommand(context: String, arguments: [String]) throws -> KubectlCommand
 }
 
+public protocol KubectlConfigurationCommandBuilding: Sendable {
+    func configurationCommand(arguments: [String]) throws -> KubectlCommand
+}
+
 public protocol KubectlProcessHandling: Sendable {
     var isRunning: Bool { get }
     func terminate()
@@ -65,13 +69,25 @@ public protocol KubectlProcessStarting: Sendable {
     func start(_ command: KubectlCommand) throws -> any KubectlProcessHandling
 }
 
-public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, KubectlProcessStarting {
+public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, KubectlConfigurationCommandBuilding, KubectlProcessStarting {
     private let environment: @Sendable () -> [String: String]
+    private let providerEnvironment: @Sendable () -> [String: String]
 
-    public init(
+    public convenience init(
         environment: @escaping @Sendable () -> [String: String] = { ProcessInfo.processInfo.environment }
     ) {
+        self.init(
+            environment: environment,
+            providerEnvironment: { ProviderCommandEnvironment.overrides() }
+        )
+    }
+
+    public init(
+        environment: @escaping @Sendable () -> [String: String],
+        providerEnvironment: @escaping @Sendable () -> [String: String]
+    ) {
         self.environment = environment
+        self.providerEnvironment = providerEnvironment
     }
 
     public func inspectionCommand(context: String, arguments: [String]) throws -> KubectlCommand {
@@ -84,8 +100,17 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
         )
     }
 
+    public func configurationCommand(arguments: [String]) throws -> KubectlCommand {
+        guard !arguments.isEmpty else { throw KubectlRunnerError.emptyArguments }
+        return KubectlCommand(
+            executablePath: try resolveKubectlPath(),
+            arguments: arguments
+        )
+    }
+
     public func run(_ command: KubectlCommand, timeout: TimeInterval) async throws -> KubectlResult {
         let environment = environmentWithSearchPath(environment())
+            .merging(providerEnvironment()) { _, override in override }
         let processBox = ProcessBox()
         return try await withTaskCancellationHandler {
             try await Task.detached {
@@ -149,7 +174,9 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-        process.environment = environmentWithSearchPath(environment()).merging(command.environmentOverrides) { _, override in override }
+        process.environment = environmentWithSearchPath(environment())
+            .merging(providerEnvironment()) { _, override in override }
+            .merging(command.environmentOverrides) { _, override in override }
         do {
             try process.run()
             try? stdinPipe.fileHandleForWriting.close()
@@ -187,103 +214,6 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
         var merged = environment
         merged["PATH"] = searchPaths(in: environment).joined(separator: ":")
         return merged
-    }
-}
-
-private final class KubectlStartedProcess: KubectlProcessHandling, @unchecked Sendable {
-    private let process: Process
-    private let stdoutPipe: Pipe
-    private let stderrPipe: Pipe
-    private let outputLock = NSLock()
-    private var outputData = Data()
-    private var terminationHandler: (@Sendable () -> Void)?
-
-    init(process: Process, stdoutPipe: Pipe, stderrPipe: Pipe) {
-        self.process = process
-        self.stdoutPipe = stdoutPipe
-        self.stderrPipe = stderrPipe
-        
-        setupReadabilityHandlers()
-        setupTerminationHandler()
-    }
-
-    deinit {
-        cleanup()
-    }
-
-    private func setupReadabilityHandlers() {
-        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-                return
-            }
-            self?.appendData(data)
-        }
-        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-                return
-            }
-            self?.appendData(data)
-        }
-    }
-
-    private func setupTerminationHandler() {
-        process.terminationHandler = { [weak self] _ in
-            self?.handleTermination()
-        }
-    }
-
-    private func handleTermination() {
-        cleanup()
-        let handler: (@Sendable () -> Void)?
-        outputLock.lock()
-        handler = terminationHandler
-        outputLock.unlock()
-        handler?()
-    }
-
-    private func appendData(_ data: Data) {
-        outputLock.lock()
-        defer { outputLock.unlock() }
-        outputData.append(data)
-        if outputData.count > 64 * 1024 {
-            outputData = outputData.suffix(64 * 1024)
-        }
-    }
-
-    var isRunning: Bool {
-        process.isRunning
-    }
-
-    func terminate() {
-        cleanup()
-        guard process.isRunning else { return }
-        process.terminate()
-    }
-
-    private func cleanup() {
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-    }
-
-    func outputIfExited() -> String {
-        cleanup()
-        outputLock.lock()
-        defer { outputLock.unlock() }
-        return String(decoding: outputData, as: UTF8.self)
-    }
-
-    func setTerminationHandler(_ handler: @Sendable @escaping () -> Void) {
-        outputLock.lock()
-        terminationHandler = handler
-        let alreadyExited = !process.isRunning
-        outputLock.unlock()
-        if alreadyExited {
-            handler()
-        }
     }
 }
 

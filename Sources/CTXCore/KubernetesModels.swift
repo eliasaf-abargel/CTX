@@ -40,6 +40,17 @@ public struct ClusterMetadata: Codable, Equatable, Sendable {
     }
 }
 
+public enum KubernetesCredentialKind: String, Codable, Hashable, Sendable {
+    case none
+    case bearerToken
+    case tokenFile
+    case execPlugin
+    case clientCertificate
+    case basicAuth
+    case authProvider
+    case unknown
+}
+
 public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendable {
     public var id: String {
         "\(kubeconfigPath):\(contextName)"
@@ -55,7 +66,9 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
     public var environmentDetection: EnvironmentDetectionResult
     public var isCurrent: Bool
     public var clusterMetadata: ClusterMetadata
-    public var token: String
+    public var credentialKind: KubernetesCredentialKind
+    public var hasCredentials: Bool
+    public var skipTLSVerification: Bool
 
     public init(
         contextName: String,
@@ -67,7 +80,9 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         environmentDetection: EnvironmentDetectionResult = EnvironmentDetectionResult(type: .unknown, confidence: 0, source: "none"),
         isCurrent: Bool = false,
         clusterMetadata: ClusterMetadata? = nil,
-        token: String = ""
+        credentialKind: KubernetesCredentialKind = .none,
+        hasCredentials: Bool = false,
+        skipTLSVerification: Bool = false
     ) {
         self.contextName = contextName
         self.clusterName = clusterName
@@ -79,7 +94,93 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         self.environmentDetection = environmentDetection
         self.isCurrent = isCurrent
         self.clusterMetadata = clusterMetadata ?? ClusterMetadata(id: clusterName.isEmpty ? contextName : clusterName, name: clusterName, serverURL: "")
-        self.token = token
+        self.credentialKind = credentialKind
+        self.hasCredentials = hasCredentials
+        self.skipTLSVerification = skipTLSVerification
+    }
+
+    @available(*, deprecated, message: "Token values are discarded; use credentialKind and hasCredentials.")
+    public init(
+        contextName: String,
+        clusterName: String,
+        userName: String = "",
+        namespace: String = "",
+        kubeconfigPath: String,
+        providerType: KubernetesProviderType = .unknown,
+        environmentDetection: EnvironmentDetectionResult = EnvironmentDetectionResult(type: .unknown, confidence: 0, source: "none"),
+        isCurrent: Bool = false,
+        clusterMetadata: ClusterMetadata? = nil,
+        token: String
+    ) {
+        self.init(
+            contextName: contextName,
+            clusterName: clusterName,
+            userName: userName,
+            namespace: namespace,
+            kubeconfigPath: kubeconfigPath,
+            providerType: providerType,
+            environmentDetection: environmentDetection,
+            isCurrent: isCurrent,
+            clusterMetadata: clusterMetadata,
+            credentialKind: token.isEmpty ? .none : .bearerToken,
+            hasCredentials: !token.isEmpty
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case contextName
+        case clusterName
+        case userName
+        case namespace
+        case kubeconfigPath
+        case providerType
+        case environmentType
+        case environmentDetection
+        case isCurrent
+        case clusterMetadata
+        case credentialKind
+        case hasCredentials
+        case skipTLSVerification
+        case token
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        contextName = try values.decode(String.self, forKey: .contextName)
+        clusterName = try values.decode(String.self, forKey: .clusterName)
+        userName = try values.decodeIfPresent(String.self, forKey: .userName) ?? ""
+        namespace = try values.decodeIfPresent(String.self, forKey: .namespace) ?? ""
+        kubeconfigPath = try values.decode(String.self, forKey: .kubeconfigPath)
+        providerType = try values.decodeIfPresent(KubernetesProviderType.self, forKey: .providerType) ?? .unknown
+        environmentDetection = try values.decodeIfPresent(EnvironmentDetectionResult.self, forKey: .environmentDetection)
+            ?? EnvironmentDetectionResult(type: .unknown, confidence: 0, source: "none")
+        environmentType = environmentDetection.type
+        isCurrent = try values.decodeIfPresent(Bool.self, forKey: .isCurrent) ?? false
+        clusterMetadata = try values.decodeIfPresent(ClusterMetadata.self, forKey: .clusterMetadata)
+            ?? ClusterMetadata(id: clusterName.isEmpty ? contextName : clusterName, name: clusterName)
+
+        let legacyTokenWasPresent = !(try values.decodeIfPresent(String.self, forKey: .token) ?? "").isEmpty
+        credentialKind = try values.decodeIfPresent(KubernetesCredentialKind.self, forKey: .credentialKind)
+            ?? (legacyTokenWasPresent ? .bearerToken : .none)
+        hasCredentials = try values.decodeIfPresent(Bool.self, forKey: .hasCredentials) ?? legacyTokenWasPresent
+        skipTLSVerification = try values.decodeIfPresent(Bool.self, forKey: .skipTLSVerification) ?? false
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(contextName, forKey: .contextName)
+        try values.encode(clusterName, forKey: .clusterName)
+        try values.encode(userName, forKey: .userName)
+        try values.encode(namespace, forKey: .namespace)
+        try values.encode(kubeconfigPath, forKey: .kubeconfigPath)
+        try values.encode(providerType, forKey: .providerType)
+        try values.encode(environmentType, forKey: .environmentType)
+        try values.encode(environmentDetection, forKey: .environmentDetection)
+        try values.encode(isCurrent, forKey: .isCurrent)
+        try values.encode(clusterMetadata, forKey: .clusterMetadata)
+        try values.encode(credentialKind, forKey: .credentialKind)
+        try values.encode(hasCredentials, forKey: .hasCredentials)
+        try values.encode(skipTLSVerification, forKey: .skipTLSVerification)
     }
 }
 

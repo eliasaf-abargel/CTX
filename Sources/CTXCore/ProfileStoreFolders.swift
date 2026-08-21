@@ -93,7 +93,7 @@ extension ProfileStore {
         lastMessage = "Updated folder \(name)"
     }
 
-    public func deleteFolder(_ folder: CloudFolder) {
+    internal func deleteFolder(_ folder: CloudFolder) {
         if folder.isCustom {
             customFolders.removeAll { $0.id == folder.id }
             folderOverrides = folderOverrides.filter { $0.value != folder.id }
@@ -135,11 +135,22 @@ extension ProfileStore {
         folderPreferences.saveFolderCustomizations(folderCustomizations)
     }
 
-    internal func promptForFolderIfUnassigned(_ profile: CloudProfile, targetFolder: CloudFolder?) {
+    internal func promptForFolderIfUnassigned(
+        _ profile: CloudProfile,
+        targetFolder: CloudFolder?,
+        from origin: ProfilePresentationSurface
+    ) {
         guard targetFolder == nil else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.pendingFolderPrompt = profile
+        guard presentation != nil else {
+            present(.pendingFolderAssignment(profile), from: origin)
+            return
         }
+        guard let blockingPresentationID = presentation?.id else { return }
+        deferredPresentation = DeferredProfilePresentation(
+            expectedPresentationID: blockingPresentationID,
+            route: .pendingFolderAssignment(profile),
+            origin: origin
+        )
     }
 
     internal func assignFolder(_ folder: CloudFolder?, provider: CloudProvider, profileName: String) {

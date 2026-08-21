@@ -48,7 +48,8 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
     public var region: String
     public var ssoStartURL: String
     public var ssoRegion: String
-    public var token: String
+    public var kubernetesCredentialKind: KubernetesCredentialKind
+    public var hasKubernetesCredentials: Bool
     public var status: ProfileStatus
 
     public init(
@@ -59,7 +60,8 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         region: String = "",
         ssoStartURL: String = "",
         ssoRegion: String = "",
-        token: String = "",
+        kubernetesCredentialKind: KubernetesCredentialKind = .none,
+        hasKubernetesCredentials: Bool = false,
         status: ProfileStatus = .unknown
     ) {
         self.provider = provider
@@ -69,8 +71,81 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         self.region = region
         self.ssoStartURL = ssoStartURL
         self.ssoRegion = ssoRegion
-        self.token = token
+        self.kubernetesCredentialKind = kubernetesCredentialKind
+        self.hasKubernetesCredentials = hasKubernetesCredentials
         self.status = status
+    }
+
+    @available(*, deprecated, message: "Token values are discarded; use Kubernetes credential metadata.")
+    public init(
+        provider: CloudProvider,
+        name: String,
+        accountID: String = "",
+        roleName: String = "",
+        region: String = "",
+        ssoStartURL: String = "",
+        ssoRegion: String = "",
+        token: String,
+        status: ProfileStatus = .unknown
+    ) {
+        self.init(
+            provider: provider,
+            name: name,
+            accountID: accountID,
+            roleName: roleName,
+            region: region,
+            ssoStartURL: ssoStartURL,
+            ssoRegion: ssoRegion,
+            kubernetesCredentialKind: provider == .kubernetes && !token.isEmpty ? .bearerToken : .none,
+            hasKubernetesCredentials: provider == .kubernetes && !token.isEmpty,
+            status: status
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case name
+        case accountID
+        case roleName
+        case region
+        case ssoStartURL
+        case ssoRegion
+        case kubernetesCredentialKind
+        case hasKubernetesCredentials
+        case status
+        case token
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try values.decode(CloudProvider.self, forKey: .provider)
+        name = try values.decode(String.self, forKey: .name)
+        accountID = try values.decodeIfPresent(String.self, forKey: .accountID) ?? ""
+        roleName = try values.decodeIfPresent(String.self, forKey: .roleName) ?? ""
+        region = try values.decodeIfPresent(String.self, forKey: .region) ?? ""
+        ssoStartURL = try values.decodeIfPresent(String.self, forKey: .ssoStartURL) ?? ""
+        ssoRegion = try values.decodeIfPresent(String.self, forKey: .ssoRegion) ?? ""
+        status = try values.decodeIfPresent(ProfileStatus.self, forKey: .status) ?? .unknown
+
+        let legacyTokenWasPresent = !(try values.decodeIfPresent(String.self, forKey: .token) ?? "").isEmpty
+        kubernetesCredentialKind = try values.decodeIfPresent(KubernetesCredentialKind.self, forKey: .kubernetesCredentialKind)
+            ?? (provider == .kubernetes && legacyTokenWasPresent ? .bearerToken : .none)
+        hasKubernetesCredentials = try values.decodeIfPresent(Bool.self, forKey: .hasKubernetesCredentials)
+            ?? (provider == .kubernetes && legacyTokenWasPresent)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(provider, forKey: .provider)
+        try values.encode(name, forKey: .name)
+        try values.encode(accountID, forKey: .accountID)
+        try values.encode(roleName, forKey: .roleName)
+        try values.encode(region, forKey: .region)
+        try values.encode(ssoStartURL, forKey: .ssoStartURL)
+        try values.encode(ssoRegion, forKey: .ssoRegion)
+        try values.encode(kubernetesCredentialKind, forKey: .kubernetesCredentialKind)
+        try values.encode(hasKubernetesCredentials, forKey: .hasKubernetesCredentials)
+        try values.encode(status, forKey: .status)
     }
 
     public var accountLabel: String {
