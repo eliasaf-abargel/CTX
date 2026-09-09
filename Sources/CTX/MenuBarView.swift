@@ -116,8 +116,9 @@ struct MenuBarView: View {
                                     MenuBarFolderSection(
                                         group: group,
                                         isExpanded: binding(for: group.id),
-                                        activeProfileName: activeName(for: group.folder.provider),
-                                        selectBinding: activeBinding(for:)
+                                        activeProfileName: store.activeProfileName(for: group.folder.provider),
+                                        selectBinding: activeBinding(for:),
+                                        openTerminal: { store.openTerminal(for: $0) }
                                     )
                                 }
                             }
@@ -249,9 +250,7 @@ struct MenuBarView: View {
     }
 
     private var activeMenuProfiles: [CloudProfile] {
-        CloudProvider.allCases.compactMap { provider in
-            store.activeProfile(for: provider)
-        }
+        store.connectedProfiles
     }
 
     private var activeKubernetesContext: KubernetesContextProfile? {
@@ -267,26 +266,9 @@ struct MenuBarView: View {
         ProfileGrouping.expansionBinding(for: id, in: $expandedGroups, forcedOpenWhile: searchQuery)
     }
 
-    private func activeName(for provider: CloudProvider) -> String {
-        switch provider {
-        case .aws: store.activeAWSProfile
-        case .gcp: store.activeGCPProfile
-        case .azure: store.activeAzureProfile
-        case .kubernetes: store.activeKubeContext
-        }
-    }
 
     private func activeBinding(for profile: CloudProfile) -> Binding<Bool> {
-        Binding(
-            get: { store.isActive(profile) },
-            set: { isOn in
-                if isOn {
-                    store.login(profile, from: .menuBar)
-                } else if store.isActive(profile) {
-                    store.logout(profile, from: .menuBar)
-                }
-            }
-        )
+        store.connectionBinding(for: profile, from: .menuBar)
     }
 
 
@@ -347,6 +329,7 @@ private struct MenuBarFolderSection: View {
     @Binding var isExpanded: Bool
     let activeProfileName: String
     let selectBinding: (CloudProfile) -> Binding<Bool>
+    let openTerminal: (CloudProfile) -> Void
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
@@ -355,7 +338,8 @@ private struct MenuBarFolderSection: View {
                     MenuBarProfileRow(
                         profile: profile,
                         isActive: activeProfileName == profile.name,
-                        isOn: selectBinding(profile)
+                        isOn: selectBinding(profile),
+                        onOpenTerminal: { openTerminal(profile) }
                     )
                 }
             }
@@ -396,6 +380,9 @@ private struct MenuBarProfileRow: View {
     let profile: CloudProfile
     let isActive: Bool
     @Binding var isOn: Bool
+    var onOpenTerminal: (() -> Void)?
+
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -411,15 +398,10 @@ private struct MenuBarProfileRow: View {
                 .foregroundStyle(isActive ? .primary : .secondary)
                 .lineLimit(1)
 
-            if profile.status == .connected {
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 4, height: 4)
-            } else if profile.status.isBusy {
-                Circle()
-                    .fill(profile.status.color)
-                    .frame(width: 4, height: 4)
-            } else if profile.status == .needsLogin {
+            // The switch already says "connected", so a green dot beside it would say it
+            // twice. Orange is kept: it means off for a reason, which a switch alone
+            // cannot express. Busy is carried by the switch itself.
+            if profile.status == .needsLogin {
                 Circle()
                     .fill(Color.orange)
                     .frame(width: 4, height: 4)
@@ -427,8 +409,18 @@ private struct MenuBarProfileRow: View {
 
             Spacer(minLength: 8)
 
-            MiniSwitch(isOn: $isOn)
+            if let onOpenTerminal {
+                TerminalButton(
+                    profile: profile,
+                    isVisible: isHovering,
+                    size: 10.5,
+                    action: onOpenTerminal
+                )
+            }
+
+            MiniSwitch(isOn: $isOn, isBusy: profile.status.isBusy)
         }
+        .onHover { isHovering = $0 }
         .padding(.horizontal, 8)
         .frame(height: 28)
         .background(isActive ? Color.accentColor.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -438,36 +430,3 @@ private struct MenuBarProfileRow: View {
     }
 }
 
-private struct MiniSwitch: View {
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Button {
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
-                isOn.toggle()
-            }
-        } label: {
-            ZStack(alignment: isOn ? .trailing : .leading) {
-                Capsule()
-                    .fill(isOn ? Color.accentColor.opacity(0.88) : Color.secondary.opacity(0.18))
-                    .background(.thinMaterial, in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .stroke(.white.opacity(isOn ? 0.24 : 0.12), lineWidth: 0.5)
-                    }
-                    .frame(width: 28, height: 16)
-                    .shadow(color: (isOn ? Color.accentColor : Color.black).opacity(0.22), radius: 3, y: 1)
-
-                Circle()
-                    .fill(.white)
-                    .frame(width: 12, height: 12)
-                    .padding(2)
-                    .shadow(color: .black.opacity(0.24), radius: 1, y: 0.5)
-            }
-            .frame(width: 32, height: 22)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(isOn ? "Disconnect" : "Connect")
-    }
-}

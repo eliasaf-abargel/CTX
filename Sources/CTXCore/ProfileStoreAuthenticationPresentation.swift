@@ -28,7 +28,7 @@ extension ProfileStore {
             kind: kind,
             cache: .none,
             durationMs: max(0, Int(Date().timeIntervalSince(started) * 1000)),
-            outcome: outcome == "success" ? .success : .error
+            outcome: outcome == "success" ? .success : (outcome == "skipped" ? .skipped : .error)
         )
     }
 

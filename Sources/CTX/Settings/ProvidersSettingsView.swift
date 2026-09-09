@@ -10,6 +10,7 @@ struct ProvidersSettingsView: View {
     @AppStorage(CTXDefaultsKey.azureProfilesDirPath) private var azureProfilesDirPath = ""
     @AppStorage(CTXDefaultsKey.azureCLIDirPath) private var azureCLIDirPath = ""
     @AppStorage(CTXDefaultsKey.kubeconfigPath) private var kubeconfigPath = ""
+    @AppStorage(CTXDefaultsKey.terminalApplication) private var terminalApplication = ""
 
     var body: some View {
         Form {
@@ -70,6 +71,21 @@ struct ProvidersSettingsView: View {
             }
 
             Section {
+                Picker("Open terminals in", selection: $terminalApplication) {
+                    Text("Whichever is installed").tag("")
+                    ForEach(TerminalApplication.installed()) { terminal in
+                        Text(terminal.name).tag(terminal.bundlePath)
+                    }
+                }
+            } header: {
+                Text("Terminal")
+            } footer: {
+                Text("Used by the terminal button on a profile. The shell opens with that profile's environment set.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Menu {
                     Button("AWS Profile…") {
                         store.presentProfileEditor(.add(provider: .aws, targetFolder: nil), from: .settings)
@@ -92,12 +108,15 @@ struct ProvidersSettingsView: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .onChange(of: awsConfigPath) { _, _ in store.reloadConfiguredSources() }
-        .onChange(of: awsCredentialsPath) { _, _ in store.reloadConfiguredSources() }
-        .onChange(of: gcpConfigDirPath) { _, _ in store.reloadConfiguredSources() }
-        .onChange(of: azureProfilesDirPath) { _, _ in store.reloadConfiguredSources() }
-        .onChange(of: azureCLIDirPath) { _, _ in store.reloadConfiguredSources() }
-        .onChange(of: kubeconfigPath) { _, _ in store.reloadConfiguredSources() }
+        // One rule, one place: any configured location changing reloads the sources.
+        // Six separate modifiers meant a new path silently did nothing until someone
+        // remembered to add a seventh.
+        .onChange(of: configuredPaths) { _, _ in store.reloadConfiguredSources() }
+    }
+
+    private var configuredPaths: [String] {
+        [awsConfigPath, awsCredentialsPath, gcpConfigDirPath,
+         azureProfilesDirPath, azureCLIDirPath, kubeconfigPath]
     }
 
     private func providerHeader(

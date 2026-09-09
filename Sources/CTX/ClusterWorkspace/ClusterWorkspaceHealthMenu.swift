@@ -3,6 +3,15 @@ import SwiftUI
 
 struct ClusterWorkspaceHealthMenu: View {
     @ObservedObject var viewModel: ClusterWorkspaceViewModel
+    let store: ProfileStore
+
+    /// Only for the two failures CTX can remediate here without guessing
+    /// which command actually needs to run — see `reconnectKubernetesAuth`.
+    private var reconnectableCategory: KubernetesDiagnosticCategory? {
+        guard let category = viewModel.lastRefreshIssue?.category,
+              category == .gcpAuthExpired || category == .awsSSOExpired else { return nil }
+        return category
+    }
 
     private var hasDeniedRBAC: Bool {
         viewModel.overviewSummary.rbac.contains { $0.allowed == false }
@@ -43,6 +52,14 @@ struct ClusterWorkspaceHealthMenu: View {
             Text("Last refresh: \(viewModel.lastRefreshedText)")
             if let issue = viewModel.lastRefreshIssue {
                 Text(issue.category.presentationSummary)
+            }
+            if let category = reconnectableCategory {
+                Divider()
+                Button {
+                    store.reconnectKubernetesAuth(for: viewModel.context, category: category)
+                } label: {
+                    Label("Reconnect", systemImage: "arrow.triangle.2.circlepath")
+                }
             }
             Divider()
             Button {

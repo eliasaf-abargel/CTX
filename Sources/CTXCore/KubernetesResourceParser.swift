@@ -347,22 +347,6 @@ enum KubernetesResourceParser {
         return list(.secretMetadata, ["Namespace", "Name", "Type", "Keys", "Age"], rows)
     }
 
-    public static func genericCRDRow(_ item: [String: Any]) -> KubernetesResourceRow {
-        let metadata = dict(item["metadata"])
-        let status = dict(item["status"])
-        let name = string(metadata["name"])
-        let ns = namespace(metadata)
-        let kind = string(item["kind"])
-        let phase = string(status["phase"]).isEmpty ? (string(status["state"]).isEmpty ? "Active" : string(status["state"])) : string(status["phase"])
-        return row("\(ns)/\(name)", [
-            "Namespace": ns,
-            "Kind": kind.isEmpty ? "CustomResource" : kind,
-            "Name": name,
-            "Status": phase,
-            "Age": age(metadata)
-        ])
-    }
-
     private static func hpaRow(_ item: [String: Any]) -> KubernetesResourceRow {
         let metadata = dict(item["metadata"])
         let spec = dict(item["spec"])

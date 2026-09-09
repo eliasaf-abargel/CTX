@@ -16,8 +16,7 @@ public enum TopologyGraphNodeKind: String, Sendable, Codable, CaseIterable {
     case service
     case workload
     case pod
-    /// Several interchangeable healthy pods drawn as one node. See
-    /// `ClusterTopologyGraph.collapsingHealthyPods`.
+    /// Several interchangeable healthy pods drawn as one node.
     case podGroup
     /// Successfully completed pods hidden from the active runtime path.
     case terminalGroup
@@ -213,18 +212,6 @@ public struct ClusterTopologyGraph: Sendable {
     /// of the graph, so you can see both the lineage and where it sits.
     public func lineage(of id: String) -> Set<String> {
         walk(from: id) { self.edgesOut($0).map(\.target) + self.edgesIn($0).map(\.source) }
-    }
-
-    /// Compatibility entry point routed through the production projection policy.
-    @available(*, deprecated, message: "Use TopologyRelevanceProjector.project(_:options:).graph")
-    public func collapsingHealthyPods(threshold: Int = 5) -> ClusterTopologyGraph {
-        TopologyRelevanceProjector.project(
-            self,
-            options: TopologyProjectionOptions(
-                budget: min(nodes.count, TopologyProjectionOptions.hardCeiling),
-                perParentCap: max(1, threshold)
-            )
-        ).graph
     }
 
     /// Everything this node depends on, walking upstream only — dbt's `+model`.

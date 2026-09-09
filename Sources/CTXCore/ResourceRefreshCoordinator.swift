@@ -186,16 +186,6 @@ public actor ResourceRefreshCoordinator {
         }
     }
 
-    /// Clears cached entries for a context, or a narrower namespace/kind slice of it.
-    public func invalidate(contextID: String, namespace: KubernetesNamespaceSelection? = nil, kind: KubernetesResourceKind? = nil) {
-        entries = entries.filter { entryKey, _ in
-            guard entryKey.contextID == contextID else { return true }
-            if let namespace, entryKey.namespace != namespace.storageValue { return true }
-            if let kind, entryKey.kind != kind { return true }
-            return false
-        }
-    }
-
     private func key(contextID: String, namespace: KubernetesNamespaceSelection, kind: KubernetesResourceKind) -> Key {
         Key(contextID: contextID, namespace: namespace.storageValue, kind: kind)
     }

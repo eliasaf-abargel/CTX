@@ -53,6 +53,12 @@ public final class ProfileStore: ObservableObject {
     @Published public internal(set) var availableAWSRoles: [String: [String]] = [:]
 
     internal let configURL: URL
+    /// Where the selection is recorded for shells started outside CTX.
+    ///
+    /// `nil` by default so nothing writes to a person's home directory unless the app
+    /// explicitly opts in. A store built by a test, or by any other caller, records
+    /// nothing - the previous default let the test suite overwrite the real file.
+    internal let shellSelectionURL: URL?
     internal let runner: any CloudCommandRunning
     internal let kubeConfigMutations: KubeConfigMutationService
     internal let kubeConfigDiscoveryService: KubeConfigDiscoveryService
@@ -92,6 +98,7 @@ public final class ProfileStore: ObservableObject {
 
     public init(
         configURL: URL = AWSConfigPaths.configURL,
+        shellSelectionURL: URL? = nil,
         runner: any CloudCommandRunning = CloudCommandRunner(),
         kubeConfigMutations: KubeConfigMutationService? = nil,
         kubeConfigDiscoveryService: KubeConfigDiscoveryService? = nil,
@@ -121,6 +128,7 @@ public final class ProfileStore: ObservableObject {
             ProviderCommandEnvironment.overrides(defaults: sendableDefaults.value)
         }
         self.configURL = configURL
+        self.shellSelectionURL = shellSelectionURL
         self.runner = runner
         self.kubeConfigMutations = kubeConfigMutations ?? KubeConfigMutationService(
             providerEnvironment: providerEnvironment
@@ -203,6 +211,11 @@ public final class ProfileStore: ObservableObject {
         } else {
             refreshImmediately(runVerification: false)
         }
+
+        // Record what was just restored. Doing this only when the selection changes
+        // left a person whose profile was already active with no file at all, so
+        // terminals opened by hand adopted nothing until they toggled something.
+        recordShellSelection()
     }
 
     public var selectedProfile: CloudProfile? {

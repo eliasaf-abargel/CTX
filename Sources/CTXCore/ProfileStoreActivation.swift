@@ -1,14 +1,18 @@
 import Foundation
 
 extension ProfileStore {
-    public func activeProfile(for provider: CloudProvider) -> CloudProfile? {
-        let name: String
+    /// The selected name for a provider, whether or not it is connected.
+    public func activeProfileName(for provider: CloudProvider) -> String {
         switch provider {
-        case .aws: name = activeAWSProfile
-        case .gcp: name = activeGCPProfile
-        case .azure: name = activeAzureProfile
-        case .kubernetes: name = activeKubeContext
+        case .aws: activeAWSProfile
+        case .gcp: activeGCPProfile
+        case .azure: activeAzureProfile
+        case .kubernetes: activeKubeContext
         }
+    }
+
+    public func activeProfile(for provider: CloudProvider) -> CloudProfile? {
+        let name = activeProfileName(for: provider)
 
         guard !name.isEmpty,
               let profile = profiles.first(where: { $0.provider == provider && $0.name == name }),
@@ -72,13 +76,18 @@ extension ProfileStore {
                 }
                 activeAWSProfile = profile.name
                 defaults.set(profile.name, forKey: "activeAWSProfile")
-                lastMessage = "Active AWS_PROFILE=\(profile.name)"
+                // Not "AWS_PROFILE=…": a GUI cannot set an environment variable inside a
+                // shell that is already running, and this never did. Selecting a profile
+                // scopes what CTX itself does; a terminal is scoped when it is opened.
+                lastMessage = "Active profile: \(profile.name)"
+                recordShellSelection()
             }
         case .gcp:
             if activeGCPProfile != profile.name {
                 activeGCPProfile = profile.name
                 defaults.set(profile.name, forKey: "activeGCPProfile")
                 lastMessage = "Active GCP configuration=\(profile.name)"
+                recordShellSelection()
             }
         case .azure:
             if activeAzureProfile != profile.name {
@@ -209,6 +218,7 @@ extension ProfileStore {
             activeAWSExpiresAt = nil
             lastMessage = "No active AWS profile"
             try? awsCredentials.clearDefaultProfile()
+            recordShellSelection()
         case .gcp:
             activeGCPProfile = ""
             defaults.removeObject(forKey: "activeGCPProfile")

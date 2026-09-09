@@ -5,6 +5,7 @@ public struct LocalProfileDiscoveryResult: Sendable {
     public var kubernetesContexts: [KubernetesContextProfile]
     public var currentKubeContext: String
     public var currentKubeContextByPath: [String: String]
+    public var kubeconfigErrors: [KubeConfigDiscoveryError]
     public var activeGCPProfile: String
 
     public init(
@@ -12,8 +13,10 @@ public struct LocalProfileDiscoveryResult: Sendable {
         kubernetesContexts: [KubernetesContextProfile],
         currentKubeContext: String,
         currentKubeContextByPath: [String: String] = [:],
-        activeGCPProfile: String
+        activeGCPProfile: String,
+        kubeconfigErrors: [KubeConfigDiscoveryError] = []
     ) {
+        self.kubeconfigErrors = kubeconfigErrors
         self.profiles = profiles
         self.kubernetesContexts = kubernetesContexts
         self.currentKubeContext = currentKubeContext
@@ -83,11 +86,23 @@ public final class LocalProfileDiscoveryService: Sendable {
             kubernetesContexts: kube.contexts,
             currentKubeContext: kube.currentContext,
             currentKubeContextByPath: kube.currentContextByPath,
-            activeGCPProfile: GCPConfigParser.parseActiveConfig(at: gcpActiveConfigURL())
+            activeGCPProfile: GCPConfigParser.parseActiveConfig(at: gcpActiveConfigURL()),
+            kubeconfigErrors: kube.errors
         )
     }
 
     private func awsProfiles() -> [CloudProfile] {
+        // Configs written before sessions were shared hold one sso-session per profile,
+        // which makes signing in to one profile sign its siblings out. Repair those in
+        // place, backup first; a no-op once the file is clean. Announce it when it does
+        // happen - a config rewritten with no explanation, followed by every profile
+        // asking to sign in again, reads as the app having broken the setup.
+        if let merged = try? AWSConfigWriter.consolidateSSOSessions(in: awsConfigURL()), !merged.isEmpty {
+            AppNotificationService().sendSSOSessionsMerged(
+                mergedCount: merged.reduce(0) { $0 + $1.mergedSessions.count },
+                keptSessions: merged.map(\.canonicalSession)
+            )
+        }
         let text = (try? String(contentsOf: awsConfigURL(), encoding: .utf8)) ?? ""
         return AWSConfigParser.parse(text).filter { $0.name != "default" }
     }

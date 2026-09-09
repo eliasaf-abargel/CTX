@@ -44,20 +44,33 @@ public enum AzureConfigWriter {
             }
         }
 
-        if let originalName, isRename {
-            let oldURL = dir.appendingPathComponent("\(originalName).json")
+        // A rename carries the old file's contents to the new name, so read from
+        // whichever file currently holds them.
+        let oldURL = originalName.map { dir.appendingPathComponent("\($0).json") }
+        let sourceURL = isRename ? (oldURL ?? targetURL) : targetURL
+
+        try ConfigBackup.snapshot(sourceURL)
+        if let oldURL, isRename {
             try? manager.removeItem(at: oldURL)
         }
 
-        let file = AzureProfileFile(
-            name: name,
-            subscriptionID: subscriptionID,
-            tenantID: tenantID,
-            location: location
+        // Merge into the existing object instead of re-encoding the four fields below:
+        // a profile written by the Azure CLI carries keys this form never shows, and
+        // re-encoding would drop them.
+        var object: [String: Any] = [:]
+        if let data = try? Data(contentsOf: sourceURL),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            object = existing
+        }
+        object["name"] = name
+        object["subscriptionID"] = subscriptionID
+        object["tenantID"] = tenantID
+        object["location"] = location
+
+        let data = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys]
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(file)
         try data.write(to: targetURL, options: .atomic)
     }
 
@@ -66,6 +79,7 @@ public enum AzureConfigWriter {
         let fileURL = dir.appendingPathComponent("\(name).json")
         let manager = FileManager.default
         if manager.fileExists(atPath: fileURL.path) {
+            try ConfigBackup.snapshot(fileURL)
             try manager.removeItem(at: fileURL)
         }
     }

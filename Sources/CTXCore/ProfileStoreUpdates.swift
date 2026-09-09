@@ -6,6 +6,7 @@ import AppKit
 
 extension ProfileStore {
     public func checkForUpdates(manual: Bool = false) {
+        guard !isCheckingForUpdates else { return }
         isCheckingForUpdates = true
         if manual {
             updateCheckMessage = "Checking for updates..."
@@ -36,22 +37,10 @@ extension ProfileStore {
                         }
                     }
                 }
-            } catch CTXUpdateServiceError.invalidReleaseInfo {
-                await MainActor.run {
-                    self.isCheckingForUpdates = false
-                    self.updateCheckMessage = "Failed to parse release info."
-                    if manual {
-                        self.showErrorAlert(message: "Failed to parse release information from GitHub.")
-                    }
-                }
             } catch {
-                await MainActor.run {
-                    self.isCheckingForUpdates = false
-                    self.updateCheckMessage = "Error checking for updates."
-                    if manual {
-                        self.showErrorAlert(message: "Could not connect to GitHub. Please check your internet connection and try again.")
-                    }
-                }
+                self.isCheckingForUpdates = false
+                self.updateCheckMessage = "Could not check for updates right now. Try again later."
+                try? LocalDiagnostics.shared.record(step: "update_check", outcome: "unavailable")
             }
         }
     }
@@ -79,17 +68,6 @@ extension ProfileStore {
         if response == .alertFirstButtonReturn {
             self.installUpdate()
         }
-        #endif
-    }
-
-    internal func showErrorAlert(message: String) {
-        #if canImport(AppKit)
-        let alert = NSAlert()
-        alert.messageText = "Update Error"
-        alert.informativeText = message
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
         #endif
     }
 

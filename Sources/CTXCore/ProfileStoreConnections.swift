@@ -158,4 +158,64 @@ extension ProfileStore {
 
         await pollForConnectedProfile(profile, operationID: operationID, origin: origin)
     }
+
+    /// One-click remediation for the two Kubernetes auth failures CTX can
+    /// actually fix without guessing: a mid-work GCP/AWS credential expiry
+    /// shouldn't force the user out to a terminal. Anchored on the context's
+    /// own `.kubernetes` profile so status updates and the in-app auth window
+    /// use the same machinery as a normal login.
+    public func reconnectKubernetesAuth(
+        for context: KubernetesContextProfile,
+        category: KubernetesDiagnosticCategory,
+        from origin: ProfilePresentationSurface = .mainWindow
+    ) {
+        guard let anchorProfile = profiles.first(where: { $0.provider == .kubernetes && $0.name == context.contextName }) else { return }
+
+        switch category {
+        case .gcpAuthExpired:
+            _ = startProfileOperation(for: anchorProfile, kind: .connect, origin: origin) { @MainActor [weak self] operationID in
+                guard let self else { return }
+                self.updateStatus(anchorProfile, status: .connecting, operationID: operationID)
+                self.lastMessage = "Refreshing GCP credentials for \(context.contextName)..."
+                let result = await self.profileCommands.refreshGCPApplicationDefaultCredentials { [weak self] output in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.isCurrentOperation(profileID: anchorProfile.id, operationID: operationID) else { return }
+                        self.openAuthURLIfPresent(output, operationID: operationID, profileID: anchorProfile.id, origin: origin)
+                    }
+                }
+                guard self.isCurrentOperation(profileID: anchorProfile.id, operationID: operationID) else { return }
+                self.dismissInAppAuth(profileID: anchorProfile.id, operationID: operationID, origin: origin)
+                guard result.exitCode == 0 else {
+                    self.reportLoginFailure(result, for: anchorProfile, operationID: operationID, origin: origin)
+                    self.updateStatus(anchorProfile, status: .needsLogin, operationID: operationID)
+                    return
+                }
+                self.lastMessage = "GCP credentials refreshed"
+                // Not `.connected` — that would claim more than an ADC refresh
+                // proves. The real kubectl check below settles the true status.
+                self.verifyAllProfiles()
+            }
+        case .awsSSOExpired:
+            if anchorProfile.usesStrongDM || anchorProfile.usesTeleport {
+                login(anchorProfile, from: origin)
+                return
+            }
+            _ = startProfileOperation(for: anchorProfile, kind: .connect, origin: origin) { @MainActor [weak self] operationID in
+                guard let self else { return }
+                let linkedName = await self.profileCommands.linkedAWSProfile(for: context)
+                guard self.isCurrentOperation(profileID: anchorProfile.id, operationID: operationID) else { return }
+                if let linkedName, let awsProfile = self.profiles.first(where: { $0.provider == .aws && $0.name == linkedName }) {
+                    self.login(awsProfile, from: origin)
+                } else {
+                    self.report(
+                        "This context does not specify a known AWS profile. Select its AWS profile explicitly in the sidebar.",
+                        title: "AWS Reconnect",
+                        from: origin
+                    )
+                }
+            }
+        default:
+            break
+        }
+    }
 }

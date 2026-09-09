@@ -53,10 +53,15 @@ public final class KubeConfigDiscoveryService: Sendable {
 
         for url in deduplicated(paths) {
             guard FileManager.default.fileExists(atPath: url.path) else {
+                errors.append(KubeConfigDiscoveryError(path: url.path, message: "Configuration file is unavailable"))
                 continue
             }
             do {
                 let text = try String(contentsOf: url, encoding: .utf8)
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    errors.append(KubeConfigDiscoveryError(path: url.path, message: "Configuration file is empty"))
+                    continue
+                }
                 let parsed = parse(text, path: url.path)
                 if firstCurrentContext.isEmpty {
                     firstCurrentContext = parsed.currentContext
@@ -79,6 +84,7 @@ public final class KubeConfigDiscoveryService: Sendable {
             return $0.contextName.localizedStandardCompare($1.contextName) == .orderedAscending
         }
 
+        try? LocalDiagnostics.shared.record(step: "kubeconfig_discovery", outcome: errors.isEmpty ? "success" : "read_error", count: contexts.count)
         return KubeConfigDiscoveryResult(
             contexts: contexts,
             currentContext: firstCurrentContext,
@@ -108,6 +114,7 @@ public final class KubeConfigDiscoveryService: Sendable {
         var users: [String: KubeCredentialMetadata] = [:]
 
         var section = ""
+        var itemIndent: Int?
         var currentContextName = ""
         var currentCluster = ""
         var currentUser = ""
@@ -176,6 +183,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                     commitCluster()
                     commitUser()
                     section = "contexts"
+                    itemIndent = nil
                     continue
                 }
                 if trimmed == "clusters:" {
@@ -183,6 +191,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                     commitCluster()
                     commitUser()
                     section = "clusters"
+                    itemIndent = nil
                     continue
                 }
                 if trimmed == "users:" {
@@ -190,6 +199,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                     commitCluster()
                     commitUser()
                     section = "users"
+                    itemIndent = nil
                     continue
                 }
                 if !trimmed.hasPrefix("-") {
@@ -199,21 +209,29 @@ public final class KubeConfigDiscoveryService: Sendable {
                     section = ""
                     continue
                 }
-                // A top-level "- " line always starts a new list item under
-                // contexts:/clusters:, whichever key leads it
-                switch section {
-                case "contexts": commitContext()
-                case "clusters": commitCluster()
-                case "users": commitUser()
-                default: break
+            }
+
+            // List indentation is chosen by the writer. Nested exec args/env
+            // are not new context, cluster, or user entries.
+            if trimmed.hasPrefix("- "), !section.isEmpty {
+                if itemIndent == nil { itemIndent = indent }
+                if indent == itemIndent {
+                    switch section {
+                    case "contexts": commitContext()
+                    case "clusters": commitCluster()
+                    case "users": commitUser()
+                    default: break
+                    }
                 }
             }
+            let isItemName = indent == itemIndent && trimmed.hasPrefix("- name:")
+            let isSiblingName = itemIndent.map { indent == $0 + 2 } == true && trimmed.hasPrefix("name:")
 
             switch section {
             case "contexts":
-                if trimmed.hasPrefix("- name:") {
+                if isItemName {
                     currentContextName = value(after: "- name:", in: trimmed)
-                } else if trimmed.hasPrefix("name:") {
+                } else if isSiblingName {
                     currentContextName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("cluster:") {
                     currentCluster = value(after: "cluster:", in: trimmed)
@@ -223,9 +241,9 @@ public final class KubeConfigDiscoveryService: Sendable {
                     currentNamespace = value(after: "namespace:", in: trimmed)
                 }
             case "clusters":
-                if trimmed.hasPrefix("- name:") {
+                if isItemName {
                     currentClusterName = value(after: "- name:", in: trimmed)
-                } else if trimmed.hasPrefix("name:") {
+                } else if isSiblingName {
                     currentClusterName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("server:") {
                     currentServer = value(after: "server:", in: trimmed)
@@ -236,11 +254,9 @@ public final class KubeConfigDiscoveryService: Sendable {
                     ).lowercased() == "true"
                 }
             case "users":
-                if trimmed.hasPrefix("- name:") {
-                    commitUser()
+                if isItemName {
                     currentUserName = value(after: "- name:", in: trimmed)
-                } else if trimmed.hasPrefix("name:") {
-                    commitUser()
+                } else if isSiblingName {
                     currentUserName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("token:") {
                     currentCredentialKind = .bearerToken

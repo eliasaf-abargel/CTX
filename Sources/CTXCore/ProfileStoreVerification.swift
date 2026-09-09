@@ -10,6 +10,11 @@ extension ProfileStore {
         from origin: ProfilePresentationSurface = .mainWindow
     ) async -> Bool {
         guard canPublishLifecycleState(for: profile.id, operationID: operationID) else { return false }
+        // Verification must not initiate a connect-on-knock request after Disconnect.
+        if manuallyDisconnectedProfiles.contains(profile.id) {
+            updateStatus(profile, status: .needsLogin, operationID: operationID)
+            return false
+        }
         let startedAt = Date()
         let result = await profileCommands.verify(
             profile,
@@ -18,8 +23,8 @@ extension ProfileStore {
         )
         guard canPublishLifecycleState(for: profile.id, operationID: operationID) else { return false }
         lastCommandDuration = Date().timeIntervalSince(startedAt)
-        let step = profile.provider == .kubernetes ? "verify_kubectl" : "app_connect"
-        logConnectCall(step: step, kind: profile.provider.rawValue.lowercased(), profileID: profile.id, started: startedAt, outcome: result.exitCode == 0 ? "success" : "failure")
+        let step = profile.provider == .kubernetes ? "verify_kubectl" : "verify_cloud"
+        logConnectCall(step: step, kind: profile.provider.rawValue.lowercased(), profileID: profile.id, started: startedAt, outcome: result.exitCode == 0 ? "success" : (result.exitCode == 99 ? "skipped" : "failure"))
 
         let isConnected = result.exitCode == 0
         let isManuallyDisconnected = manuallyDisconnectedProfiles.contains(profile.id)
@@ -40,7 +45,10 @@ extension ProfileStore {
         }
 
         let newStatus: ProfileStatus
-        if effectiveConnection {
+        if isManuallyDisconnected {
+            newStatus = .needsLogin
+            verificationErrors[profile.id] = nil
+        } else if effectiveConnection {
             newStatus = .connected
             verificationErrors[profile.id] = nil
         } else {
@@ -176,6 +184,11 @@ extension ProfileStore {
 
     public func sessionExpiry(for profile: CloudProfile) -> Date? {
         awsSessionExpirations.sessionExpiry(for: profile)
+    }
+
+    /// Other profiles that the same sign-in covers.
+    public func profilesSharingSignIn(with profile: CloudProfile) -> [CloudProfile] {
+        awsSessionExpirations.profilesSharingSignIn(with: profile, among: profiles)
     }
 
     public func markKubernetesContextNeedsLogin(contextName: String, reason: String) {

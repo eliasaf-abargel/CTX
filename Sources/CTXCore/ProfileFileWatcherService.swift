@@ -19,6 +19,7 @@ public final class ProfileFileWatcherService {
 
     public func start(
         kubeConfigPath: String?,
+        additionalKubeConfigPaths: [String] = [],
         awsConfigPath: String,
         gcpActiveConfigPath: String,
         gcpConfigsDirPath: String,
@@ -31,8 +32,14 @@ public final class ProfileFileWatcherService {
         isStopped = false
         lock.unlock()
 
-        if let kubeConfigPath {
-            watch(path: kubeConfigPath, handler: onRefresh)
+        let kubePaths = (kubeConfigPath.map { [$0] } ?? []) + additionalKubeConfigPaths
+        for path in Set(kubePaths) {
+            watch(path: path, handler: onRefresh)
+        }
+        // A parent watch observes recreation even if the file is absent for
+        // longer than the inode watch's rearm delay.
+        for parent in Set(kubePaths.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }) {
+            watch(path: parent, handler: onRefresh)
         }
         watch(path: awsConfigPath, handler: onRefresh)
         watch(path: gcpActiveConfigPath, handler: onGCPActiveConfigChanged)

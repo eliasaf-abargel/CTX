@@ -20,6 +20,9 @@ extension ProfileDetailView {
     }
 
     var statusText: String {
+        if store.isManuallyDisconnected(profile) {
+            return store.needsDisconnectRetry(profile) ? "Disconnect not confirmed" : "Disconnected"
+        }
         if profile.provider == .kubernetes {
             if store.isActive(profile) {
                 return currentProfile.status == .connected
@@ -40,7 +43,7 @@ extension ProfileDetailView {
     }
 
     var canDisconnect: Bool {
-        currentProfile.status == .connected
+        currentProfile.status == .connected || store.needsDisconnectRetry(profile)
     }
 
     var canOpenWorkspace: Bool {

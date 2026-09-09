@@ -117,10 +117,6 @@ extension ClusterWorkspaceViewModel {
         recalculateTopology()
     }
 
-    func resetTopologySelector() {
-        setTopologySelector("")
-    }
-
     /// Drops the map and stops the build behind it.
     ///
     /// Called when the namespace changes. Clearing the published graph and

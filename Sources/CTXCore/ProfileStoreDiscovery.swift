@@ -15,6 +15,7 @@ extension ProfileStore {
     internal func startAllFileWatchers() {
         fileWatchers.start(
             kubeConfigPath: kubeConfigDiscoveryService.candidatePaths().first?.path,
+            additionalKubeConfigPaths: kubeConfigDiscoveryService.candidatePaths().dropFirst().map(\.path),
             awsConfigPath: Self.configuredURL(
                 defaultsKey: CTXDefaultsKey.awsConfigPath,
                 fallback: configURL,
@@ -83,6 +84,17 @@ extension ProfileStore {
     }
 
     internal func apply(_ discovered: LocalProfileDiscoveryResult, runVerification: Bool) {
+        var discovered = discovered
+        let unavailablePaths = Set(discovered.kubeconfigErrors.map(\.path))
+        let names = Set(discovered.kubernetesContexts.map(\.contextName))
+        let retained = kubernetesContexts.filter {
+            unavailablePaths.contains($0.kubeconfigPath) && !names.contains($0.contextName)
+        }
+        discovered.kubernetesContexts.append(contentsOf: retained)
+        discovered.profiles.append(contentsOf: retained.map(KubernetesProfileAdapter.cloudProfile))
+        if !retained.isEmpty {
+            lastMessage = "A kubeconfig is temporarily unavailable. Showing previously discovered contexts; refresh after the file is restored."
+        }
         if kubernetesContexts != discovered.kubernetesContexts {
             kubernetesContexts = discovered.kubernetesContexts
         }
@@ -96,6 +108,12 @@ extension ProfileStore {
         }
         if profiles != mergedProfiles {
             profiles = mergedProfiles
+        }
+        for context in retained {
+            let id = KubernetesProfileAdapter.cloudProfile(from: context).id
+            if let index = profiles.firstIndex(where: { $0.id == id }) {
+                profiles[index].status = .unknown
+            }
         }
         let discoveredProfileIDs = Set(mergedProfiles.map(\.id))
         cancelOperationsForMissingProfiles(discoveredProfileIDs)

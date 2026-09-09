@@ -112,7 +112,7 @@ extension ProfileDetailView {
             Button(role: .destructive) {
                 store.logout(profile, from: .mainWindow)
             } label: {
-                Text("Disconnect")
+                Text(store.needsDisconnectRetry(profile) ? "Retry Disconnect" : "Disconnect")
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                     .frame(height: 34)

@@ -19,13 +19,21 @@ public final class KubeConfigMutationService: Sendable {
         await run(["config", "use-context", name], kubeconfigPath: kubeconfigPath)
     }
 
-    @discardableResult
-    public func clearCurrentContext(kubeconfigPath: String? = nil) async -> CommandResult {
-        await run(["config", "unset", "current-context"], kubeconfigPath: kubeconfigPath)
+    /// Copies the kubeconfig before a structural change.
+    ///
+    /// `kubectl config` rewrites the whole file in place, and that one file usually
+    /// holds every cluster a person has - not only the context being edited. Switching
+    /// the current context deliberately does not snapshot: it happens constantly and is
+    /// a single reversible line, so backing it up would bury the useful restore points.
+    internal func snapshotKubeconfig(_ kubeconfigPath: String?) {
+        let url = kubeconfigPath.map { URL(fileURLWithPath: $0) } ?? KubeConfigPaths.configURL
+        // Best effort: a kubeconfig that cannot be copied must not block the edit.
+        _ = try? ConfigBackup.snapshot(url)
     }
 
     public func addContext(name: String, server: String, cluster: String, user: String, namespace: String, credential: KubeConfigCredential, skipTLSVerification: Bool = false, kubeconfigPath: String? = nil) async throws {
         try validate(name: name, server: server)
+        snapshotKubeconfig(kubeconfigPath)
         let clusterName = cluster.isEmpty ? "\(name)-cluster" : cluster
         let userName = user.isEmpty ? "\(name)-user" : user
 
@@ -50,6 +58,7 @@ public final class KubeConfigMutationService: Sendable {
         namespace: String,
         kubeconfigPath: String
     ) async throws {
+        snapshotKubeconfig(kubeconfigPath)
         let sourceName = normalizedName(sourceName)
         let newName = normalizedName(newName)
         guard !sourceName.isEmpty else {
@@ -92,6 +101,7 @@ public final class KubeConfigMutationService: Sendable {
     ) async throws {
         try validate(name: newName, server: server)
         try validate(credentialUpdate: credentialUpdate)
+        snapshotKubeconfig(kubeconfigPath)
         if oldName != newName {
             let result = await run(["config", "rename-context", oldName, newName], kubeconfigPath: kubeconfigPath)
             try requireSuccess(result, "Failed to rename context")
@@ -126,6 +136,7 @@ public final class KubeConfigMutationService: Sendable {
     }
 
     public func deleteContext(_ name: String, kubeconfigPath: String? = nil) async throws {
+        snapshotKubeconfig(kubeconfigPath)
         let result = await run(["config", "delete-context", name], kubeconfigPath: kubeconfigPath)
         try requireSuccess(result, "Failed to delete context")
     }
@@ -142,7 +153,6 @@ public final class KubeConfigMutationService: Sendable {
         }
         return config.clusters?.first(where: { $0.name == clusterName })?.cluster.server ?? ""
     }
-
 }
 
 private struct KubeConfigServerLookup: Decodable {

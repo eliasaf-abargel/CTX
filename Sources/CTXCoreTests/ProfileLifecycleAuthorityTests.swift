@@ -101,15 +101,9 @@ func testManualDisconnectRemainsAuthoritativeAfterRestart() async throws {
 
     let restartedStore = makeAuthorityStore(configURL: configURL, defaults: defaults, runner: runner)
     let restartedProfile = restartedStore.profiles.first!
-    let verification = Task {
-        await restartedStore.verify(restartedProfile, isManualAttempt: true)
-    }
-    await runner.waitForCommandCount(1)
-    await runner.releaseCommand(
-        0,
-        result: CommandResult(exitCode: 0, output: #"{"Account":"123456789012"}"#)
-    )
-    let verified = await verification.value
+    let verified = await restartedStore.verify(restartedProfile, isManualAttempt: true)
+    let commands = await runner.allCommands()
+    assert(commands.isEmpty, "verification after Disconnect must not contact providers")
 
     assert(!verified, "provider session overrode a persisted CTX disconnect")
     assert(restartedStore.profiles.first?.status == .needsLogin)

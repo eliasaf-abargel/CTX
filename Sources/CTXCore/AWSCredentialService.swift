@@ -93,7 +93,7 @@ public final class AWSCredentialService: Sendable {
         try? FileManager.default.removeItem(at: metadataURL(for: credentialsURL))
     }
 
-    public func storeExportedCredentials(_ output: String, profileName: String, isActiveProfile: Bool) throws -> AWSStoredCredentialsResult {
+    public func storeExportedCredentials(_ output: String, profileName: String) throws -> AWSStoredCredentialsResult {
         let exported = try Self.parseExportedCredentials(output)
 
         try AWSConfigWriter.updateCredentials(
@@ -105,21 +105,14 @@ public final class AWSCredentialService: Sendable {
             to: credentialsURLProvider()
         )
 
-        if isActiveProfile {
-            try AWSConfigWriter.copyConfig(from: profileName, to: "default", fileURL: configURLProvider())
-            try AWSConfigWriter.updateCredentials(
-                profileName: "default",
-                accessKeyId: exported.accessKeyId,
-                secretAccessKey: exported.secretAccessKey,
-                sessionToken: exported.sessionToken,
-                expiration: exported.expiration,
-                to: credentialsURLProvider()
-            )
-        }
-        try recordExportedProfiles(
-            [profileName] + (isActiveProfile ? ["default"] : []),
-            credentialsURL: credentialsURLProvider()
-        )
+        // Activating a profile no longer copies it into `[default]`.
+        //
+        // `[default]` is one global value every shell, script and background process
+        // shares, so mirroring into it changed what a bare `aws` command means for
+        // terminals opened hours earlier - silently, and with no way to tell from the
+        // command line which account was in play. Scope now belongs to the shell:
+        // `AWS_PROFILE`, set per terminal, which nothing else can observe or inherit.
+        try recordExportedProfiles([profileName], credentialsURL: credentialsURLProvider())
 
         return AWSStoredCredentialsResult(expiresAt: Self.parseDate(exported.expiration))
     }

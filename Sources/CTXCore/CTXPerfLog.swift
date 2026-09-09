@@ -1,6 +1,6 @@
 import Foundation
 
-/// Structured, DEBUG-only timing log for diagnosing load/timeout/cache behavior.
+/// Structured local timing log for diagnosing load/timeout/cache behavior.
 ///
 /// Format: `[CTX perf] step=<name> context=<contextHash> namespace=<namespace|all|cluster>
 /// kind=<kind> cache=<hit|miss|stale|none> durationMs=<ms> outcome=<success|timeout|error|cancelled>`
@@ -13,7 +13,7 @@ public enum CTXPerfLog {
     }
 
     public enum Outcome: String {
-        case success, timeout, error, cancelled
+        case success, timeout, error, cancelled, skipped
     }
 
     public static func log(
@@ -25,6 +25,7 @@ public enum CTXPerfLog {
         durationMs: Int,
         outcome: Outcome
     ) {
+        try? LocalDiagnostics.shared.record(step: step, contextID: contextID, durationMs: durationMs, outcome: outcome.rawValue)
 #if DEBUG
         print("[CTX perf] step=\(step) context=\(safeContextHash(contextID)) namespace=\(namespace) kind=\(kind) cache=\(cache.rawValue) durationMs=\(durationMs) outcome=\(outcome.rawValue)")
 #endif

@@ -1,6 +1,7 @@
 import Foundation
 
 public enum CTXUpdateServiceError: LocalizedError, Equatable, Sendable {
+    case releaseUnavailable(statusCode: Int)
     case invalidReleaseInfo
     case invalidDownloadURL
     case downloadFailed
@@ -8,6 +9,7 @@ public enum CTXUpdateServiceError: LocalizedError, Equatable, Sendable {
 
     public var errorDescription: String? {
         switch self {
+        case .releaseUnavailable(let code): "The release service is unavailable (HTTP \(code))."
         case .invalidReleaseInfo: "Failed to parse release information."
         case .invalidDownloadURL: "Invalid update download URL."
         case .downloadFailed: "Failed to download update file."
@@ -47,12 +49,18 @@ public final class CTXUpdateService: Sendable {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 10.0
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        return try Self.checkResult(data: data, statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, currentVersion: currentVersion())
+    }
+
+    public static func checkResult(data: Data, statusCode: Int, currentVersion: String) throws -> CTXUpdateCheckResult {
+        try? LocalDiagnostics.shared.record(step: "update_check", outcome: statusCode == 200 ? "success" : "unavailable", count: statusCode)
+        guard statusCode == 200 else { throw CTXUpdateServiceError.releaseUnavailable(statusCode: statusCode) }
         guard let tagName = Self.releaseTag(from: data) else {
             throw CTXUpdateServiceError.invalidReleaseInfo
         }
 
-        let current = currentVersion()
+        let current = currentVersion
         return CTXUpdateCheckResult(
             tagName: tagName,
             currentVersion: current,
@@ -103,8 +111,11 @@ public final class CTXUpdateService: Sendable {
     }
 
     public static func isUpdateAvailable(latestTag: String, currentVersion: String) -> Bool {
-        let latestVersion = latestTag.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "v", with: "")
-        return latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending
+        func normalized(_ value: String) -> String {
+            let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.hasPrefix("v") ? String(value.dropFirst()) : value
+        }
+        return normalized(latestTag).compare(normalized(currentVersion), options: .numeric) == .orderedDescending
     }
 
     private func launchInstaller(sourcePath: String, targetPath: String, in tempDirURL: URL) throws {

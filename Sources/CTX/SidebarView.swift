@@ -97,7 +97,7 @@ struct SidebarView: View {
             
             // Settings & Profile Footer
             HStack(spacing: 8) {
-                Text(store.activeIdentityInitials)
+                Text(store.localIdentityInitials)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(Color.accentColor)
                     .frame(width: 22, height: 22)
@@ -107,14 +107,12 @@ struct SidebarView: View {
                             .stroke(Color.accentColor.opacity(0.3), lineWidth: 0.5)
                     }
                 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(store.activeIdentityLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                    Text(store.activeIdentityStatusLabel)
-                        .font(.system(size: 9))
-                        .foregroundStyle(identityStatusColor)
-                }
+                // The macOS user, and only that. Which cloud happens to be connected
+                // belongs to the profile that is connected, not to the person - and it
+                // is already shown there, on the row and in the detail pane.
+                Text(store.localIdentityLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
                 
                 Spacer()
                 
@@ -175,16 +173,6 @@ struct SidebarView: View {
         ProfileGrouping.expansionBinding(for: id, in: $expandedGroups, forcedOpenWhile: sidebarSearchQuery)
     }
 
-    private var identityStatusColor: Color {
-        if store.isCloudIdentityActive {
-            return .secondary
-        }
-        if !store.activeAWSProfile.isEmpty || !store.activeGCPProfile.isEmpty || !store.activeAzureProfile.isEmpty || !store.activeKubeContext.isEmpty {
-            return .orange
-        }
-        return .secondary
-    }
-
     private func openNewProfile() {
         let targetFolder: CloudFolder? = if case .folder(let folderID) = store.selectedSelection {
             store.allFolders.first { $0.id == folderID }
@@ -210,7 +198,9 @@ struct ProfileDisclosureGroup: View {
             ForEach(group.profiles) { profile in
                 SidebarProfileRow(
                     profile: profile,
-                    isSelected: selectedSelection == .profile(profile.id)
+                    isSelected: selectedSelection == .profile(profile.id),
+                    onOpenTerminal: { store.openTerminal(for: profile) },
+                    connection: store.connectionBinding(for: profile, from: .mainWindow)
                 )
                 .tag(SidebarSelection.profile(profile.id))
             }
@@ -267,6 +257,10 @@ struct ProfileDisclosureGroup: View {
 struct SidebarProfileRow: View {
     let profile: CloudProfile
     let isSelected: Bool
+    var onOpenTerminal: (() -> Void)?
+    var connection: Binding<Bool>?
+
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -281,24 +275,32 @@ struct SidebarProfileRow: View {
                 .font(.body)
                 .lineLimit(1)
 
-            if profile.status == .connected {
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 6, height: 6)
-            } else if profile.status.isBusy {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.6)
-                    .frame(width: 6, height: 6)
-            } else if profile.status == .needsLogin {
+            // The switch already says "connected", so a green dot beside it would say it
+            // twice. Orange is kept: it means off for a reason, which a switch alone
+            // cannot express. Busy is carried by the switch itself.
+            if profile.status == .needsLogin {
                 Circle()
                     .fill(Color.orange)
                     .frame(width: 6, height: 6)
             }
 
             Spacer(minLength: 8)
+
+            if let onOpenTerminal {
+                TerminalButton(
+                    profile: profile,
+                    isVisible: isHovering,
+                    size: 11,
+                    action: onOpenTerminal
+                )
+            }
+
+            if let connection {
+                MiniSwitch(isOn: connection, isBusy: profile.status.isBusy)
+            }
         }
         .frame(height: 28)
         .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
     }
 }

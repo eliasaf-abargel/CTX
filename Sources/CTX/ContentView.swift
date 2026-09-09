@@ -32,9 +32,7 @@ struct DetailPane: View {
     @Environment(\.openSettings) private var openSettings: OpenSettingsAction
 
     private var activeToolbarProfiles: [CloudProfile] {
-        CloudProvider.allCases.compactMap { provider in
-            store.activeProfile(for: provider)
-        }
+        store.connectedProfiles
     }
 
     var body: some View {
@@ -129,48 +127,6 @@ struct DetailPane: View {
     }
 }
 
-private struct ActiveToolbarCard: View {
-    let profile: CloudProfile
-    let expiresAt: Date?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(Color.green)
-                .frame(width: 7, height: 7)
-                .shadow(color: .green.opacity(0.45), radius: 4)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(profile.provider.shortName) \(profile.name)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                if !profile.contextSubtitle.isEmpty {
-                    Text(profile.contextSubtitle)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-
-            if let expiresAt, expiresAt > Date() {
-                Spacer(minLength: 8)
-                SessionCountdownView(expiresAt: expiresAt, tintColor: profile.provider.tint, fontSize: 13)
-            }
-        }
-        .foregroundStyle(profile.provider.tint)
-        .padding(.horizontal, 12)
-        .frame(width: 250, height: 44, alignment: .leading)
-        .background(profile.provider.tint.opacity(0.16), in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(profile.provider.tint.opacity(0.36), lineWidth: 0.75)
-        }
-    }
-}
-
 /// A live mm:ss countdown to an AWS SSO session's expiry, shown in the toolbar.
 struct SessionCountdownView: View {
     let expiresAt: Date
@@ -200,31 +156,34 @@ struct SessionCountdownView: View {
     }
 }
 
-struct WelcomeView: View {
-    var body: some View {
-        VStack(spacing: 24) {
-            CTXAppLogoView(size: 80)
-            
-            VStack(spacing: 8) {
-                Text("Welcome to CTX")
-                    .font(.title3.weight(.bold))
-                Text("Select a profile or environment folder in the sidebar to get started.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: 280)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear)
-    }
-}
-
 private struct ActiveConnectionRow: View {
     let profile: CloudProfile
     let expiresAt: Date?
     @ObservedObject var store: ProfileStore
     @State private var isHovering = false
+
+    /// One meaning for all four providers: this is the active profile for its provider.
+    /// What that propagates to differs, which the help text says rather than the icon.
+    private var isPrimary: Bool { store.isActive(profile) }
+
+    private var primaryHelp: String {
+        guard !isPrimary else {
+            switch profile.provider {
+            case .aws:  return "New terminals opened outside CTX start in this profile"
+            case .gcp:  return "New terminals start here, and gcloud uses it everywhere"
+            case .azure, .kubernetes:
+                return "The active \(profile.provider.rawValue) selection, used everywhere"
+            }
+        }
+        switch profile.provider {
+        case .aws:
+            return "Make new terminals start in this profile. Nothing disconnects."
+        case .gcp:
+            return "Make this active. New terminals start here and gcloud switches machine-wide. Nothing disconnects."
+        case .azure, .kubernetes:
+            return "Make this active. \(profile.provider.rawValue) has no per-shell switch, so every open terminal follows. Nothing disconnects."
+        }
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -248,6 +207,7 @@ private struct ActiveConnectionRow: View {
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
 
+
                     if !profile.contextSubtitle.isEmpty {
                         Text("·")
                             .foregroundStyle(.secondary)
@@ -269,6 +229,25 @@ private struct ActiveConnectionRow: View {
             }
             .buttonStyle(.plain)
             .help("Navigate to profile details")
+
+            // Which connected profile a shell opened outside CTX comes up in. Radio
+            // semantics, because exactly one of several can hold it - and choosing does
+            // not disconnect the others: it only moves the recorded selection, leaving
+            // every session exactly as it was.
+            Button {
+                store.setActive(profile, from: .mainWindow)
+            } label: {
+                Image(systemName: isPrimary ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(isPrimary ? profile.provider.tint : .secondary.opacity(isHovering ? 0.7 : 0.25))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(primaryHelp)
+            .accessibilityLabel(isPrimary
+                                ? "New terminals start in \(profile.name)"
+                                : "Make new terminals start in \(profile.name)")
 
             Button {
                 store.logout(profile, from: .mainWindow)

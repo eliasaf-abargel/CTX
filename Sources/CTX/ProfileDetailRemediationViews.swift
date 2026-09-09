@@ -7,9 +7,7 @@ struct KubeAuthRemediationCardView: View {
     let onConnect: () -> Void
     let onRunTerminal: (String) -> Void
 
-    @State private var isLaunchingTerminal = false
-    @State private var isVerifying = false
-    @State private var statusNotice: String?
+    private var isVerifying: Bool { profile.status.isBusy }
 
     private var isSDM: Bool { profile.usesStrongDM }
     private var isTeleport: Bool { profile.usesTeleport }
@@ -28,7 +26,7 @@ struct KubeAuthRemediationCardView: View {
 
     private var authExplanation: String {
         if isSDM {
-            return "This cluster is routed via StrongDM. Run sdm connect or authenticate to establish a secure connection."
+            return "Connect uses your existing StrongDM client, completes sign-in, and verifies access to this cluster."
         }
         if isTeleport {
             return "This cluster is managed via Teleport. Run tsh login to renew your access certificate."
@@ -76,61 +74,22 @@ struct KubeAuthRemediationCardView: View {
             .padding(8)
             .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
 
-            if let statusNotice {
-                HStack(spacing: 6) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundStyle(.blue)
-                    Text(statusNotice)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.primary)
-                }
-                .padding(.vertical, 2)
-                .transition(.opacity)
-            }
-
             HStack(spacing: 10) {
-                Button {
-                    isLaunchingTerminal = true
-                    statusNotice = "Terminal launched. Complete login in the Terminal window."
-                    onRunTerminal(commandSnippet)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        isLaunchingTerminal = false
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        if isLaunchingTerminal {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "terminal.fill")
-                        }
-                        Text(isLaunchingTerminal ? "Opening..." : "Run in Terminal")
-                    }
+                Button(action: onConnect) {
+                    Label(isVerifying ? "Connecting..." : "Connect with Provider", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(CTXPrimaryButton())
-                .controlSize(.small)
+                .disabled(isVerifying)
 
                 Button {
-                    isVerifying = true
-                    statusNotice = "Connecting to cluster & verifying status..."
-                    onConnect()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-                        isVerifying = false
-                    }
+                    onRunTerminal(commandSnippet)
                 } label: {
-                    HStack(spacing: 6) {
-                        if isVerifying {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        Text(isVerifying ? "Verifying..." : "Connect & Verify")
-                    }
+                    Label("Open in Terminal", systemImage: "terminal.fill")
                 }
                 .buttonStyle(CTXSecondaryButton())
-                .controlSize(.small)
+                .disabled(isVerifying)
             }
+            .controlSize(.small)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

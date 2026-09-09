@@ -18,7 +18,7 @@ struct ClusterWorkspaceScene: View {
 
     var body: some View {
         if let context {
-            ClusterWorkspaceView(context: context, onStatusCheckFailed: { contextName, reason in
+            ClusterWorkspaceView(store: store, context: context, onStatusCheckFailed: { contextName, reason in
                 store.markKubernetesContextNeedsLogin(contextName: contextName, reason: reason)
             })
             .onChange(of: profile?.status) { _, newStatus in
@@ -56,10 +56,12 @@ struct ClusterWorkspaceScene: View {
 }
 
 struct ClusterWorkspaceView: View {
+    let store: ProfileStore
     @StateObject private var viewModel: ClusterWorkspaceViewModel
     @State private var isSearchPresented: Bool = false
 
-    init(context: KubernetesContextProfile, onStatusCheckFailed: ((String, String) -> Void)? = nil) {
+    init(store: ProfileStore, context: KubernetesContextProfile, onStatusCheckFailed: ((String, String) -> Void)? = nil) {
+        self.store = store
         let vm = ClusterWorkspaceViewModel(context: context)
         vm.onStatusCheckFailed = onStatusCheckFailed
         _viewModel = StateObject(wrappedValue: vm)
@@ -87,7 +89,7 @@ struct ClusterWorkspaceView: View {
             // lowest-priority columns as though space were tight.
             GeometryReader { proxy in
             VStack(spacing: 0) {
-                ClusterWorkspaceHeader(viewModel: viewModel)
+                ClusterWorkspaceHeader(viewModel: viewModel, store: store)
                     .padding(.horizontal, 22)
                     .padding(.top, 14)
                     .padding(.bottom, 12)
@@ -150,6 +152,7 @@ struct ClusterWorkspaceView: View {
 
 struct ClusterWorkspaceHeader: View {
     @ObservedObject var viewModel: ClusterWorkspaceViewModel
+    let store: ProfileStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -227,7 +230,7 @@ struct ClusterWorkspaceHeader: View {
     private var statusBlock: some View {
         VStack(alignment: .trailing, spacing: 10) {
             HStack(spacing: 8) {
-                ClusterWorkspaceHealthMenu(viewModel: viewModel)
+                ClusterWorkspaceHealthMenu(viewModel: viewModel, store: store)
                 refreshButton
             }
         }
@@ -256,6 +259,6 @@ struct ClusterWorkspaceHeader: View {
 
 struct ClusterWorkspaceView_Previews: PreviewProvider {
     static var previews: some View {
-        ClusterWorkspaceView(context: .previewProduction)
+        ClusterWorkspaceView(store: ProfileStore(startsBackgroundServices: false), context: .previewProduction)
     }
 }

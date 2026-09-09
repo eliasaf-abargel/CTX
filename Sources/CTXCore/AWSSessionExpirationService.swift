@@ -173,6 +173,25 @@ public final class AWSSessionExpirationService: Sendable {
         return cacheExpiries[normalizedStartURL]
     }
 
+    /// Profiles that share one sign-in with `profile`, itself excluded.
+    ///
+    /// Signing out of the portal, or letting it lapse, takes all of them at once - the
+    /// token belongs to the portal, not to any single profile.
+    public func profilesSharingSignIn(with profile: CloudProfile, among profiles: [CloudProfile]) -> [CloudProfile] {
+        let normalizedStartURL = profile.ssoStartURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard profile.provider == .aws, !normalizedStartURL.isEmpty else { return [] }
+
+        return profiles.filter { candidate in
+            candidate.provider == .aws
+                && candidate.id != profile.id
+                && candidate.ssoStartURL
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == normalizedStartURL
+        }
+    }
+
     private func cacheExpiries(from files: [URL]) -> (expiryByStartURL: [String: Date], newestModificationDate: Date) {
         var expiryByStartURL: [String: Date] = [:]
         var newestModificationDate = Date.distantPast

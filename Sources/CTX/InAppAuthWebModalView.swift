@@ -3,6 +3,41 @@ import CTXCore
 import SwiftUI
 import WebKit
 
+/// Content for the standalone "in-app-auth" window (see `CTXApp`). Reads the
+/// active `.inAppAuth` presentation directly off the store — there's only
+/// ever one at a time — rather than being handed one, so it keeps working
+/// regardless of which surface (main window, settings) requested it.
+struct InAppAuthWindowScene: View {
+    @ObservedObject var store: ProfileStore
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        Group {
+            if let presentation = store.presentation,
+               case .inAppAuth(let request) = presentation.route {
+                InAppAuthWebModalView(url: request.url, userEmail: request.email) { result in
+                    switch result {
+                    case .success:
+                        store.consumePresentation(id: presentation.id, from: presentation.origin)
+                    case .failure:
+                        store.cancelPresentation(id: presentation.id, from: presentation.origin)
+                    }
+                }
+                .id(presentation.id)
+            } else {
+                Color.clear.onAppear { dismissWindow(id: "in-app-auth") }
+            }
+        }
+        .onDisappear {
+            // Covers the native red-button close, which skips `onComplete`.
+            if let presentation = store.presentation, case .inAppAuth = presentation.route {
+                store.cancelPresentation(id: presentation.id, from: presentation.origin)
+            }
+        }
+        .ctxChromelessWindow()
+    }
+}
+
 public struct InAppAuthWebModalView: View {
     let url: URL
     let userEmail: String?

@@ -48,29 +48,30 @@ public enum GCPConfigWriter {
             }
         }
 
-        // If it's a rename, delete the old file
-        if let originalName, isRename {
-            let oldURL = dir.appendingPathComponent("config_\(originalName)")
+        // A rename carries the old file's contents to the new name, so read from
+        // whichever file currently holds them.
+        let oldURL = originalName.map { dir.appendingPathComponent("config_\($0)") }
+        let sourceURL = isRename ? (oldURL ?? targetURL) : targetURL
+
+        try ConfigBackup.snapshot(sourceURL)
+        if let oldURL, isRename {
             try? manager.removeItem(at: oldURL)
         }
 
-        // Build INI content
-        var content = """
-        [core]
-        project = \(project)
-        account = \(account)
-        """
-
+        // Edit in place rather than rebuilding from the fields below: a gcloud
+        // configuration also carries compute zones, container clusters and run regions
+        // that this form never shows, and rebuilding would drop every one of them.
+        var document = INIDocument(text: (try? String(contentsOf: sourceURL, encoding: .utf8)) ?? "")
+        document.set("project", to: project, in: "core")
+        document.set("account", to: account, in: "core")
+        // An empty region means "not specified", never "erase the one already there".
         if !region.isEmpty {
-            content += """
-            
-            
-            [compute]
-            region = \(region)
-            """
+            document.set("region", to: region, in: "compute")
         }
 
-        try (content + "\n").write(to: targetURL, atomically: true, encoding: .utf8)
+        let content = document.rendered()
+        try (content.hasSuffix("\n") ? content : content + "\n")
+            .write(to: targetURL, atomically: true, encoding: .utf8)
     }
 
     public static func deleteConfig(_ name: String, dir: URL = GCPConfigPaths.configurationsDirURL) throws {
@@ -78,6 +79,7 @@ public enum GCPConfigWriter {
         let fileURL = dir.appendingPathComponent("config_\(name)")
         let manager = FileManager.default
         if manager.fileExists(atPath: fileURL.path) {
+            try ConfigBackup.snapshot(fileURL)
             try manager.removeItem(at: fileURL)
         }
     }

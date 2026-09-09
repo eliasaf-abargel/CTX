@@ -2,6 +2,15 @@ import Combine
 import CTXCore
 import Foundation
 
+// Point diagnostics at a throwaway directory before anything can log. CTXPerfLog
+// records on every timed step, so without this the suite writes into the real
+// ~/.config/ctx/diagnostics and rolls the person's own history out of it.
+setenv(
+    "CTX_DIAGNOSTICS_DIR",
+    NSTemporaryDirectory() + "ctx-tests-diagnostics-" + UUID().uuidString,
+    1
+)
+
 func testProviderLabelsStayCloudSpecific() {
     assert(CloudProfile(provider: .aws, name: "prod").accountLabel == "AWS Account")
     assert(CloudProfile(provider: .gcp, name: "prod").roleLabel == "GCP Account")
@@ -1976,6 +1985,7 @@ func testProfileCommandServiceBuildsProviderCommands() async {
         ["az", "account", "set", "--subscription", "sub-123"],
         ["aws", "sso", "login", "--profile", "dev", "--no-browser"],
         ["gcloud", "auth", "login", "--configuration", "dev", "--account", "dev@example.com"],
+        ["gcloud", "auth", "application-default", "login"],
         ["az", "login", "--tenant", "tenant-123"],
         ["az", "account", "set", "--subscription", "sub-123"],
         ["aws", "sso", "logout"],
@@ -1984,6 +1994,7 @@ func testProfileCommandServiceBuildsProviderCommands() async {
         ["aws", "sts", "get-caller-identity", "--profile", "dev", "--output", "json"],
         ["gcloud", "config", "configurations", "describe", "dev", "--format=value(properties.core.account)", "--quiet"],
         ["az", "account", "show", "--subscription", "sub-123", "--output", "json"],
+        ["az", "account", "get-access-token", "--subscription", "sub-123", "--output", "none"],
         ["aws", "configure", "export-credentials", "--profile", "dev", "--output", "json"]
     ])
     assert(kubectl.commands.map(\.arguments) == [
@@ -2181,7 +2192,9 @@ func testProfileCommandServiceStrongDMLoginAndVerify() async {
         CommandResult(exitCode: 0, output: "disconnect success") // sdm disconnect for logout
     ])
 
-    let service = ProfileCommandService(runner: runner)
+    let kubectl = ScriptedKubectl()
+    kubectl.outputForCommand = { _ in .success("{}") }
+    let service = ProfileCommandService(runner: runner, kubectl: kubectl)
     let sdmKube = CloudProfile(provider: .kubernetes, name: "sdm-context", roleName: ("sdm-" + "user"))
 
     // Test verify when cluster API succeeds
@@ -2206,6 +2219,14 @@ func testProfileCommandServiceStrongDMLoginAndVerify() async {
         ["sdm", "disconnect", "sdm-context"],
         ["tsh", "kube", "logout", "teleport-context"]
     ])
+    await runner.setResults([
+        CommandResult(exitCode: 1, output: "login required"),
+        CommandResult(exitCode: 0, output: "signed in"),
+        CommandResult(exitCode: 1, output: "resource unavailable")
+    ])
+    let failedReconnect = await service.login(sdmKube)
+    assert(failedReconnect.exitCode == 1)
+
 }
 
 func testCTXUpdateServiceParsesReleaseAndComparesVersions() throws {
@@ -2367,8 +2388,7 @@ func testAWSCredentialServiceRemovesOnlyCTXExportedTemporarySections() throws {
 
     _ = try service.storeExportedCredentials(
         #"{"AccessKeyId":"TRACKED","SecretAccessKey":"tracked-secret","SessionToken":"tracked-token"}"#,
-        profileName: "tracked",
-        isActiveProfile: true
+        profileName: "tracked"
     )
     try service.clearExportedTemporaryCredentials()
 
@@ -2400,8 +2420,7 @@ func testAWSCredentialCleanupPreservesReplacedLongLivedKeys() throws {
     let service = AWSCredentialService(configURL: configURL, credentialsURL: credentialsURL)
     _ = try service.storeExportedCredentials(
         #"{"AccessKeyId":"TEMP","SecretAccessKey":"temporary","SessionToken":"session"}"#,
-        profileName: "tracked",
-        isActiveProfile: false
+        profileName: "tracked"
     )
     try """
     [tracked]
@@ -4087,24 +4106,21 @@ func testBrokerDisconnectFailuresPreserveStateAndSanitizeErrors() async throws {
             startsBackgroundServices: false
         )
         let profile = store.profiles.first { $0.name == testCase.context }!
-        let previousStatus = profile.status
-        let previousActiveContext = store.activeKubeContext
-
         store.logout(profile)
-        await waitForLifecycleCondition("broker disconnect failure presentation") {
-            store.presentation != nil
+        await waitForLifecycleCondition("broker disconnect result") {
+            store.lastMessage.contains("could not be confirmed")
         }
+        let commandsBeforeVerify = await runner.allCommands()
+        assert(commandsBeforeVerify.first == testCase.expected)
+        assert(store.profiles.first(where: { $0.id == profile.id })?.status == .needsLogin)
+        assert(store.activeKubeContext.isEmpty)
+        assert(store.presentation == nil)
+        assert(!store.lastMessage.contains("private-value"))
+        let verified = await store.verify(profile)
+        let commandsAfterVerify = await runner.allCommands()
+        assert(!verified && commandsAfterVerify == commandsBeforeVerify)
+        assert(defaults.stringArray(forKey: CTXDefaultsKey.manuallyDisconnectedProfileIDs)?.contains(profile.id) == true)
 
-        let commands = await runner.allCommands()
-        assert(commands == [testCase.expected])
-        assert(store.profiles.first(where: { $0.id == profile.id })?.status == previousStatus)
-        assert(store.activeKubeContext == previousActiveContext)
-        guard case .operationError(let error) = store.presentation?.route else {
-            assertionFailure("broker disconnect failure must be presented")
-            continue
-        }
-        assert(error.title == "Disconnect Failed")
-        assert(!error.message.contains("private-value"))
     }
 }
 
@@ -4115,6 +4131,15 @@ testAWSDraftDuplicatePreservesConfigurationAndRenamesCopy()
 testKubernetesContextProfileMapsToCloudProfile()
 testEnvironmentDetection()
 testKubernetesProviderDetection()
+try await testStrongDMPostSSOFailureAndDiagnosticPrivacy()
+await testStrongDMSSOContinuesToResourceAndVerifiesAPI()
+await testStrongDMAlreadyDisconnectedAndResourceFailure()
+try testUpdateCheckDistinguishesCurrentReleaseFromServiceFailure()
+try await testLocalIdentityDoesNotFollowProviderSelection()
+try await testDiscoveryRetainsContextsDuringFileReplacement()
+try testExplicitKubeAWSProfileDoesNotUseGlobalSelection()
+try testLocalDiagnosticsAreBoundedAndExcludeIdentity()
+try testIndentedKubeDiscoveryPreservesEntriesAndUsers()
 try testKubeConfigDiscoverySingleFile()
 try testKubernetesBearerTokensNeverEnterSharedProfileState()
 try testKubeConfigDiscoveryHandlesNameAfterNestedClusterOrContextKey()
@@ -6534,5 +6559,239 @@ testTopologyKeyboardNavigationFollowsEdgesBeforeGeometry()
 testTopologyCountSummaryAgreesAtEveryLength()
 testTopologyCountSummaryFollowsTheSnapshot()
 testTopologyBuilderStopsDuringLargeInputCancellation()
+
+func testProfilesOnOneIdentityCenterShareASingleSSOSession() {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("ctx-awsconfig-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("config")
+
+    func draft(_ name: String, _ account: String, _ portal: String) -> AWSProfileDraft {
+        var draft = AWSProfileDraft()
+        draft.name = name
+        draft.ssoStartURL = portal
+        draft.ssoRegion = "us-east-1"
+        draft.accountID = account
+        draft.roleName = "AdministratorAccess"
+        draft.defaultRegion = "us-east-1"
+        return draft
+    }
+
+    func occurrences(_ needle: String, _ haystack: String) -> Int {
+        haystack.components(separatedBy: needle).count - 1
+    }
+
+    let portal = "https://d-1111111111.awsapps.com/start/#"
+    try! AWSConfigWriter.appendProfile(draft("alpha", "111122223333", portal), to: url)
+    try! AWSConfigWriter.appendProfile(draft("beta", "222233334444", portal), to: url)
+    try! AWSConfigWriter.appendProfile(
+        draft("gamma", "333344445555", "https://d-2222222222.awsapps.com/start/#"),
+        to: url
+    )
+
+    let text = try! String(contentsOf: url, encoding: .utf8)
+    // One session per portal, not one per profile - two portals, two sessions.
+    assert(occurrences("[sso-session ", text) == 2)
+    assert(occurrences("[sso-session alpha]", text) == 1)
+    assert(occurrences("[sso-session beta]", text) == 0)
+    assert(text.contains("[profile beta]"))
+    assert(occurrences("sso_session = alpha", text) == 2)
+    assert(text.contains("[sso-session gamma]"))
+
+    // Editing a profile must not remove the session its sibling still points at.
+    try! AWSConfigWriter.updateProfile(
+        originalName: "beta",
+        draft: draft("beta", "222233334444", portal),
+        to: url
+    )
+    let edited = try! String(contentsOf: url, encoding: .utf8)
+    assert(edited.contains("[sso-session alpha]"))
+    assert(occurrences("[profile beta]", edited) == 1)
+    assert(occurrences("sso_session = alpha", edited) == 2)
+}
+
+testProfilesOnOneIdentityCenterShareASingleSSOSession()
+
+func testConsolidateCollapsesDuplicateSessionsAndLeavesCleanConfigsAlone() {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("ctx-awsconfig-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("config")
+
+    // A config as older versions wrote it: one session per profile, two portals.
+    try! """
+    [sso-session alpha]
+    sso_start_url = https://d-1111111111.awsapps.com/start/#
+    sso_region = us-east-1
+    sso_registration_scopes = sso:account:access
+
+    [profile alpha]
+    sso_session = alpha
+    sso_account_id = 111122223333
+    sso_role_name = ReadOnly
+    region = us-east-1
+
+    [sso-session beta]
+    sso_start_url = https://d-1111111111.awsapps.com/start/#
+    sso_region = us-east-1
+    sso_registration_scopes = sso:account:access
+
+    [profile beta]
+    sso_session = beta
+    sso_account_id = 222233334444
+    sso_role_name = ReadOnly
+    region = us-east-1
+
+    [sso-session gamma]
+    sso_start_url = https://d-2222222222.awsapps.com/start/#
+    sso_region = eu-west-1
+    sso_registration_scopes = sso:account:access
+
+    [profile gamma]
+    sso_session = gamma
+    sso_account_id = 333344445555
+    sso_role_name = ReadOnly
+    region = eu-west-1
+
+    [default]
+    sso_session = beta
+    sso_account_id = 222233334444
+    sso_role_name = ReadOnly
+    """.write(to: url, atomically: true, encoding: .utf8)
+
+    let merged = try! AWSConfigWriter.consolidateSSOSessions(in: url)
+    assert(merged.count == 1)
+    assert(merged[0].canonicalSession == "alpha")
+    assert(merged[0].mergedSessions == ["beta"])
+    // The default profile is spelled [default], not [profile default]; leaving it behind
+    // points it at a deleted session and every CLI call fails, whatever profile is asked for.
+    assert(merged[0].repointedProfiles == ["beta", "default"])
+
+    let text = try! String(contentsOf: url, encoding: .utf8)
+    assert(text.contains("[sso-session alpha]"))
+    assert(!text.contains("[sso-session beta]"))
+    assert(text.contains("[profile beta]"))
+    assert(text.contains("sso_session = alpha"))
+    // A different portal keeps its own session.
+    assert(text.contains("[sso-session gamma]"))
+    assert(text.contains("sso_session = gamma"))
+    // Unrelated profile settings survive untouched.
+    assert(text.contains("sso_account_id = 222233334444"))
+    // No section may still reference a session that was removed.
+    assert(!text.contains("sso_session = beta"))
+    assert(text.contains("[default]"))
+
+    // Second run is a no-op: nothing left to merge.
+    assert(try! AWSConfigWriter.consolidateSSOSessions(in: url).isEmpty)
+    assert(try! String(contentsOf: url, encoding: .utf8) == text)
+}
+
+testConsolidateCollapsesDuplicateSessionsAndLeavesCleanConfigsAlone()
+
+func testConsolidateLeavesEverythingItDoesNotOwnByteForByte() {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("ctx-awsconfig-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    // A config a person wrote by hand: comments, static keys, credential_process,
+    // an assumed-role chain, and a region CTX never asked about.
+    let handWritten = """
+    # work accounts - do not reorder
+    [sso-session alpha]
+    sso_start_url = https://d-1111111111.awsapps.com/start/#
+    sso_region = us-east-1
+    sso_registration_scopes = sso:account:access
+
+    [profile one]
+    sso_session = alpha
+    sso_account_id = 111122223333
+    sso_role_name = ReadOnly
+    region = us-east-1
+
+    ; legacy static keys, rotated by hand
+    [profile vendor]
+    aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+    region = eu-west-1
+
+    [profile via-helper]
+    credential_process = /opt/bin/creds --json
+    region = ap-south-1
+
+    [profile escalated]
+    role_arn = arn:aws:iam::444455556666:role/Escalated
+    source_profile = one
+    duration_seconds = 3600
+    """
+
+    // Case 1: nothing to merge - the file must come back untouched.
+    let clean = directory.appendingPathComponent("clean")
+    try! handWritten.write(to: clean, atomically: true, encoding: .utf8)
+    let before = try! String(contentsOf: clean, encoding: .utf8)
+    assert(try! AWSConfigWriter.consolidateSSOSessions(in: clean).isEmpty)
+    assert(try! String(contentsOf: clean, encoding: .utf8) == before)
+
+    // Case 2: add a duplicate session; only that block may move.
+    let messy = directory.appendingPathComponent("messy")
+    try! (handWritten + """
+
+
+    [sso-session beta]
+    sso_start_url = https://d-1111111111.awsapps.com/start/#
+    sso_region = us-east-1
+    sso_registration_scopes = sso:account:access
+
+    [profile two]
+    sso_session = beta
+    sso_account_id = 222233334444
+    sso_role_name = ReadOnly
+    """).write(to: messy, atomically: true, encoding: .utf8)
+
+    assert(try! AWSConfigWriter.consolidateSSOSessions(in: messy).count == 1)
+    let after = try! String(contentsOf: messy, encoding: .utf8)
+
+    // Comments survive, including the ; style.
+    assert(after.contains("# work accounts - do not reorder"))
+    assert(after.contains("; legacy static keys, rotated by hand"))
+    // Non-SSO profiles are not rewritten in any way.
+    assert(after.contains("aws_access_key_id = AKIAIOSFODNN7EXAMPLE"))
+    assert(after.contains("credential_process = /opt/bin/creds --json"))
+    assert(after.contains("role_arn = arn:aws:iam::444455556666:role/Escalated"))
+    assert(after.contains("source_profile = one"))
+    assert(after.contains("duration_seconds = 3600"))
+    assert(after.contains("region = ap-south-1"))
+    // Only the duplicate session is gone; the profile that used it is repointed.
+    assert(!after.contains("[sso-session beta]"))
+    assert(after.contains("[profile two]"))
+    assert(after.contains("sso_session = alpha"))
+    assert(!after.contains("sso_session = beta"))
+}
+
+testConsolidateLeavesEverythingItDoesNotOwnByteForByte()
+
+testSnapshotCopiesTheFileAndNamesItAfterTheOriginal()
+testSnapshotSkipsMissingFilesAndNeverCollides()
+testGCPWriterKeepsSettingsItHasNoFieldFor()
+testGCPWriterLeavesAnExistingRegionAloneWhenNoneIsGiven()
+testGCPWriterPreservesOnRenameAndDelete()
+testAzureWriterPreservesOnRewriteAndDelete()
+testFirstWriteLeavesNoBackupBehind()
+
+testTerminalScopeIsOneEnvironmentVariablePerProvider()
+testTerminalScopeKeepsConfiguredPathOverrides()
+testAzureIsRefusedRatherThanFaked()
+testLaunchScriptQuotesValuesAndHandsOverToTheLoginShell()
+testScriptNameIsReadableAndCannotEscapeItsDirectory()
+testTerminalChoiceFallsBackWhenTheChosenAppIsGone()
+testExportingCredentialsNeverWritesADefaultProfile()
+testInstallingTheSnippetTwiceLeavesOneCopy()
+testUninstallingLeavesTheRestOfTheFileIntact()
+testSelectionFileRefusesValuesThatCouldForgeAnAssignment()
+testSelectionIsOnlyEverWrittenWhereItIsToldTo()
+testAccessFromThisMachineIsTheCredentialClockNotTheTokenClock()
+testProfilesOnOnePortalShareOneSignIn()
+testAnExpiredSignInIsReportedForAProfileThatOnlyNamesASession()
 
 print("CTXCoreTests passed")

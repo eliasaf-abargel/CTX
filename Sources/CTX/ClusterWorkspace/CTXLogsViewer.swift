@@ -157,7 +157,4 @@ struct CTXLogsViewer: View {
         return AttributedString(text)
     }
 
-    private static func looksLikeTimestamp(_ candidate: Substring) -> Bool {
-        candidate.count >= 20 && candidate.contains("T") && (candidate.hasSuffix("Z") || candidate.contains("+"))
-    }
 }

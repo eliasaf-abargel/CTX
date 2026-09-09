@@ -5,6 +5,8 @@ struct AboutSettingsView: View {
     @ObservedObject var store: ProfileStore
     @AppStorage(AppAppearance.storageKey) private var appAppearanceRaw = AppAppearance.dark.rawValue
 
+    @State private var diagnosticsError: String?
+
     var body: some View {
         Form {
             Section {
@@ -22,11 +24,9 @@ struct AboutSettingsView: View {
             }
 
             Section("Application info") {
-                LabeledContent("Name", value: "CTX")
                 LabeledContent("Version", value: appVersion)
-                LabeledContent("Runtime", value: "Native macOS")
-                LabeledContent("Active identity", value: store.activeIdentityLabel)
-                LabeledContent("Identity status", value: store.activeIdentityStatusLabel)
+                LabeledContent("Local user", value: store.localIdentityLabel)
+                LabeledContent("Cloud sessions", value: store.activeIdentityStatusLabel)
 
                 if store.updateAvailable {
                     LabeledContent("New version") {
@@ -66,6 +66,22 @@ struct AboutSettingsView: View {
                         }
                     }
                 }
+            }
+
+            Section("Local diagnostics") {
+                Text("Connection and discovery metadata stays on this Mac. No credentials or command output are collected. Nothing is uploaded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Show diagnostic files") {
+                    do {
+                        try LocalDiagnostics.shared.record(step: "support_open", outcome: "success")
+                        NSWorkspace.shared.open(LocalDiagnostics.directory)
+                        diagnosticsError = nil
+                    } catch {
+                        diagnosticsError = "Could not open local diagnostics. Check folder permissions."
+                    }
+                }
+                if let diagnosticsError { Text(diagnosticsError).foregroundStyle(.red) }
             }
 
             Section("Creator") {

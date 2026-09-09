@@ -61,11 +61,6 @@ extension ProfileStore {
         profileOperations[profileID] != nil
     }
 
-    internal func operationOrigin(profileID: String, operationID: UUID) -> ProfilePresentationSurface? {
-        guard let operation = profileOperations[profileID], operation.id == operationID else { return nil }
-        return operation.origin
-    }
-
     internal func finishProfileOperation(profileID: String, operationID: UUID) {
         guard profileOperations[profileID]?.id == operationID else { return }
         profileOperations[profileID] = nil

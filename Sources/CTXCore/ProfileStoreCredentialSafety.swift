@@ -63,8 +63,7 @@ extension ProfileStore {
         do {
             let stored = try awsCredentials.storeExportedCredentials(
                 result.output,
-                profileName: profile.name,
-                isActiveProfile: true
+                profileName: profile.name
             )
             activeAWSExpiresAt = stored.expiresAt
             lastMessage = "Exported credentials for \(profile.name)"

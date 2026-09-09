@@ -1,6 +1,17 @@
 import Foundation
 
 extension ProfileStore {
+    /// The local app user stays constant when cloud sessions change.
+    public var localIdentityLabel: String {
+        let name = NSFullUserName()
+        return name.isEmpty ? NSUserName() : name
+    }
+
+    public var localIdentityInitials: String {
+        let words = localIdentityLabel.split(whereSeparator: { $0.isWhitespace })
+        return words.prefix(2).compactMap { $0.first }.map(String.init).joined().uppercased()
+    }
+
     public var activeIdentityLabel: String {
         if !activeGCPProfile.isEmpty,
            let gcp = profiles.first(where: { $0.provider == .gcp && $0.name == activeGCPProfile }),

@@ -4,11 +4,18 @@ import SwiftUI
 extension ProfileDetailView {
     @ViewBuilder
     var connectionIssueSection: some View {
-        if profile.provider == .kubernetes
+        if store.isManuallyDisconnected(profile) {
+            if let message = store.verificationErrors[profile.id] {
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if profile.provider == .kubernetes
             && (currentProfile.status == .needsLogin || store.verificationErrors[profile.id] != nil) {
             let errorMessage = store.verificationErrors[profile.id]
             KubeAuthRemediationCardView(
-                profile: profile,
+                profile: currentProfile,
                 errorMessage: errorMessage,
                 onConnect: {
                     store.login(profile, from: .mainWindow)

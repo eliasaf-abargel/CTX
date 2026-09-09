@@ -100,6 +100,9 @@ open_app() {
     rm -rf "/Applications/$APP_NAME.app"
     cp -R "$APP_BUNDLE" "/Applications/"
     xattr -rd com.apple.quarantine "/Applications/$APP_NAME.app" >/dev/null 2>&1 || true
+    # Launch Services indexes every .app under $HOME, so a staging bundle left in
+    # dist/ shows up alongside the installed copy as a second, stale app.
+    rm -rf "$APP_BUNDLE"
     /usr/bin/open "/Applications/$APP_NAME.app"
   else
     /usr/bin/open "$APP_BUNDLE"

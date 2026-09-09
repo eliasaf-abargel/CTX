@@ -6,6 +6,8 @@ struct ProfileLifecyclePresentationHost: ViewModifier {
     let surface: ProfilePresentationSurface
     @State private var presentedSheetID: UUID?
     @State private var presentedAlertID: UUID?
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     func body(content: Content) -> some View {
         content
@@ -73,6 +75,21 @@ struct ProfileLifecyclePresentationHost: ViewModifier {
                     presentedAlertID = presentation.id
                 }
             }
+            .onChange(of: isPresentingInAppAuth, initial: true) { _, isPresenting in
+                if isPresenting {
+                    openWindow(id: "in-app-auth")
+                } else {
+                    dismissWindow(id: "in-app-auth")
+                }
+            }
+    }
+
+    /// True only for the host instance whose surface actually owns the
+    /// request — `presentation(for:)` already filters by origin.
+    private var isPresentingInAppAuth: Bool {
+        guard let presentation = store.presentation(for: surface) else { return false }
+        if case .inAppAuth = presentation.route { return true }
+        return false
     }
 
     private var sheetBinding: Binding<ProfilePresentation?> {
@@ -82,6 +99,9 @@ struct ProfileLifecyclePresentationHost: ViewModifier {
                       presentation.route.isSheet else {
                     return nil
                 }
+                // Shown in its own movable window (see CTXApp) instead of an
+                // attached sheet, which macOS pins to the parent title bar.
+                if case .inAppAuth = presentation.route { return nil }
                 return presentation
             },
             set: { newValue in

@@ -5,7 +5,7 @@ import UserNotifications
 @main
 struct CTXApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var store = ProfileStore()
+    @StateObject private var store = ProfileStore(shellSelectionURL: ShellIntegration.selectionURL)
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -26,6 +26,15 @@ struct CTXApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 780)
+
+        // A real, separate window (not a `.sheet`) so the user can drag it
+        // anywhere on screen — sheets are permanently docked to their parent
+        // window's title bar on macOS and can't be repositioned.
+        Window("CTX Auth", id: "in-app-auth") {
+            InAppAuthWindowScene(store: store)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 900, height: 820)
 
         MenuBarExtra {
             MenuBarView(store: store)

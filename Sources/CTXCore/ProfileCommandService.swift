@@ -17,8 +17,30 @@ public final class ProfileCommandService: Sendable {
         self.providerEnvironment = providerEnvironment
     }
 
+    public func linkedAWSProfile(for context: KubernetesContextProfile) async -> String? {
+        do {
+            var command = try kubectl.inspectionCommand(
+                context: context.contextName,
+                arguments: ["--kubeconfig", context.kubeconfigPath, "config", "view", "--minify", "-o", "json"]
+            )
+            command.environmentOverrides["KUBECONFIG"] = context.kubeconfigPath
+            let result = try await kubectl.run(command, timeout: 10)
+            guard result.exitCode == 0 else { return nil }
+            return Self.explicitAWSProfile(in: Data(result.stdout.utf8))
+        } catch { return nil }
+    }
+
     public func activateGCPConfiguration(_ profile: CloudProfile) async -> CommandResult {
         await run(["gcloud", "config", "configurations", "activate", profile.name])
+    }
+
+    /// Refreshes Application Default Credentials directly — the credential a
+    /// kubectl exec plugin like `gke-gcloud-auth-plugin` actually reads, and
+    /// which `login(_:)` only reaches indirectly through one named gcloud
+    /// configuration. Unscoped on purpose: it works even when CTX has no GCP
+    /// profile on file for whatever context needs it refreshed.
+    public func refreshGCPApplicationDefaultCredentials(onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
+        await runLogin(["gcloud", "auth", "application-default", "login"], onOutput: onOutput)
     }
 
     public func activateAzureSubscription(_ profile: CloudProfile) async -> CommandResult {
@@ -44,7 +66,14 @@ public final class ProfileCommandService: Sendable {
             if !emailCandidate.isEmpty {
                 args.append(contentsOf: ["--account", emailCandidate])
             }
-            return await runLogin(args, onOutput: onOutput)
+            let loginResult = await runLogin(args, onOutput: onOutput)
+            guard loginResult.exitCode == 0 else { return loginResult }
+            // `gcloud auth login` only refreshes the CLI's own credentials. Any client
+            // library or external tool (Terraform, gcloud SDKs, other agents) reads
+            // Application Default Credentials instead, which live in a separate file
+            // and need their own login step — otherwise they keep failing even though
+            // CTX and `gcloud` itself look fully connected.
+            return await runLogin(["gcloud", "auth", "application-default", "login"], onOutput: onOutput)
         case .azure:
             var args = ["az", "login"]
             if !profile.roleName.isEmpty {
@@ -53,23 +82,7 @@ public final class ProfileCommandService: Sendable {
             return await runLogin(args, onOutput: onOutput)
         case .kubernetes:
             if profile.usesStrongDM {
-                let connectResult = await runLogin(["sdm", "connect", profile.name], onOutput: onOutput)
-                if connectResult.exitCode == 0 {
-                    return connectResult
-                }
-                if connectResult.output.contains("http://") || connectResult.output.contains("https://") {
-                    return connectResult
-                }
-                var loginArgs = ["sdm", "login"]
-                if let userEmail = email, !userEmail.isEmpty {
-                    loginArgs.append(contentsOf: ["--email", userEmail])
-                }
-                let loginResult = await runLogin(loginArgs, onOutput: onOutput)
-                if loginResult.output.contains("http://") || loginResult.output.contains("https://") {
-                    return loginResult
-                }
-                _ = await runLogin(["sdm", "connect", profile.name], onOutput: onOutput)
-                return loginResult
+                return await loginStrongDM(profile, email: email, onOutput: onOutput)
             } else if profile.usesTeleport {
                 let loginResult = await runLogin(["tsh", "kube", "login", profile.name], onOutput: onOutput)
                 if loginResult.exitCode == 0 {
@@ -99,7 +112,7 @@ public final class ProfileCommandService: Sendable {
             return CommandResult(exitCode: 0, output: "")
         case .kubernetes:
             if profile.usesStrongDM {
-                return await run(["sdm", "disconnect", profile.name])
+                return await disconnectStrongDM(profile)
             }
             if profile.usesTeleport {
                 return await run(["tsh", "kube", "logout", profile.name])
@@ -160,30 +173,54 @@ public final class ProfileCommandService: Sendable {
                     output: "Configuration \(profile.name) is associated with a different account."
                 )
             }
+            // Everything above only reads a local config file — it says nothing
+            // about whether the refresh token behind that account still works.
+            // This is the actual liveness check: cheap, non-interactive, and it
+            // fails immediately instead of opening a browser if the token was
+            // revoked or expired.
+            let tokenCheck = await run([
+                "gcloud", "auth", "print-access-token",
+                "--account", account,
+                "--quiet"
+            ])
+            guard tokenCheck.exitCode == 0 else {
+                return CommandResult(
+                    exitCode: 1,
+                    output: "GCP credentials for \(account) have expired or were revoked. Run gcloud auth login."
+                )
+            }
             return CommandResult(exitCode: 0, output: "")
         case .azure:
             let target = profile.accountID.isEmpty ? profile.name : profile.accountID
-            return await run([
+            let result = await run([
                 "az", "account", "show",
                 "--subscription", target,
                 "--output", "json"
             ])
+            guard result.exitCode == 0 else { return result }
+            // Same story as GCP: `account show` only reads the local profile
+            // cache. `get-access-token` is the real, non-interactive check.
+            let tokenCheck = await run([
+                "az", "account", "get-access-token",
+                "--subscription", target,
+                "--output", "none"
+            ])
+            guard tokenCheck.exitCode == 0 else {
+                return CommandResult(
+                    exitCode: 1,
+                    output: "Azure credentials for \(target) have expired or require re-authentication. Run az login."
+                )
+            }
+            return CommandResult(exitCode: 0, output: "")
         case .kubernetes:
             guard profile.name == activeKubeContext else {
                 return CommandResult(exitCode: 99, output: "Not active context")
             }
             if profile.usesStrongDM {
                 let statusResult = await run(["sdm", "status"])
-                if statusResult.exitCode == 0 {
-                    let lines = statusResult.output.components(separatedBy: .newlines)
-                    let lowerName = profile.name.lowercased()
-                    for line in lines {
-                        let lowerLine = line.lowercased()
-                        if lowerLine.contains(lowerName) && (lowerLine.contains("connected") || lowerLine.contains("ready") || lowerLine.contains("active")) {
-                            return CommandResult(exitCode: 0, output: "StrongDM connected (\(profile.name))")
-                        }
-                    }
-                }
+                guard statusResult.exitCode == 0 else { return statusResult }
+                // Broker authentication alone does not prove the cluster API is reachable.
+
             }
 
             if profile.usesTeleport {
@@ -202,9 +239,6 @@ public final class ProfileCommandService: Sendable {
                 return versionResult
             }
 
-            if profile.usesStrongDM {
-                return CommandResult(exitCode: 401, output: "StrongDM resource '\(profile.name)' is not connected. Run 'sdm connect \(profile.name)'.")
-            }
             return versionResult
         }
     }
@@ -220,17 +254,19 @@ public final class ProfileCommandService: Sendable {
     /// Verification, activation and logout calls are expected to answer promptly;
     /// `login(...)` overrides this with `CloudCommandTimeout.interactiveLogin`,
     /// because an SSO flow legitimately waits on the user finishing in a browser.
-    private func run(
+    internal func run(
         _ arguments: [String],
         timeout: TimeInterval = CloudCommandTimeout.standard,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async -> CommandResult {
+        let started = Date()
         let result = await runner.run(
             arguments,
             environmentOverrides: providerEnvironment(),
             timeout: timeout,
             onOutput: onOutput
         )
+        LocalDiagnostics.shared.recordCommand(arguments: arguments, result: result, durationMs: Int(Date().timeIntervalSince(started) * 1000))
         guard result.exitCode != 0 else { return result }
         return CommandResult(
             exitCode: result.exitCode,
@@ -238,7 +274,7 @@ public final class ProfileCommandService: Sendable {
         )
     }
 
-    private func runLogin(_ arguments: [String], onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
+    internal func runLogin(_ arguments: [String], onOutput: (@Sendable (String) -> Void)? = nil) async -> CommandResult {
         await run(arguments, timeout: CloudCommandTimeout.interactiveLogin, onOutput: onOutput)
     }
 
@@ -259,6 +295,7 @@ public final class ProfileCommandService: Sendable {
             command.environmentOverrides = environment
             let result = try await kubectl.run(command, timeout: 10)
             let output = result.stdout + result.stderr
+            LocalDiagnostics.shared.recordCommand(arguments: ["kubectl", "get"], result: CommandResult(exitCode: result.exitCode, output: output), durationMs: 0)
             return CommandResult(
                 exitCode: result.exitCode,
                 output: result.exitCode == 0 ? output : KubernetesDiagnosticClassifier.sanitize(output)

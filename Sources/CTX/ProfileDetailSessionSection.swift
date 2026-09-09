@@ -26,14 +26,18 @@ extension ProfileDetailView {
                 .padding(.horizontal, 18)
                 .frame(minHeight: 38)
 
+                // The access token behind an SSO sign-in carries a refresh token and
+                // renews silently, so its hourly expiry is not a deadline anyone acts
+                // on. What governs CLI access from this machine is the credentials
+                // already exported for this profile, and each profile has its own -
+                // one connected an hour ago has an hour less than one connected now.
                 if profile.provider == .aws,
-                   store.isActive(profile),
-                   let expiresAt = store.activeAWSExpiresAt,
+                   let expiresAt = store.sessionExpiry(for: currentProfile),
                    expiresAt > Date() {
                     Divider()
                         .padding(.leading, 16)
                     HStack {
-                        Text("Expires in")
+                        Text("Access expires in")
                             .foregroundStyle(fieldLabelStyle)
                         Spacer()
                         SessionCountdownView(expiresAt: expiresAt)

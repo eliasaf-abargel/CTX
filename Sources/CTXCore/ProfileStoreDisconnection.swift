@@ -1,6 +1,14 @@
 import Foundation
 
 extension ProfileStore {
+    public func isManuallyDisconnected(_ profile: CloudProfile) -> Bool {
+        manuallyDisconnectedProfiles.contains(profile.id)
+    }
+
+    public func needsDisconnectRetry(_ profile: CloudProfile) -> Bool {
+        isManuallyDisconnected(profile) && verificationErrors[profile.id] != nil
+    }
+
     internal func runLogout(
         _ profile: CloudProfile,
         operationID: UUID,
@@ -10,7 +18,7 @@ extension ProfileStore {
               isCurrentOperation(profileID: profile.id, operationID: operationID) else {
             return
         }
-        let previousStatus = profiles.first(where: { $0.id == profile.id })?.status ?? profile.status
+        let started = Date()
         markManuallyDisconnected(profile.id)
         dismissLifecyclePresentation(for: profile.id, from: origin)
         updateStatus(profile, status: .disconnecting, operationID: operationID)
@@ -25,12 +33,7 @@ extension ProfileStore {
         }
 
         guard isCurrentOperation(profileID: profile.id, operationID: operationID) else { return }
-        guard result.exitCode == 0 else {
-            clearManualDisconnect(profile.id)
-            updateStatus(profile, status: previousStatus, operationID: operationID)
-            report(result.output, title: "Disconnect Failed", from: origin)
-            return
-        }
+        logConnectCall(step: "app_disconnect", kind: profile.provider.rawValue, profileID: profile.id, started: started, outcome: result.exitCode == 0 ? "success" : "failure")
         if isActive(profile) {
             clearActive(
                 for: profile.provider,
@@ -39,6 +42,12 @@ extension ProfileStore {
             )
         }
         updateStatus(profile, status: .needsLogin, operationID: operationID)
+        guard result.exitCode == 0 else {
+            lastMessage = "CTX stopped using this profile. The broker disconnect could not be confirmed; retry Disconnect."
+            verificationErrors[profile.id] = lastMessage
+            return
+        }
+        verificationErrors[profile.id] = nil
         lastMessage = isBrokerScoped
             ? "Disconnected \(profile.name)"
             : "Disconnected \(profile.name) from CTX"
