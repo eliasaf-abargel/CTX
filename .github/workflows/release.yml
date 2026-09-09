@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -19,9 +18,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup JFrog Fly
-        uses: jfrog/fly-action@v1
-
       - name: Run Tests
         timeout-minutes: 20
         run: swift run CTXCoreTests
@@ -30,14 +26,6 @@ jobs:
         run: ./script/build_and_run.sh release
         env:
           CTX_RELEASE_VERSION: ${{ github.ref_name }}
-
-      - name: Upload Artifact to JFrog Fly
-        uses: jfrog/fly-action/upload@v1
-        with:
-          name: CTX
-          version: ${{ github.ref_name }}
-          files: |
-            dist/CTX.app.zip
 
       - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
