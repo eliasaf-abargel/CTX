@@ -77,15 +77,6 @@ swift run CTXCheck
 ./script/build_and_run.sh verify
 ```
 
-## Documentation
-
-- [Cloud architecture](docs/CLOUD.md)
-- [Kubernetes workspace](docs/KUBERNETES_WORKSPACE.md)
-- [Design system](docs/DESIGN_SYSTEM.md)
-- [Security](docs/SECURITY.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Contributing](docs/CONTRIBUTING.md)
-- [Agent guide](AGENTS.md)
 
 ## License
 

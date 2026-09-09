@@ -6,6 +6,7 @@ DerivedData/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 .codex/
+.claude
 .idea/
 .swiftpm/
 
@@ -23,3 +24,12 @@ DerivedData/
 credentials
 config.local.*
 secrets.*
+
+# Local investigation notes and diagnostic evidence
+.local-support/
+
+# Markdown stays local, except the README the repository is read by.
+# Ignored at any depth; .local-support/ is excluded as a directory already, so its
+# own README is not re-included by the exception below.
+*.md
+!README.md
