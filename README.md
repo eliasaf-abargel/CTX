@@ -33,13 +33,26 @@ backend, account, or telemetry.
 
 ## Install
 
-Download `CTX.app.zip` from [GitHub Releases](https://github.com/eliasaf-abargel/CTX/releases),
-extract it, and move `CTX.app` to `/Applications`.
+```bash
+brew install --cask eliasaf-abargel/tap/ctx
+```
 
-To install the latest release with the repository script:
+Later releases arrive with `brew upgrade --cask ctx`. If `CTX.app` is already in
+`/Applications` from an earlier manual install, add `--force` the first time so
+Homebrew adopts it.
+
+Without Homebrew, the same release installs with:
 
 ```bash
-./script/install.sh
+curl -fsSL https://raw.githubusercontent.com/eliasaf-abargel/CTX/main/script/install.sh | bash
+```
+
+Or download `CTX.app.zip` from
+[Releases](https://github.com/eliasaf-abargel/CTX/releases), extract it, move
+`CTX.app` to `/Applications`, and clear the quarantine flag macOS puts on it:
+
+```bash
+xattr -rd com.apple.quarantine /Applications/CTX.app
 ```
 
 To build and run from source:
