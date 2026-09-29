@@ -192,7 +192,6 @@ extension ProfileStore {
             }
             completeKubeContextActivation(generation: activationGeneration, result: result)
             refresh()
-            verifyAllProfiles()
         }
     }
 

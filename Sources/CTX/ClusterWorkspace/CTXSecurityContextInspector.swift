@@ -12,7 +12,7 @@ public struct CTXSecurityContextInspector: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("SECURITY CONTEXT & PRIVILEGES")
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
@@ -48,9 +48,9 @@ public struct CTXSecurityContextInspector: View {
     private func badge(title: String, icon: String, tint: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(.caption2, weight: .semibold))
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 8)

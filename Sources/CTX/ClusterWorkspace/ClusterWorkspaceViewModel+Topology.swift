@@ -22,14 +22,13 @@ extension ClusterWorkspaceViewModel {
         isBuildingTopology || !hasLoadedTopologySources || !hasResolvedTopology
     }
 
-    func loadTopologyResources() {
-        loadResource(kind: .services, bypassCache: false)
-        loadResource(kind: .workloads, bypassCache: false, priority: .background)
-        loadResource(kind: .pods, bypassCache: false, priority: .background)
-        loadResource(kind: .ingress, bypassCache: false, priority: .background)
-        loadResource(kind: .hpa, bypassCache: false, priority: .background)
-        loadResource(kind: .pvc, bypassCache: false, priority: .background)
-        recalculateTopology()
+    /// Loads all topology-related resources,
+    /// updating all stores simultaneously and triggering recalculation.
+    func loadTopologyResources(bypassCache: Bool = false) {
+        let topologyKinds: [KubernetesResourceKind] = [.services, .workloads, .pods, .ingress, .hpa, .pvc]
+        for kind in topologyKinds {
+            loadResource(kind: kind, bypassCache: bypassCache)
+        }
     }
 
     /// Rebuilds one source graph from the loaded rows, then publishes its bounded
@@ -46,6 +45,7 @@ extension ClusterWorkspaceViewModel {
         let ingress = resourceList(for: .ingress)?.rows ?? []
         let pvcs = resourceList(for: .storage)?.rows ?? []
         let hpas = resourceList(for: .hpa)?.rows ?? []
+        let diagnostics = self.diagnosticReport
 
         guard !services.isEmpty || !workloads.isEmpty || !pods.isEmpty else {
             topologyGraph = ClusterTopologyGraph(nodes: [], edges: [])
@@ -69,6 +69,7 @@ extension ClusterWorkspaceViewModel {
                 ingress: ingress,
                 pvcs: pvcs,
                 hpas: hpas,
+                diagnostics: diagnostics,
                 isCancelled: { Task.isCancelled }
             )
             guard !Task.isCancelled else { return }
@@ -144,13 +145,13 @@ extension ClusterWorkspaceViewModel {
         generation: Int,
         searchNodeIDs: Set<String>
     ) {
-        guard generation == topologyBuildGeneration, !Task.isCancelled else { return }
-        topologyProjection = projection
-        topologySearchNodeIDs = searchNodeIDs
-        // Layout consumers only ever receive the bounded projection.
-        topologyGraph = projection.graph
-        topologyBuildTask = nil
-        isBuildingTopology = false
-        hasResolvedTopology = true
+        Task { @MainActor [weak self] in
+            guard let self, self.topologyBuildGeneration == generation else { return }
+            self.topologyGraph = projection.graph
+            self.topologyProjection = projection
+            self.topologySearchNodeIDs = searchNodeIDs
+            self.isBuildingTopology = false
+            self.hasResolvedTopology = true
+        }
     }
 }

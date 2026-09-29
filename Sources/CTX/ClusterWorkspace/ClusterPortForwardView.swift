@@ -50,7 +50,7 @@ struct ClusterPortForwardView: View {
     private var servicePicker: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text("Service")
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(.secondary)
             Menu {
                 ForEach(services) { row in
@@ -69,7 +69,7 @@ struct ClusterPortForwardView: View {
                         .truncationMode(.middle)
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -99,11 +99,11 @@ struct ClusterPortForwardView: View {
     private func portField(title: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(.secondary)
             TextField(title, text: text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .font(.system(.footnote, design: .monospaced, weight: .semibold))
                 .padding(.horizontal, 10)
                 .frame(height: 34)
                 .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -187,13 +187,13 @@ private struct PortForwardSessionRow: View {
     private var content: some View {
         HStack(spacing: 10) {
             Image(systemName: "link")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(.green)
                 .frame(width: 28, height: 28)
                 .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text("service/\(session.targetName)")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(.footnote, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text("\(session.namespace) · \(session.localPort) -> \(session.remotePort) · \(session.localURL)")

@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var store: ProfileStore
     @AppStorage(AppAppearance.storageKey) private var appAppearanceRaw: String = AppAppearance.dark.rawValue
+    @AppStorage(CTXDefaultsKey.hasCompletedOnboardingTourV1) private var hasCompletedOnboardingTour = false
     @Environment(\.colorScheme) private var colorScheme
 
     private var currentAppearance: AppAppearance {
@@ -24,6 +25,20 @@ struct ContentView: View {
         .ctxChromelessWindow()
         .preferredColorScheme(currentAppearance.colorScheme)
         .profileLifecyclePresentationHost(store: store, surface: .mainWindow)
+        // Unlike a system sheet, a plain `.overlay` doesn't remove what's
+        // underneath from the accessibility tree, so VoiceOver could still
+        // reach the sidebar/detail pane through the dimmed scrim.
+        .accessibilityHidden(!hasCompletedOnboardingTour)
+        .overlay {
+            if !hasCompletedOnboardingTour {
+                OnboardingTourView {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        hasCompletedOnboardingTour = true
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
     }
 }
 
@@ -43,7 +58,7 @@ struct DetailPane: View {
                     if store.showExpirationWarning {
                         HStack(spacing: 8) {
                             Image(systemName: "timer")
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.system(.footnote, weight: .bold))
                                 .foregroundStyle(.white)
                             Text(store.expirationWarningMessage)
                                 .font(.subheadline.weight(.semibold))
@@ -64,14 +79,14 @@ struct DetailPane: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "arrow.down.circle.fill")
-                                    .font(.system(size: 13, weight: .bold))
+                                    .font(.system(.footnote, weight: .bold))
                                     .foregroundStyle(.white)
                                 Text("Update Available: \(store.latestVersionString). Click to open settings.")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.white)
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .bold))
+                                    .font(.system(.caption2, weight: .bold))
                                     .foregroundStyle(.white.opacity(0.8))
                             }
                             .padding(.horizontal, 16)
@@ -92,7 +107,7 @@ struct DetailPane: View {
             if !activeToolbarProfiles.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("ACTIVE CONNECTIONS")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .foregroundStyle(.secondary)
                         .padding(.leading, 4)
 
@@ -197,14 +212,14 @@ private struct ActiveConnectionRow: View {
                         .shadow(color: profile.status.color.opacity(0.45), radius: 3)
 
                     Text(profile.provider.compactName)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .foregroundStyle(profile.provider.tint)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(profile.provider.tint.opacity(0.12), in: Capsule())
 
                     Text(profile.name)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                         .lineLimit(1)
 
 
@@ -212,7 +227,7 @@ private struct ActiveConnectionRow: View {
                         Text("·")
                             .foregroundStyle(.secondary)
                         Text(profile.contextSubtitle)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -238,7 +253,7 @@ private struct ActiveConnectionRow: View {
                 store.setActive(profile, from: .mainWindow)
             } label: {
                 Image(systemName: isPrimary ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(isPrimary ? profile.provider.tint : .secondary.opacity(isHovering ? 0.7 : 0.25))
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
@@ -253,7 +268,7 @@ private struct ActiveConnectionRow: View {
                 store.logout(profile, from: .mainWindow)
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)

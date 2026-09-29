@@ -83,14 +83,14 @@ struct ClusterDiffView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 12) {
                         Image(systemName: section.systemImage)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(.callout, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .frame(width: 30, height: 30)
                             .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(section.rawValue)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(.footnote, weight: .semibold))
                             if let result {
                                 Text("Compared \(result.comparedAt.formatted(date: .omitted, time: .shortened))")
                                     .font(.caption)
@@ -154,7 +154,7 @@ struct ClusterDiffView: View {
 
     private func diffBadge(_ text: String, tint: Color) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .font(.system(.caption2, design: .monospaced, weight: .bold))
             .foregroundStyle(tint)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
@@ -163,7 +163,7 @@ struct ClusterDiffView: View {
 
     private func diffLine(_ text: String, tint: Color) -> some View {
         Text(text)
-            .font(.system(size: 11, design: .monospaced))
+            .font(.system(.caption2, design: .monospaced))
             .foregroundStyle(tint)
             .lineLimit(1)
             .truncationMode(.middle)

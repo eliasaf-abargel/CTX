@@ -47,9 +47,9 @@ public struct CLITool: Sendable, Identifiable, Hashable {
     )
     public static let sdm = CLITool(
         binary: "sdm",
-        displayName: "StrongDM CLI",
-        brewPackage: nil,
-        isCask: false,
+        displayName: "StrongDM (SDM)",
+        brewPackage: "sdm",
+        isCask: true,
         downloadPage: URL(string: "https://www.strongdm.com/docs/user-guide/client-installation/")!
     )
     public static let tsh = CLITool(

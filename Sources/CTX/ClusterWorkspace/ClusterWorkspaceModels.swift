@@ -104,19 +104,20 @@ struct ClusterWorkspaceResourceSelection: Equatable {
     let row: KubernetesResourceRow
 }
 
-/// Which tab of the resource inspector is active. YAML is always in the tab bar
-/// (with an in-tab disabled explanation when unsupported); Logs only appears for
-/// kinds where `visibleTabs(for:)` includes it.
+/// Which tab of the resource inspector is active. YAML and Diagnostics are always
+/// in the tab bar; Logs only appears for kinds where `visibleTabs(for:)` includes it.
 enum CTXInspectorTab: CaseIterable, Equatable, Hashable {
     case overview
     case yaml
     case logs
+    case diagnostics
 
     var title: String {
         switch self {
         case .overview: "Overview"
         case .yaml: "YAML"
         case .logs: "Logs"
+        case .diagnostics: "Diagnostics"
         }
     }
 
@@ -125,18 +126,15 @@ enum CTXInspectorTab: CaseIterable, Equatable, Hashable {
         case .overview: "info.circle"
         case .yaml: "curlybraces"
         case .logs: "text.alignleft"
+        case .diagnostics: "stethoscope"
         }
     }
 
-    /// Tabs actually shown for this resource kind. YAML is always shown (with an
-    /// in-tab disabled explanation when unsupported — see `CTXInspectorYAMLTab`).
-    /// Logs shows for Pods (real log-tailing), and for Services/Workloads (generic
-    /// label-selector discovery of related Pods, then logs for whichever the user
-    /// picks — see `KubernetesRelatedPods`). Every other kind has no Logs tab.
+    /// Tabs actually shown for this resource kind.
     static func visibleTabs(for kind: KubernetesResourceKind) -> [CTXInspectorTab] {
         switch kind {
-        case .pods, .workloads, .services: [.overview, .yaml, .logs]
-        default: [.overview, .yaml]
+        case .pods, .workloads, .services: [.overview, .yaml, .logs, .diagnostics]
+        default: [.overview, .yaml, .diagnostics]
         }
     }
 }

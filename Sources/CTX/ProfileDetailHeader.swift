@@ -22,12 +22,12 @@ extension ProfileDetailView {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(profile.name)
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(.headline, weight: .bold))
                         .lineLimit(1)
 
                     if store.isActive(profile) && profile.status == .connected {
                         Text("ACTIVE")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(.caption2, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
@@ -60,7 +60,7 @@ extension ProfileDetailView {
                     openWindow(id: "cluster-workspace", value: context.id)
                 } label: {
                     Label("Workspace", systemImage: "rectangle.3.group")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(.footnote, weight: .medium))
                         .lineLimit(1)
                         .frame(height: 34)
                         .padding(.horizontal, 13)
@@ -77,7 +77,7 @@ extension ProfileDetailView {
                 )
             } label: {
                 Label("Edit", systemImage: "pencil")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(.footnote, weight: .medium))
                     .lineLimit(1)
                     .frame(height: 34)
                     .padding(.horizontal, 13)
@@ -99,7 +99,7 @@ extension ProfileDetailView {
                     .controlSize(.small)
                 Text(currentProfile.status.rawValue + "...")
             }
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(.footnote, weight: .medium))
             .lineLimit(1)
             .frame(height: 34)
             .padding(.horizontal, 14)
@@ -113,7 +113,7 @@ extension ProfileDetailView {
                 store.logout(profile, from: .mainWindow)
             } label: {
                 Text(store.needsDisconnectRetry(profile) ? "Retry Disconnect" : "Disconnect")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(.footnote, weight: .medium))
                     .lineLimit(1)
                     .frame(height: 34)
                     .padding(.horizontal, 14)
@@ -130,7 +130,7 @@ extension ProfileDetailView {
                 store.login(profile, from: .mainWindow)
             } label: {
                 Text("Connect")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .lineLimit(1)
                     .frame(height: 34)
                     .padding(.horizontal, 18)
@@ -215,7 +215,7 @@ extension ProfileDetailView {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(.footnote, weight: .semibold))
                 .frame(width: 42, height: 34)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }

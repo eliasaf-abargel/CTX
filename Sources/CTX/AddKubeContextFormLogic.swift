@@ -2,6 +2,22 @@ import CTXCore
 import SwiftUI
 
 extension AddKubeContextView {
+    static func eksRegion(from text: String) -> String {
+        let lower = text.lowercased()
+        if let range = lower.range(of: #"[a-z]{2}-(?:gov-)?[a-z]+-\d"#, options: .regularExpression) {
+            return String(lower[range])
+        }
+        if let range = lower.range(of: #"[a-z]{2}-[a-z]+\d"#, options: .regularExpression) {
+            let matched = String(lower[range])
+            // Standardize format like us-east1 to us-east-1
+            if let lastDigit = matched.last, let splitIdx = matched.dropLast().indices.last {
+                return String(matched[..<splitIdx]) + "-" + String(lastDigit)
+            }
+            return matched
+        }
+        return ""
+    }
+
     var awsProfiles: [CloudProfile] {
         store.profiles
             .filter { $0.provider == .aws }
@@ -47,8 +63,14 @@ extension AddKubeContextView {
             if !region.isEmpty {
                 awsRegion = region
             }
-        } else if lower.contains("sdm") || lower.contains("teleport") || lower.contains("tsh") {
-            authMode = .proxyTunnel
+        } else if lower.contains("sdm") {
+            authMode = .strongDM
+        } else if lower.contains("teleport") || lower.contains("tsh") {
+            authMode = .teleport
+        } else if lower.contains("gke") {
+            authMode = .gcpGKE
+        } else if lower.contains("aks") {
+            authMode = .azureAKS
         }
     }
 
@@ -71,10 +93,20 @@ extension AddKubeContextView {
 
             if profile.kubernetesCredentialKind == .bearerToken {
                 authMode = .bearerToken
-            } else if profile.provider == .aws || cluster.contains("arn:aws:eks") || name.lowercased().contains("eks") {
+            } else if profile.usesStrongDM {
+                authMode = .strongDM
+            } else if profile.usesTeleport {
+                authMode = .teleport
+            } else if profile.provider == .aws || cluster.contains("arn:aws:eks") || name.lowercased().contains("eks") || profile.name.lowercased().contains("aws") {
                 authMode = .cloudIAM
                 awsProfile = store.activeAWSProfile
                 awsRegion = Self.eksRegion(from: cluster)
+            } else if cluster.contains("gke") || name.lowercased().contains("gke") {
+                authMode = .gcpGKE
+            } else if cluster.contains("aks") || name.lowercased().contains("aks") {
+                authMode = .azureAKS
+            } else {
+                authMode = .proxyTunnel
             }
 
             if !cluster.isEmpty {
@@ -99,7 +131,7 @@ extension AddKubeContextView {
                 switch mode {
                 case .create:
                     let credential: KubeConfigCredential = switch authMode {
-                    case .proxyTunnel:
+                    case .proxyTunnel, .strongDM, .teleport, .gcpGKE, .azureAKS:
                         .internalProxy
                     case .bearerToken:
                         .bearerToken(token.isEmpty ? nil : token)
@@ -143,7 +175,7 @@ extension AddKubeContextView {
                                 profile: awsProfile.trimmingCharacters(in: .whitespaces)
                             )
                         )
-                    case .proxyTunnel:
+                    case .proxyTunnel, .strongDM, .teleport, .gcpGKE, .azureAKS:
                         .replace(.internalProxy)
                     }
                     try await store.updateKubeContext(
@@ -174,12 +206,5 @@ extension AddKubeContextView {
                 saveTask = nil
             }
         }
-    }
-
-    static func eksRegion(from server: String) -> String {
-        guard let host = URL(string: server)?.host else { return "" }
-        let parts = host.split(separator: ".").map(String.init)
-        guard let eksIndex = parts.firstIndex(of: "eks"), eksIndex > 0 else { return "" }
-        return parts[eksIndex - 1]
     }
 }

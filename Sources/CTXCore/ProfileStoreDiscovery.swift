@@ -77,7 +77,7 @@ extension ProfileStore {
         }
     }
 
-    public func refreshImmediately(runVerification: Bool = true) {
+    public func refreshImmediately(runVerification: Bool = false) {
         refreshDebounceTask?.cancel()
         let discovered = localProfileDiscovery.discover()
         apply(discovered, runVerification: runVerification)

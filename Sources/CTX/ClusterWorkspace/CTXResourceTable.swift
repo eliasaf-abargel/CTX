@@ -159,7 +159,7 @@ struct CTXResourceTable: View {
                                     displayLimit = rows.count
                                 } label: {
                                     Text("Show all \(rows.count) items")
-                                        .font(.system(size: 11, weight: .semibold))
+                                        .font(.system(.caption2, weight: .semibold))
                                         .foregroundStyle(Color.accentColor)
                                 }
                                 .buttonStyle(.plain)
@@ -213,7 +213,7 @@ struct CTXResourceTable: View {
         HStack(spacing: columnSpacing) {
             ForEach(resolved) { resolvedColumn in
                 Text(resolvedColumn.column.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(width: resolvedColumn.width, alignment: resolvedColumn.column.alignment == .trailing ? .trailing : .leading)
@@ -332,6 +332,10 @@ private struct ResourceRowView: View, Equatable {
         .background(background, in: Rectangle())
         .onTapGesture { onSelect(row) }
         .onHover { onHoverChange($0) }
+        // Otherwise VoiceOver stops once per column per row, and never
+        // announces that tapping the row selects it.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 
     private var background: Color {
@@ -353,7 +357,7 @@ private struct ResourceRowView: View, Equatable {
                 TechBrandIconView(name: value)
             } else {
                 Text(value)
-                    .font(.system(size: 12, design: column.monospaced ? .monospaced : .default))
+                    .font(.system(.caption, design: column.monospaced ? .monospaced : .default))
                     .foregroundStyle(row.warning && column.key == "Status" ? .orange : .primary)
                     .lineLimit(column.key == "Message" ? 2 : 1)
                     .truncationMode(.middle)
@@ -382,7 +386,7 @@ private struct ResourceRowView: View, Equatable {
         return HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
             Text(text)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -399,10 +403,10 @@ private struct ResourceRowView: View, Equatable {
         let color: Color = isCPU ? .cyan : (isMem ? .purple : .indigo)
         return HStack(spacing: 3) {
             Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(color)
             Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(.caption2, design: .monospaced, weight: .semibold))
                 .foregroundStyle(.primary)
         }
         .padding(.horizontal, 6)

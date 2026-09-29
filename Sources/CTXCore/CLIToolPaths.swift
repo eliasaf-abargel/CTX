@@ -14,6 +14,9 @@ public enum CLIToolPaths {
             "\(home)/.rd/bin",              // Rancher Desktop
             "\(home)/google-cloud-sdk/bin", // gcloud's own tarball installer
             "\(home)/.local/bin",           // pipx / uv
+            "\(home)/.sdm/bin",             // StrongDM user binary location
+            "/Applications/SDM.app/Contents/Resources", // StrongDM bundled resources
+            "\(home)/Applications/SDM.app/Contents/Resources",
             "/opt/homebrew/bin",            // Homebrew, Apple silicon
             "/usr/local/bin",               // Homebrew on Intel, AWS CLI pkg, Docker Desktop
             "/opt/local/bin",               // MacPorts
@@ -34,6 +37,18 @@ public enum CLIToolPaths {
             let path = (dir as NSString).appendingPathComponent(binaryName)
             if fileManager.isExecutableFile(atPath: path) {
                 return path
+            }
+        }
+        if binaryName == "sdm" {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let sdmCandidates = [
+                "/Applications/SDM.app/Contents/Resources/sdm.darwin",
+                "\(home)/Applications/SDM.app/Contents/Resources/sdm.darwin"
+            ]
+            for candidate in sdmCandidates {
+                if fileManager.isExecutableFile(atPath: candidate) {
+                    return candidate
+                }
             }
         }
         return nil

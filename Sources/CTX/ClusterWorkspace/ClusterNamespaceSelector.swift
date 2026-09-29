@@ -23,10 +23,10 @@ struct ClusterNamespaceSelector: View {
                     .truncationMode(.middle)
                     .frame(maxWidth: 140)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.caption2.weight(.bold))
                     .foregroundStyle(.tertiary)
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(.blue)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
@@ -86,7 +86,7 @@ struct ClusterNamespaceSelector: View {
                         .foregroundStyle(.blue)
                 }
             }
-            .font(.system(size: 12, weight: .medium))
+            .font(.caption.weight(.medium))
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background(selection == viewModel.selectedNamespace ? .blue.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))

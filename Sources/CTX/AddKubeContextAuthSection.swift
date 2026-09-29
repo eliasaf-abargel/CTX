@@ -1,12 +1,28 @@
 import CTXCore
 import SwiftUI
 
-enum KubeContextAuthMode: String, CaseIterable, Identifiable {
-    case proxyTunnel = "Zero-Trust / Proxy"
-    case cloudIAM = "Cloud IAM"
+public enum KubeContextAuthMode: String, CaseIterable, Identifiable, Sendable {
+    case cloudIAM = "AWS EKS (IAM / SSO)"
+    case strongDM = "StrongDM (SDM)"
+    case teleport = "Teleport (tsh)"
+    case gcpGKE = "Google GKE"
+    case azureAKS = "Azure AKS"
     case bearerToken = "Bearer Token"
+    case proxyTunnel = "Local Proxy / Direct"
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
+
+    public var icon: String {
+        switch self {
+        case .cloudIAM: "cloud.fill"
+        case .strongDM: "network.badge.shield.half.filled"
+        case .teleport: "lock.shield.fill"
+        case .gcpGKE: "globe"
+        case .azureAKS: "triangle.fill"
+        case .bearerToken: "key.fill"
+        case .proxyTunnel: "server.rack"
+        }
+    }
 }
 
 struct AddKubeContextDetailsSections: View {
@@ -21,38 +37,38 @@ struct AddKubeContextDetailsSections: View {
 
     var body: some View {
         Section("Organization & Folder") {
-                Picker("Folder / Environment:", selection: $selectedFolder) {
-                    ForEach(store.folders(for: .kubernetes)) { folder in
-                        Label(folder.name, systemImage: folder.icon.systemImage)
-                            .tag(Optional(folder))
-                    }
+            Picker("Folder / Environment:", selection: $selectedFolder) {
+                ForEach(store.folders(for: .kubernetes)) { folder in
+                    Label(folder.name, systemImage: folder.icon.systemImage)
+                        .tag(Optional(folder))
+                }
+            }
+        }
+
+        Section("Context Settings") {
+            TextField("Context Name:", text: $name, prompt: Text("e.g. dev-k8s"))
+                .textFieldStyle(.roundedBorder)
+
+            TextField("Namespace:", text: $namespace, prompt: Text("e.g. default (optional)"))
+                .textFieldStyle(.roundedBorder)
+                .disabled(isDuplicating)
+        }
+
+        Section("Cluster Settings") {
+            HStack(spacing: 8) {
+                TextField("API Server URL:", text: $server, prompt: Text("e.g. https://127.0.0.1:8443 or EKS endpoint"))
+                    .textFieldStyle(.roundedBorder)
+
+                if isResolvingServer {
+                    ProgressView()
+                        .controlSize(.small)
                 }
             }
 
-            Section("Context Settings") {
-                TextField("Context Name:", text: $name, prompt: Text("e.g. dev-k8s"))
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Namespace:", text: $namespace, prompt: Text("e.g. default (optional)"))
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(isDuplicating)
-            }
-
-            Section("Cluster Settings") {
-                HStack(spacing: 8) {
-                    TextField("API Server URL:", text: $server, prompt: Text("e.g. https://127.0.0.1:8443 or EKS endpoint"))
-                        .textFieldStyle(.roundedBorder)
-
-                    if isResolvingServer {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-
-                TextField("Cluster Name:", text: $cluster, prompt: Text("e.g. my-cluster (optional, defaults to name-cluster)"))
-                    .textFieldStyle(.roundedBorder)
-            }
-            .disabled(isDuplicating)
+            TextField("Cluster Name:", text: $cluster, prompt: Text("e.g. my-cluster (optional, defaults to name-cluster)"))
+                .textFieldStyle(.roundedBorder)
+        }
+        .disabled(isDuplicating)
     }
 }
 
@@ -77,33 +93,21 @@ struct AddKubeContextAuthSection: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Picker("Auth Mode:", selection: $authMode) {
+            Picker("Auth Provider:", selection: $authMode) {
                 ForEach(KubeContextAuthMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+                    Label(mode.rawValue, systemImage: mode.icon).tag(mode)
                 }
             }
-            .pickerStyle(.segmented)
 
             TextField("User Name:", text: $user, prompt: Text("e.g. my-user (optional, defaults to name-user)"))
                 .textFieldStyle(.roundedBorder)
 
             switch authMode {
-            case .proxyTunnel:
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.shield.fill")
-                        .foregroundStyle(.blue)
-                    Text("Uses an existing local proxy or gateway session.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 2)
-
             case .cloudIAM:
-                LabeledContent("Cloud Provider:") {
+                LabeledContent("Provider:") {
                     Text("AWS EKS")
                 }
-                Text("Cloud IAM supports AWS EKS. Use Proxy or Bearer Token for existing GKE and AKS contexts.")
+                Text("Configures aws eks get-token with your AWS SSO profile credentials.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -116,6 +120,61 @@ struct AddKubeContextAuthSection: View {
                         Text(profile.name).tag(profile.name)
                     }
                 }
+
+            case .strongDM:
+                HStack(spacing: 6) {
+                    Image(systemName: "network.badge.shield.half.filled")
+                        .foregroundStyle(.orange)
+                    Text("Routes traffic through StrongDM local proxy (SDM Desktop App or CLI).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 2)
+
+            case .teleport:
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield.fill")
+                        .foregroundStyle(.purple)
+                    Text("Authenticates using Teleport Zero-Trust Gateway (tsh kube login).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 2)
+
+            case .gcpGKE:
+                HStack(spacing: 6) {
+                    Image(systemName: "globe")
+                        .foregroundStyle(.blue)
+                    Text("Authenticates using Google Cloud SDK / gke-gcloud-auth-plugin.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 2)
+
+            case .azureAKS:
+                HStack(spacing: 6) {
+                    Image(systemName: "triangle.fill")
+                        .foregroundStyle(.cyan)
+                    Text("Authenticates using Azure CLI (az aks / kubelogin).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 2)
+
+            case .proxyTunnel:
+                HStack(spacing: 6) {
+                    Image(systemName: "server.rack")
+                        .foregroundStyle(.secondary)
+                    Text("Uses an existing local proxy or pre-configured kubeconfig endpoint.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 2)
 
             case .bearerToken:
                 if hasExistingCredential {

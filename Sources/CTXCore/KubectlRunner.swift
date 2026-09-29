@@ -4,11 +4,18 @@ public struct KubectlCommand: Equatable, Sendable {
     public var executablePath: String
     public var arguments: [String]
     public var environmentOverrides: [String: String]
+    public var stdinData: Data?
 
-    public init(executablePath: String, arguments: [String], environmentOverrides: [String: String] = [:]) {
+    public init(
+        executablePath: String,
+        arguments: [String],
+        environmentOverrides: [String: String] = [:],
+        stdinData: Data? = nil
+    ) {
         self.executablePath = executablePath
         self.arguments = arguments
         self.environmentOverrides = environmentOverrides
+        self.stdinData = stdinData
     }
 }
 
@@ -124,6 +131,10 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
 
             process.executableURL = URL(fileURLWithPath: command.executablePath)
             process.arguments = command.arguments
+            let stdinPipe = Pipe()
+            if command.stdinData != nil {
+                process.standardInput = stdinPipe
+            }
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
             process.environment = environment.merging(command.environmentOverrides) { _, override in override }
@@ -142,12 +153,26 @@ public final class KubectlRunner: KubectlRunning, KubectlCommandBuilding, Kubect
                 }
             }
 
+            // Stdin is written on its own task, concurrently with draining stdout/stderr
+            // below. A manifest large enough to fill the ~64KB pipe buffer, or a
+            // `kubectl` that writes output before it has read all of stdin (verbose
+            // dry-run/admission errors do this), would otherwise deadlock: the child
+            // blocks writing output nobody is reading yet, while this call sat blocked
+            // writing the rest of stdin before it ever started reading.
+            let writeStdinTask: Task<Void, Never>? = command.stdinData.map { data in
+                Task {
+                    try? stdinPipe.fileHandleForWriting.write(contentsOf: data)
+                    try? stdinPipe.fileHandleForWriting.close()
+                }
+            }
+
             // Read stderr concurrently to prevent deadlock if both pipes get filled past the 64KB buffer limit
             let readStderrTask = Task {
                 stderrPipe.fileHandleForReading.readDataToEndOfFile()
             }
             let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             let stderrData = await readStderrTask.value
+            await writeStdinTask?.value
 
             process.waitUntilExit()
             processBox.clear()

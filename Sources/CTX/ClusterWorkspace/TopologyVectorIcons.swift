@@ -30,10 +30,10 @@ struct TechBrandIconView: View, Equatable {
         let brand = Self.brand(for: name)
         return HStack(spacing: 4) {
             Image(systemName: brand.icon)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(brand.color)
             Text(name)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(.caption2, design: .monospaced, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)

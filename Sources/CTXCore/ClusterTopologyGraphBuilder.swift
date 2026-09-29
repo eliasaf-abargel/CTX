@@ -12,6 +12,7 @@ public enum ClusterTopologyGraphBuilder {
         ingress: [KubernetesResourceRow],
         pvcs: [KubernetesResourceRow],
         hpas: [KubernetesResourceRow],
+        diagnostics: KubernetesDiagnosticReport? = nil,
         isCancelled: () -> Bool = { false }
     ) -> ClusterTopologyGraph {
         var nodes: [TopologyGraphNode] = []
@@ -32,6 +33,7 @@ public enum ClusterTopologyGraphBuilder {
         for pod in pods {
             guard !isCancelled() else { return ClusterTopologyGraph(nodes: [], edges: []) }
             let health = podHealth[pod.id] ?? .healthy
+            let issues = diagnostics?.issuesByResourceID[pod.id]?.count ?? 0
             nodes.append(TopologyGraphNode(
                 id: TopologyGraphNode.id(kind: .pod, rowID: pod.id),
                 kind: .pod,
@@ -39,7 +41,8 @@ public enum ClusterTopologyGraphBuilder {
                 namespace: pod.ns,
                 subtitle: "\(pod.cells["Status"] ?? "-") · \(pod.cells["Ready"] ?? "-") ready · \(pod.cells["Restarts"] ?? "0") restarts",
                 health: health,
-                row: pod
+                row: pod,
+                issueCount: issues
             ))
         }
 
@@ -71,6 +74,7 @@ public enum ClusterTopologyGraphBuilder {
             let owned = podsByWorkload[workload.id] ?? []
             let health = workloadHealthByKey[workload.id] ?? .healthy
             let id = TopologyGraphNode.id(kind: .workload, rowID: workload.id)
+            let issues = diagnostics?.issuesByResourceID[workload.id]?.count ?? 0
             nodes.append(TopologyGraphNode(
                 id: id,
                 kind: .workload,
@@ -78,7 +82,8 @@ public enum ClusterTopologyGraphBuilder {
                 namespace: workload.ns,
                 subtitle: "\(workload.cells["Kind"] ?? "Workload") · \(workload.cells["Ready"] ?? "-") ready",
                 health: health,
-                row: workload
+                row: workload,
+                issueCount: issues
             ))
             for pod in owned {
                 guard !isCancelled() else { return ClusterTopologyGraph(nodes: [], edges: []) }
@@ -120,6 +125,7 @@ public enum ClusterTopologyGraphBuilder {
             )
             serviceHealthByKey[service.id] = health
             let id = TopologyGraphNode.id(kind: .service, rowID: service.id)
+            let issues = diagnostics?.issuesByResourceID[service.id]?.count ?? 0
             nodes.append(TopologyGraphNode(
                 id: id,
                 kind: .service,
@@ -127,7 +133,8 @@ public enum ClusterTopologyGraphBuilder {
                 namespace: service.ns,
                 subtitle: "\(service.cells["Type"] ?? "ClusterIP") · \(service.cells["Ports"] ?? "no ports") · \(activeMatched.count) endpoint\(activeMatched.count == 1 ? "" : "s")",
                 health: health,
-                row: service
+                row: service,
+                issueCount: issues
             ))
 
             var reachedViaWorkload = Set<String>()
@@ -162,6 +169,7 @@ public enum ClusterTopologyGraphBuilder {
             let resolved = backends.compactMap { servicesByKey["\(route.ns)/\($0)"] }
             let hosts = route.cells["Hosts"] ?? ""
             let id = TopologyGraphNode.id(kind: .ingress, rowID: route.id)
+            let issues = diagnostics?.issuesByResourceID[route.id]?.count ?? 0
             nodes.append(TopologyGraphNode(
                 id: id,
                 kind: .ingress,
@@ -174,7 +182,8 @@ public enum ClusterTopologyGraphBuilder {
                 health: resolved.isEmpty && !backends.isEmpty
                     ? .degraded(reason: "Backend service not found")
                     : TopologyHealthRollup.worst(resolved.compactMap { serviceHealthByKey[$0.id] }),
-                row: route
+                row: route,
+                issueCount: issues
             ))
             for service in resolved {
                 guard !isCancelled() else { return ClusterTopologyGraph(nodes: [], edges: []) }
@@ -207,6 +216,7 @@ public enum ClusterTopologyGraphBuilder {
         for pvc in mountedPVCs.values {
             guard !isCancelled() else { return ClusterTopologyGraph(nodes: [], edges: []) }
             let bound = pvc.cells["Status"] == "Bound"
+            let issues = diagnostics?.issuesByResourceID[pvc.id]?.count ?? 0
             nodes.append(TopologyGraphNode(
                 id: TopologyGraphNode.id(kind: .pvc, rowID: pvc.id),
                 kind: .pvc,
@@ -214,7 +224,8 @@ public enum ClusterTopologyGraphBuilder {
                 namespace: pvc.ns,
                 subtitle: "\(pvc.cells["Capacity"] ?? "-") · \(pvc.cells["StorageClass"] ?? "-")",
                 health: bound ? .healthy : .degraded(reason: pvc.cells["Status"] ?? "Unbound"),
-                row: pvc
+                row: pvc,
+                issueCount: issues
             ))
         }
 
@@ -227,6 +238,7 @@ public enum ClusterTopologyGraphBuilder {
             let targetName = String(reference[reference.index(after: slash)...])
             guard let workload = workloadsByKey["\(hpa.ns)/\(targetName)"] else { continue }
             let id = TopologyGraphNode.id(kind: .hpa, rowID: hpa.id)
+            let issues = diagnostics?.issuesByResourceID[hpa.id]?.count ?? 0
             nodes.append(TopologyGraphNode(
                 id: id,
                 kind: .hpa,
@@ -234,7 +246,8 @@ public enum ClusterTopologyGraphBuilder {
                 namespace: hpa.ns,
                 subtitle: "\(hpa.cells["Replicas"] ?? "?") now · \(hpa.cells["MinPods"] ?? "?")–\(hpa.cells["MaxPods"] ?? "?")",
                 health: .healthy,
-                row: hpa
+                row: hpa,
+                issueCount: issues
             ))
             edges.append(TopologyGraphEdge(
                 source: id,

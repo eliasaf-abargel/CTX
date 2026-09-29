@@ -2306,7 +2306,7 @@ func testCLIToolRequirementsCoverEachProfileShape() throws {
     assert(CLITool.aws.installCommand == "brew install awscli")
     assert(CLITool.gcloud.installCommand == "brew install --cask google-cloud-sdk")
     // StrongDM ships no Homebrew package — the sheet must fall back to its page.
-    assert(CLITool.sdm.installCommand == nil)
+    assert(CLITool.sdm.installCommand == "brew install --cask sdm")
 
     assert(CLIToolPaths.resolve("definitely-not-a-real-cli-xyz") == nil)
     assert(CLIToolPaths.resolve("ls") != nil)
@@ -6794,4 +6794,436 @@ testAccessFromThisMachineIsTheCredentialClockNotTheTokenClock()
 testProfilesOnOnePortalShareOneSignIn()
 testAnExpiredSignInIsReportedForAProfileThatOnlyNamesASession()
 
+
+func testKubernetesDiagnosticValidationRules() throws {
+    // 1. Service with no matching pods
+    let brokenSvc = KubernetesResourceRow(id: "svc-1", cells: [
+        "Name": "web-service",
+        "Namespace": "prod",
+        "Selector": "app=web,env=prod"
+    ])
+    let unrelatedPod = KubernetesResourceRow(id: "pod-other", cells: [
+        "Name": "other-pod",
+        "Namespace": "prod",
+        "Labels": "app=other"
+    ])
+    let report1 = KubernetesConfigurationValidator.validate(
+        services: [brokenSvc],
+        workloads: [],
+        pods: [unrelatedPod],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report1.issuesByResourceID["svc-1"]?.contains(where: { $0.ruleId == "SERVICE_NO_MATCHING_PODS" }) == true, "Must detect SERVICE_NO_MATCHING_PODS")
+
+    // 2. Service matched by workload scaled to 0
+    let scaledWorkload = KubernetesResourceRow(id: "wkl-1", cells: [
+        "Name": "web-deploy",
+        "Namespace": "prod",
+        "Selector": "app=web,env=prod",
+        "Ready": "0/0"
+    ])
+    let report2 = KubernetesConfigurationValidator.validate(
+        services: [brokenSvc],
+        workloads: [scaledWorkload],
+        pods: [unrelatedPod],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report2.issuesByResourceID["svc-1"]?.contains(where: { $0.ruleId == "SERVICE_WORKLOAD_SCALED_ZERO" }) == true, "Must detect SERVICE_WORKLOAD_SCALED_ZERO")
+
+    // 3. Missing ConfigMap & Secret references
+    let missingRefPod = KubernetesResourceRow(id: "pod-1", cells: [
+        "Name": "api-pod",
+        "Namespace": "prod",
+        "Status": "Running",
+        "Ready": "1/1",
+        "Restarts": "0",
+        "ConfigMaps": "app-config, missing-config",
+        "Secrets": "app-secret, missing-secret"
+    ])
+    let existingCM = KubernetesResourceRow(id: "cm-1", cells: ["Name": "app-config", "Namespace": "prod"])
+    let existingSecret = KubernetesResourceRow(id: "sec-1", cells: ["Name": "app-secret", "Namespace": "prod"])
+    let report3 = KubernetesConfigurationValidator.validate(
+        services: [],
+        workloads: [],
+        pods: [missingRefPod],
+        ingress: [],
+        configMaps: [existingCM],
+        secrets: [existingSecret],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report3.issuesByResourceID["pod-1"]?.contains(where: { $0.ruleId == "CONFIGMAP_NOT_FOUND" }) == true, "Must detect CONFIGMAP_NOT_FOUND")
+    assert(report3.issuesByResourceID["pod-1"]?.contains(where: { $0.ruleId == "SECRET_NOT_FOUND" }) == true, "Must detect SECRET_NOT_FOUND")
+
+    // 4. Missing PVC & Unbound PVC
+    let podWithPVC = KubernetesResourceRow(id: "pod-pvc", cells: [
+        "Name": "db-pod",
+        "Namespace": "prod",
+        "PVCs": "missing-data, unbound-data"
+    ])
+    let unboundPVC = KubernetesResourceRow(id: "pvc-1", cells: [
+        "Name": "unbound-data",
+        "Namespace": "prod",
+        "Status": "Pending"
+    ])
+    let report4 = KubernetesConfigurationValidator.validate(
+        services: [],
+        workloads: [],
+        pods: [podWithPVC],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [unboundPVC],
+        nodes: []
+    )
+    assert(report4.issuesByResourceID["pod-pvc"]?.contains(where: { $0.ruleId == "PVC_NOT_FOUND" }) == true, "Must detect PVC_NOT_FOUND")
+    assert(report4.issuesByResourceID["pvc-1"]?.contains(where: { $0.ruleId == "PVC_UNBOUND" }) == true, "Must detect PVC_UNBOUND")
+
+    // 5. Ingress pointing to non-existent service
+    let brokenIngress = KubernetesResourceRow(id: "ing-1", cells: [
+        "Name": "gateway",
+        "Namespace": "prod",
+        "Services": "missing-svc"
+    ])
+    let existingSvc = KubernetesResourceRow(id: "svc-other", cells: [
+        "Name": "other-svc",
+        "Namespace": "prod"
+    ])
+    let report5 = KubernetesConfigurationValidator.validate(
+        services: [existingSvc],
+        workloads: [],
+        pods: [],
+        ingress: [brokenIngress],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report5.issuesByResourceID["ing-1"]?.contains(where: { $0.ruleId == "INGRESS_SERVICE_NOT_FOUND" }) == true, "Must detect INGRESS_SERVICE_NOT_FOUND")
+
+    // 6. Security issues (Privileged, Root, HostNamespace)
+    let insecurePod = KubernetesResourceRow(id: "pod-sec", cells: [
+        "Name": "insecure-pod",
+        "Namespace": "prod",
+        "Security": "privileged,runAsRoot,hostNetwork"
+    ])
+    let report6 = KubernetesConfigurationValidator.validate(
+        services: [],
+        workloads: [],
+        pods: [insecurePod],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report6.issuesByResourceID["pod-sec"]?.contains(where: { $0.ruleId == "SECURITY_PRIVILEGED" }) == true, "Must detect SECURITY_PRIVILEGED")
+    assert(report6.issuesByResourceID["pod-sec"]?.contains(where: { $0.ruleId == "SECURITY_RUN_AS_ROOT" }) == true, "Must detect SECURITY_RUN_AS_ROOT")
+    assert(report6.issuesByResourceID["pod-sec"]?.contains(where: { $0.ruleId == "SECURITY_HOST_NAMESPACE" }) == true, "Must detect SECURITY_HOST_NAMESPACE")
+
+    // 7. Reliability issues (No limits, Missing probes)
+    let unreliableWorkload = KubernetesResourceRow(id: "wkl-rel", cells: [
+        "Name": "unreliable-app",
+        "Namespace": "prod",
+        "HasLimits": "false",
+        "Probes": ""
+    ])
+    let report7 = KubernetesConfigurationValidator.validate(
+        services: [],
+        workloads: [unreliableWorkload],
+        pods: [],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report7.issuesByResourceID["wkl-rel"]?.contains(where: { $0.ruleId == "RELIABILITY_NO_LIMITS" }) == true, "Must detect RELIABILITY_NO_LIMITS")
+    assert(report7.issuesByResourceID["wkl-rel"]?.contains(where: { $0.ruleId == "RELIABILITY_MISSING_PROBES" }) == true, "Must detect RELIABILITY_MISSING_PROBES")
+
+    // 8. Workload Replicas Degraded
+    let degradedWorkload = KubernetesResourceRow(id: "wkl-deg", cells: [
+        "Name": "payment-service",
+        "Namespace": "prod",
+        "Ready": "1/3"
+    ])
+    let report8 = KubernetesConfigurationValidator.validate(
+        services: [],
+        workloads: [degradedWorkload],
+        pods: [],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report8.issuesByResourceID["wkl-deg"]?.contains(where: { $0.ruleId == "WORKLOAD_REPLICAS_DEGRADED" }) == true, "Must detect WORKLOAD_REPLICAS_DEGRADED")
+
+    // 9. Runtime failures (CrashLoopBackOff & High Restarts)
+    let crashingPod = KubernetesResourceRow(id: "pod-crash", cells: [
+        "Name": "worker",
+        "Namespace": "prod",
+        "Status": "CrashLoopBackOff",
+        "Restarts": "25"
+    ])
+    let report9 = KubernetesConfigurationValidator.validate(
+        services: [],
+        workloads: [],
+        pods: [crashingPod],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: []
+    )
+    assert(report9.issuesByResourceID["pod-crash"]?.contains(where: { $0.ruleId == "RUNTIME_CRASH_LOOP" }) == true, "Must detect RUNTIME_CRASH_LOOP")
+    assert(report9.issuesByResourceID["pod-crash"]?.contains(where: { $0.ruleId == "RUNTIME_HIGH_RESTARTS" }) == true, "Must detect RUNTIME_HIGH_RESTARTS")
+
+    // 10. Node NotReady
+    let unreadyNode = KubernetesResourceRow(id: "node-1", cells: [
+        "Name": "worker-node-alpha",
+        "Status": "NotReady"
+    ])
+    let report10 = KubernetesConfigurationValidator.validate(
+        services: [],
+        workloads: [],
+        pods: [],
+        ingress: [],
+        configMaps: [],
+        secrets: [],
+        pvcs: [],
+        nodes: [unreadyNode]
+    )
+    assert(report10.issuesByResourceID["node-1"]?.contains(where: { $0.ruleId == "NODE_NOT_READY" }) == true, "Must detect NODE_NOT_READY")
+}
+
+
+try testKubernetesDiagnosticValidationRules()
+testYAMLDiffCalculator()
+await testKubernetesYAMLApplier()
+testCTXMCPServerProtocol()
+try await testKubernetesExplicitConnectionGuard()
+try testMCPClientInstaller()
+
+func testClusterAnomalyNotificationDebounceAndPayload() {
+    let payload = ClusterAnomalyNotificationPayload(
+        contextID: "ctx-prod-123",
+        contextName: "production-eu-west-1",
+        resourceKind: "Pod",
+        resourceName: "order-processor-7fd69-xyz",
+        namespace: "billing",
+        ruleId: "RUNTIME_CRASH_LOOP",
+        title: "Container CrashLoopBackOff",
+        message: "Pod has failed container execution and is restarting in back-off loop.",
+        isCritical: true
+    )
+    assert(payload.contextID == "ctx-prod-123")
+    assert(payload.resourceName == "order-processor-7fd69-xyz")
+    assert(payload.namespace == "billing")
+    assert(payload.isCritical == true)
+    assert(payload.ruleId == "RUNTIME_CRASH_LOOP")
+
+    // Service call must safely process payload without runtime faults
+    AppNotificationService.shared.sendClusterAnomaly(payload)
+}
+testClusterAnomalyNotificationDebounceAndPayload()
+
 print("CTXCoreTests passed")
+
+func testKubernetesResourceParserBatchParsing() {
+    let rawJSON = """
+    {
+        "kind": "List",
+        "apiVersion": "v1",
+        "items": [
+            {
+                "apiVersion": "v1",
+                "kind": "Service",
+                "metadata": {"name": "frontend-svc", "namespace": "prod"},
+                "spec": {"type": "ClusterIP", "clusterIP": "10.0.0.1", "ports": [{"port": 80}]}
+            },
+            {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {"name": "frontend-deploy", "namespace": "prod"},
+                "spec": {"replicas": 3},
+                "status": {"replicas": 3, "readyReplicas": 3, "availableReplicas": 3}
+            },
+            {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {"name": "frontend-pod-1", "namespace": "prod"},
+                "spec": {"containers": [{"name": "web", "image": "nginx:1.25"}]},
+                "status": {"phase": "Running", "containerStatuses": [{"ready": true, "restartCount": 0}]}
+            }
+        ]
+    }
+    """
+    let kinds: [KubernetesResourceKind] = [.services, .workloads, .pods]
+    let parsed = KubernetesResourceParser.parseBatch(stdout: rawJSON, requestedKinds: kinds)
+    assert(parsed != nil)
+    assert(parsed?[.services]?.rows.count == 1)
+    assert(parsed?[.services]?.rows.first?.cells["Name"] == "frontend-svc")
+    assert(parsed?[.workloads]?.rows.count == 1)
+    assert(parsed?[.workloads]?.rows.first?.cells["Name"] == "frontend-deploy")
+    assert(parsed?[.pods]?.rows.count == 1)
+    assert(parsed?[.pods]?.rows.first?.cells["Name"] == "frontend-pod-1")
+}
+
+testKubernetesResourceParserBatchParsing()
+
+
+func testYAMLDiffCalculator() {
+    let orig = """
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  ports:
+  - port: 80
+"""
+
+    let modified = """
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  ports:
+  - port: 8080
+  - port: 443
+"""
+
+    let diff = YAMLDiffCalculator.diff(original: orig, modified: modified)
+    assert(diff.hasChanges, "Diff must detect changes")
+    assert(diff.additions == 2, "Expected 2 additions, got \(diff.additions)")
+    assert(diff.deletions == 1, "Expected 1 deletion, got \(diff.deletions)")
+
+    let identicalDiff = YAMLDiffCalculator.diff(original: orig, modified: orig)
+    assert(!identicalDiff.hasChanges, "Identical content must have no changes")
+    assert(identicalDiff.additions == 0 && identicalDiff.deletions == 0)
+}
+
+func testKubernetesYAMLApplier() async {
+    let kubectl = ScriptedKubectl()
+    kubectl.defaultOutput = .success("service/web configured (dry run)")
+    let applier = KubernetesYAMLApplier(kubectl: kubectl, timeout: 5)
+    let context = testKubernetesContext()
+
+    let sampleYAML = """
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  ports:
+  - port: 80
+"""
+
+    // Dry Run
+    let dryRunRes = await applier.dryRun(yaml: sampleYAML, context: context, namespace: "default")
+    assert(dryRunRes.success, "Dry run must succeed")
+    assert(dryRunRes.isDryRun, "Result must indicate isDryRun = true")
+    assert(dryRunRes.stdout.contains("service/web configured (dry run)"))
+    assert(kubectl.commands.count == 1)
+    assert(kubectl.commands[0].arguments.contains("--dry-run=server"))
+    assert(kubectl.commands[0].stdinData != nil)
+
+    // Apply
+    kubectl.defaultOutput = .success("service/web configured")
+    let applyRes = await applier.apply(yaml: sampleYAML, context: context, namespace: "default")
+    assert(applyRes.success, "Apply must succeed")
+    assert(!applyRes.isDryRun, "Result must indicate isDryRun = false")
+    assert(applyRes.appliedYAML == sampleYAML)
+    assert(kubectl.commands.count == 2)
+    assert(!kubectl.commands[1].arguments.contains("--dry-run=server"))
+}
+
+func testCTXMCPServerProtocol() {
+    let server = CTXMCPServer()
+
+    // Test initialize
+    let initMsg = """
+    {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}
+    """
+    server.handleMessage(initMsg)
+
+    // Test tools/list
+    let listToolsMsg = """
+    {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+    """
+    server.handleMessage(listToolsMsg)
+}
+
+
+@MainActor
+func testKubernetesExplicitConnectionGuard() async throws {
+    let (store, _, directory, defaults, suiteName) = try makeKubeActivationStore()
+    defer {
+        try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let target = store.profiles.first { $0.name == "new" }!
+    assert(target.status != .connected, "Initial profile status should not be connected")
+
+    // Passive / sweep verification should be completely ignored for unconnected Kubernetes clusters
+    let passiveResult = await store.verify(target, isManualAttempt: false)
+    assert(!passiveResult, "Passive verification of unconnected cluster must be refused")
+    assert(store.profiles.first { $0.name == "new" }?.status != .connected)
+
+    // Explicit manual verification should succeed
+    let manualResult = await store.verify(target, isManualAttempt: true)
+    assert(manualResult, "Manual explicit verification must succeed")
+}
+
+func testMCPClientInstaller() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ctx-mcp-install-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("nested/config.json")
+
+    // No file yet: not installed, and installing creates the directory and file.
+    assert(!MCPClientInstaller.isInstalled(at: url), "Must not report installed before the file exists")
+    try MCPClientInstaller.install(at: url, binaryPath: "/Applications/CTX.app/Contents/MacOS/CTX")
+    assert(MCPClientInstaller.isInstalled(at: url), "Must report installed right after install")
+
+    let written = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+    let servers = written?["mcpServers"] as? [String: Any]
+    let ctxEntry = servers?["ctx"] as? [String: Any]
+    assert(ctxEntry?["command"] as? String == "/Applications/CTX.app/Contents/MacOS/CTX")
+    assert((ctxEntry?["args"] as? [String]) == ["--mcp"])
+
+    // Installing again over a config that already has another server must keep it.
+    let withOtherServer: [String: Any] = ["mcpServers": ["other": ["command": "/usr/bin/other"]]]
+    try JSONSerialization.data(withJSONObject: withOtherServer).write(to: url)
+    try MCPClientInstaller.install(at: url, binaryPath: "/Applications/CTX.app/Contents/MacOS/CTX")
+    let merged = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+    let mergedServers = merged?["mcpServers"] as? [String: Any]
+    assert(mergedServers?["other"] != nil, "Installing must not remove an existing, unrelated MCP server entry")
+    assert(mergedServers?["ctx"] != nil, "Installing must add the ctx entry alongside it")
+
+    // A backup of the pre-install file must exist.
+    let backupURL = url.appendingPathExtension("ctx-backup")
+    assert(FileManager.default.fileExists(atPath: backupURL.path), "Install must back up the previous config before overwriting it")
+
+    // A config file that isn't valid JSON must be refused, not silently overwritten.
+    let corruptURL = dir.appendingPathComponent("corrupt.json")
+    try Data("not json".utf8).write(to: corruptURL)
+    do {
+        try MCPClientInstaller.install(at: corruptURL, binaryPath: "/Applications/CTX.app/Contents/MacOS/CTX")
+        assertionFailure("Must throw rather than overwrite a config file that doesn't parse as JSON")
+    } catch is MCPClientInstallError {
+        // expected
+    }
+    let corruptContents = try String(contentsOf: corruptURL, encoding: .utf8)
+    assert(corruptContents == "not json", "Corrupt config must be left untouched")
+}

@@ -18,22 +18,24 @@ struct SidebarView: View {
             // Custom Search Bar (No Blue Focus Ring!)
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 TextField("Search...", text: $sidebarSearchQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.caption2)
 
                 if !sidebarSearchQuery.isEmpty {
                     Button {
                         sidebarSearchQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 10))
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help("Clear search")
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 8)
@@ -66,7 +68,7 @@ struct SidebarView: View {
                         HStack(spacing: 6) {
                             ProviderIcon(provider: pGroup.provider, size: 13, fallbackTint: .primary)
                             Text(pGroup.provider.sectionHeaderTitle)
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(.caption2, weight: .bold))
                                 .foregroundStyle(.primary)
 
                             if pGroup.folderGroups.contains(where: { g in g.profiles.contains { $0.status == .connected } }) {
@@ -79,7 +81,7 @@ struct SidebarView: View {
 
                             let totalCount = pGroup.folderGroups.reduce(0) { $0 + $1.profiles.count }
                             Text("\(totalCount)")
-                                .font(.system(size: 9.5, weight: .semibold))
+                                .font(.system(.caption2, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -98,7 +100,7 @@ struct SidebarView: View {
             // Settings & Profile Footer
             HStack(spacing: 8) {
                 Text(store.localIdentityInitials)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(.caption2, weight: .bold))
                     .foregroundColor(Color.accentColor)
                     .frame(width: 22, height: 22)
                     .background(Color.accentColor.opacity(0.15), in: Circle())
@@ -111,7 +113,7 @@ struct SidebarView: View {
                 // belongs to the profile that is connected, not to the person - and it
                 // is already shown there, on the row and in the detail pane.
                 Text(store.localIdentityLabel)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .lineLimit(1)
                 
                 Spacer()
@@ -120,7 +122,7 @@ struct SidebarView: View {
                     openSettings()
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 13))
+                        .font(.footnote)
                         .foregroundColor(.secondary)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
@@ -207,7 +209,7 @@ struct ProfileDisclosureGroup: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: group.folder.icon.systemImage)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .frame(width: 16)
 
                 Text(group.folder.name)
@@ -222,7 +224,7 @@ struct ProfileDisclosureGroup: View {
                 Spacer()
 
                 Text("\(group.profiles.count)")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
@@ -234,6 +236,7 @@ struct ProfileDisclosureGroup: View {
             .onTapGesture {
                 selectedSelection = .folder(group.folder.id)
             }
+            .accessibilityAddTraits(.isButton)
             .contextMenu {
                 Button {
                     editFolder(group.folder)

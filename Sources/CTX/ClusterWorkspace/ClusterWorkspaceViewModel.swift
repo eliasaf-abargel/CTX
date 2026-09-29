@@ -24,8 +24,12 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         didSet { updateAvailableNamespaces() }
     }
     @Published private(set) var availableNamespaces: [String] = ["default"]
+    @Published var diagnosticReport: KubernetesDiagnosticReport = .empty
     @Published private(set) var resourceLists: [String: KubernetesResourceList] = [:] {
-        didSet { updateAvailableNamespaces() }
+        didSet {
+            updateAvailableNamespaces()
+            recalculateDiagnostics()
+        }
     }
 
     private func updateAvailableNamespaces() {
@@ -54,6 +58,16 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var presentation: ClusterWorkspacePresentation?
     @Published var yamlResult: KubernetesYAMLResult?
     @Published var isLoadingYAML = false
+    @Published var isEditingYAML = false
+    @Published var editedYAML = ""
+    @Published var isApplyingYAML = false
+    @Published var applyResult: KubernetesApplyResult?
+    @Published var previousBaselineYAML: String?
+    /// The exact edit that most recently passed a server dry-run, successfully.
+    /// Apply is gated on `editedYAML` still matching this snapshot — any further
+    /// edit after a dry-run must be re-validated before it can go live.
+    @Published var dryRunValidatedYAML: String?
+    let yamlApplier: any KubernetesYAMLApplying
     @Published var diffResults: [String: ResourceDiffResult] = [:]
     @Published var diffingKinds: Set<KubernetesResourceKind> = []
     @Published var selectedLogPodID: String?
@@ -100,6 +114,18 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     /// it — a namespace switch or a section change would otherwise leave a filter
     /// pinned to ids that are no longer on screen.
     @Published var resourceFocus: ResourceFocus?
+    // Phase 6: Spotlight Command Palette & Quick Look Overlay
+    @Published var isCommandPalettePresented: Bool = false
+    @Published var quickLookResource: KubernetesResourceRow? = nil
+    @Published var quickLookSection: ClusterWorkspaceSection? = nil
+
+    var isQuickLookActive: Bool {
+        quickLookResource != nil
+    }
+
+    var activeSelectedResource: KubernetesResourceRow? {
+        selectedResource(for: selectedSection)
+    }
     var telemetryTask: Task<Void, Never>?
     var telemetryTimerTask: Task<Void, Never>?
     var telemetryLoadedAt: Date?
@@ -141,6 +167,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         healthService: any ClusterHealthChecking = ClusterHealthService(),
         resourceReader: any KubernetesResourceReading = KubernetesResourceReader(),
         yamlReader: any KubernetesYAMLReading = KubernetesYAMLReader(),
+        yamlApplier: any KubernetesYAMLApplying = KubernetesYAMLApplier(),
         logsReader: any KubernetesLogsReading = KubernetesLogsReader(),
         portForwardService: any KubernetesPortForwarding = KubernetesPortForwardService(),
         auditLog: any AuditLogging = LocalAuditLogService(),
@@ -157,6 +184,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         self.healthService = healthService
         self.resourceReader = resourceReader
         self.yamlReader = yamlReader
+        self.yamlApplier = yamlApplier
         self.logsReader = logsReader
         self.portForwardService = portForwardService
         self.auditLog = auditLog
@@ -302,6 +330,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         loadingResourceKinds.removeAll()
         isLoadingYAML = false
         presentation = nil
+        previousBaselineYAML = nil
         diffingKinds.removeAll()
         isLoadingLogs = false
     }
@@ -476,6 +505,10 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         let key = section.rawValue
         selectedResources[key] = row
         yamlResult = nil
+        // A staged rollback baseline belongs to whichever resource was just
+        // edited — carrying it over to a newly selected row would let
+        // "Rollback" apply that other resource's manifest here instead.
+        previousBaselineYAML = nil
         presentation = ClusterWorkspacePresentation(
             selection: ClusterWorkspaceResourceSelection(section: section, kind: kind, row: row),
             tab: .overview
@@ -505,6 +538,11 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         yamlTask?.cancel()
         yamlResult = nil
         isLoadingYAML = false
+        isEditingYAML = false
+        applyResult = nil
+        isApplyingYAML = false
+        dryRunValidatedYAML = nil
+        previousBaselineYAML = nil
         // The inspector's Logs tab shares this task with the standalone Logs
         // screen; closing the inspector must not leave a fetch running for a pod
         // that's no longer on screen anywhere.
@@ -515,11 +553,31 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     /// Switches the active inspector tab for the current resource — mutating the
     /// existing `presentation` value in place, not dismissing and re-presenting a
     /// different one. Lazily kicks off the tab's own load the first time it's shown.
+    func openInspector(for row: KubernetesResourceRow, in section: ClusterWorkspaceSection, tab: CTXInspectorTab = .overview) {
+        selectResource(row, in: section)
+        selectInspectorTab(tab)
+    }
+
+    func toggleQuickLook(for row: KubernetesResourceRow? = nil, in section: ClusterWorkspaceSection? = nil) {
+        if isQuickLookActive {
+            dismissQuickLook()
+        } else if let targetRow = row ?? activeSelectedResource {
+            let targetSection = section ?? selectedSection
+            quickLookResource = targetRow
+            quickLookSection = targetSection
+        }
+    }
+
+    func dismissQuickLook() {
+        quickLookResource = nil
+        quickLookSection = nil
+    }
+
     func selectInspectorTab(_ tab: CTXInspectorTab) {
         guard let selection = presentation?.selection else { return }
         presentation?.tab = tab
         switch tab {
-        case .overview:
+        case .overview, .diagnostics:
             break
         case .yaml:
             if yamlResult == nil { loadYAML(for: selection) }
@@ -630,11 +688,11 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         kind.isClusterScoped ? .allNamespaces : selectedNamespace
     }
 
-    private func resourceKey(kind: KubernetesResourceKind) -> String {
+    func resourceKey(kind: KubernetesResourceKind) -> String {
         resourceKey(kind: kind, namespace: scope(for: kind))
     }
 
-    private func resourceKey(kind: KubernetesResourceKind, namespace: KubernetesNamespaceSelection) -> String {
+    func resourceKey(kind: KubernetesResourceKind, namespace: KubernetesNamespaceSelection) -> String {
         "\(kind.rawValue)|\(namespace.storageValue)"
     }
 
@@ -728,6 +786,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         yamlResult = nil
         yamlTask?.cancel()
         isLoadingYAML = false
+        previousBaselineYAML = nil
         logsTask?.cancel()
         selectedLogPodID = nil
         selectedLogContainer = nil

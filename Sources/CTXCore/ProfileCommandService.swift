@@ -143,7 +143,7 @@ public final class ProfileCommandService: Sendable {
 
     public func verify(
         _ profile: CloudProfile,
-        activeKubeContext: String,
+        activeKubeContext: String = "",
         kubeconfigPath: String? = nil
     ) async -> CommandResult {
         switch profile.provider {
@@ -213,14 +213,21 @@ public final class ProfileCommandService: Sendable {
             }
             return CommandResult(exitCode: 0, output: "")
         case .kubernetes:
-            guard profile.name == activeKubeContext else {
-                return CommandResult(exitCode: 99, output: "Not active context")
-            }
             if profile.usesStrongDM {
                 let statusResult = await run(["sdm", "status"])
-                guard statusResult.exitCode == 0 else { return statusResult }
-                // Broker authentication alone does not prove the cluster API is reachable.
-
+                if statusResult.exitCode != 0 || Self.isStrongDMUnauthenticated(statusResult) {
+                    // Try kubectl anyway: if the StrongDM Desktop App is running and listening,
+                    // kubectl might succeed even if CLI login is omitted.
+                    let versionResult = await runKubectl(
+                        context: profile.name,
+                        kubeconfigPath: kubeconfigPath,
+                        arguments: ["get", "--raw=/version", "--request-timeout=5s"]
+                    )
+                    if versionResult.exitCode == 0 {
+                        return versionResult
+                    }
+                    return statusResult.exitCode != 0 ? statusResult : CommandResult(exitCode: 1, output: statusResult.output)
+                }
             }
 
             if profile.usesTeleport {
@@ -235,10 +242,6 @@ public final class ProfileCommandService: Sendable {
                 kubeconfigPath: kubeconfigPath,
                 arguments: ["get", "--raw=/version", "--request-timeout=10s"]
             )
-            if versionResult.exitCode == 0 {
-                return versionResult
-            }
-
             return versionResult
         }
     }
@@ -278,7 +281,7 @@ public final class ProfileCommandService: Sendable {
         await run(arguments, timeout: CloudCommandTimeout.interactiveLogin, onOutput: onOutput)
     }
 
-    private func runKubectl(
+    internal func runKubectl(
         context: String,
         kubeconfigPath: String?,
         arguments: [String]

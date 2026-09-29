@@ -172,6 +172,56 @@ public actor ResourceRefreshCoordinator {
         return FetchOutcome(list: result, cacheStateBeforeFetch: stateBefore)
     }
 
+    /// Fetches multiple resource kinds in a single aggregated batch.
+    /// Hits from cache return immediately; any stale or missing kinds are queried in a single call.
+    @discardableResult
+    public func fetchBatch(
+        contextID: String,
+        context: KubernetesContextProfile,
+        namespace: KubernetesNamespaceSelection,
+        kinds: [KubernetesResourceKind],
+        bypassCache: Bool,
+        priority: FetchPriority = .active
+    ) async -> [KubernetesResourceKind: KubernetesResourceList] {
+        var neededKinds: [KubernetesResourceKind] = []
+        var results: [KubernetesResourceKind: KubernetesResourceList] = [:]
+
+        for kind in kinds {
+            let requestKey = key(contextID: contextID, namespace: namespace, kind: kind)
+            var stateBefore = state(for: requestKey)
+            if stateBefore == .miss, let diskCache {
+                if let diskEntry = await diskCache.load(contextID: contextID, namespace: namespace.storageValue, kind: kind.rawValue) {
+                    entries[requestKey] = diskEntry
+                    stateBefore = state(for: requestKey)
+                }
+            }
+            if !bypassCache, stateBefore == .hit, let cached = entries[requestKey] {
+                results[kind] = cached
+            } else {
+                neededKinds.append(kind)
+            }
+        }
+
+        if neededKinds.isEmpty {
+            return results
+        }
+
+        let fetched = await reader.batchList(kinds: neededKinds, context: context, namespace: namespace)
+        for (kind, list) in fetched {
+            let requestKey = key(contextID: contextID, namespace: namespace, kind: kind)
+            if list.status == .reachable || entries[requestKey] == nil {
+                entries[requestKey] = list
+            }
+            results[kind] = list
+            if list.status == .reachable, let diskCache {
+                Task.detached {
+                    await diskCache.store(contextID: contextID, namespace: namespace.storageValue, kind: kind.rawValue, list: list)
+                }
+            }
+        }
+        return results
+    }
+
     /// Cancels in-flight fetches for a context, or — when `namespace` is given —
     /// only those scoped to that namespace, so a slow response for a namespace the
     /// user already switched away from can never land as if it were current.

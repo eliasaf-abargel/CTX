@@ -15,6 +15,12 @@ extension ProfileStore {
             updateStatus(profile, status: .needsLogin, operationID: operationID)
             return false
         }
+        // Safety guard: Remote clusters/profiles must NEVER be connected or probed in passive background sweeps.
+        // Connecting to a Kubernetes cluster must be strictly opt-in and triggered ONLY by explicit user action
+        // (clicking Connect/Login, opening the workspace, or manual verification).
+        if profile.provider == .kubernetes && !isManualAttempt && operationID == nil && profile.status != .connected {
+            return false
+        }
         let startedAt = Date()
         let result = await profileCommands.verify(
             profile,
@@ -126,7 +132,14 @@ extension ProfileStore {
     }
 
     internal func runVerificationSweep() async {
-        _ = await withBoundedConcurrency(over: profiles, limit: 3) { profile in
+        let targetProfiles = profiles.filter { profile in
+            guard !manuallyDisconnectedProfiles.contains(profile.id) else { return false }
+            if profile.provider == .kubernetes {
+                return profile.status == .connected
+            }
+            return true
+        }
+        _ = await withBoundedConcurrency(over: targetProfiles, limit: 3) { profile in
             await self.verify(profile)
         }
         await MainActor.run {

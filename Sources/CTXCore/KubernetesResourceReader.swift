@@ -8,6 +8,17 @@ import Foundation
 /// "just in case" — removed rather than left as a second, silently-bypassed cache.
 public protocol KubernetesResourceReading: Sendable {
     func list(kind: KubernetesResourceKind, context: KubernetesContextProfile, namespace: KubernetesNamespaceSelection) async -> KubernetesResourceList
+    func batchList(kinds: [KubernetesResourceKind], context: KubernetesContextProfile, namespace: KubernetesNamespaceSelection) async -> [KubernetesResourceKind: KubernetesResourceList]
+}
+
+public extension KubernetesResourceReading {
+    func batchList(kinds: [KubernetesResourceKind], context: KubernetesContextProfile, namespace: KubernetesNamespaceSelection) async -> [KubernetesResourceKind: KubernetesResourceList] {
+        var results: [KubernetesResourceKind: KubernetesResourceList] = [:]
+        for kind in kinds {
+            results[kind] = await list(kind: kind, context: context, namespace: namespace)
+        }
+        return results
+    }
 }
 
 public final class KubernetesResourceReader: KubernetesResourceReading {
@@ -95,6 +106,59 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
             logCall(kind: kind, context: context, namespace: namespace, durationMilliseconds: durationMilliseconds(since: started), outcome: .error)
             return failed(kind: kind, context: context, category: .unknown, message: error.localizedDescription, started: started)
         }
+    }
+
+    /// Fetches multiple namespace-scoped resource kinds in a single aggregated `kubectl get` query.
+    /// Dramatically reduces process spawn overhead, network roundtrips, and cluster API load.
+    public func batchList(
+        kinds: [KubernetesResourceKind],
+        context: KubernetesContextProfile,
+        namespace: KubernetesNamespaceSelection
+    ) async -> [KubernetesResourceKind: KubernetesResourceList] {
+        let validKinds = kinds.filter { $0 != .secretMetadata && !$0.isClusterScoped }
+        guard !validKinds.isEmpty else {
+            var res: [KubernetesResourceKind: KubernetesResourceList] = [:]
+            for kind in kinds {
+                res[kind] = await list(kind: kind, context: context, namespace: namespace)
+            }
+            return res
+        }
+
+        let started = Date()
+        let resourceString = validKinds.map(\.kubectlResource).joined(separator: ",")
+        var commandArguments = context.kubeconfigArguments + ["get", resourceString]
+        commandArguments += namespace.commandArguments
+        commandArguments += ["--request-timeout=\(Int(defaultTimeout))s", "--output=json"]
+
+        do {
+            var command = try kubectl.inspectionCommand(context: context.contextName, arguments: commandArguments)
+            command.environmentOverrides = context.kubeconfigEnvironment
+            let result = try await kubectl.run(command, timeout: defaultTimeout)
+            let subprocessDurationMs = durationMilliseconds(since: started)
+
+            if !Task.isCancelled, result.exitCode == 0,
+               let batchParsed = KubernetesResourceParser.parseBatch(stdout: result.stdout, requestedKinds: validKinds) {
+                var finalResults: [KubernetesResourceKind: KubernetesResourceList] = [:]
+                for kind in validKinds {
+                    var list = batchParsed[kind] ?? KubernetesResourceList(kind: kind, columns: columns(for: kind), rows: [], status: .reachable)
+                    list = attachReferences(to: list, context: context, namespace: namespace)
+                    list.diagnostic = diagnostic(kind: kind, context: context, result: result, category: .success, timeout: defaultTimeout, started: started)
+                    list.loadedAt = Date()
+                    finalResults[kind] = list
+                    logCall(kind: kind, context: context, namespace: namespace, durationMilliseconds: subprocessDurationMs, outcome: .success)
+                }
+                return finalResults
+            }
+        } catch {
+            // Graceful fallback to individual fetches on error
+        }
+
+        // Fallback: fetch individually
+        var fallbackResults: [KubernetesResourceKind: KubernetesResourceList] = [:]
+        for kind in kinds {
+            fallbackResults[kind] = await list(kind: kind, context: context, namespace: namespace)
+        }
+        return fallbackResults
     }
 
     /// DEBUG-only, Nodes-only, and only on a non-success outcome — a live-debug
@@ -195,8 +259,6 @@ public final class KubernetesResourceReader: KubernetesResourceReading {
     private func effectiveNamespace(kind: KubernetesResourceKind, namespace: KubernetesNamespaceSelection) -> KubernetesNamespaceSelection {
         kind.isClusterScoped ? .allNamespaces : namespace
     }
-
-
 
     private func diagnostic(kind: KubernetesResourceKind, context: KubernetesContextProfile, result: KubectlResult, category: KubernetesDiagnosticCategory, timeout: TimeInterval, started: Date) -> KubernetesCommandDiagnostic {
         KubernetesCommandDiagnostic(

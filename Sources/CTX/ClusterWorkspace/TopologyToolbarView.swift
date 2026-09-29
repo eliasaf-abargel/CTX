@@ -131,7 +131,7 @@ struct TopologyToolbarView: View {
             showsCounts.toggle()
         } label: {
             Text(counts.medium)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -150,7 +150,7 @@ struct TopologyToolbarView: View {
             showsCounts.toggle()
         } label: {
             Text(counts.short)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(.system(.caption2, design: .rounded, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, 8)
@@ -225,7 +225,7 @@ struct TopologyToolbarView: View {
             .accessibilityLabel("Zoom out")
 
             Text("\(Int(scale * 100))%")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(.caption2, design: .monospaced, weight: .semibold))
                 .frame(width: 40)
                 .contentTransition(.numericText())
 
@@ -276,12 +276,12 @@ private struct TopologyLegendView: View {
             ForEach(TopologyGraphNodeKind.allCases, id: \.self) { kind in
                 HStack(spacing: 8) {
                     Text(kind.code)
-                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                        .font(.system(.caption2, design: .rounded, weight: .heavy))
                         .foregroundStyle(kind.topologyTint)
                         .frame(width: 34, height: 16)
                         .background(kind.topologyTint.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
                     Label(kind.title, systemImage: kind.systemImage)
-                        .font(.system(size: 11))
+                        .font(.caption2)
                 }
             }
 

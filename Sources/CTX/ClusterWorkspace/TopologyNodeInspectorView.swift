@@ -56,11 +56,11 @@ struct TopologyNodeInspectorView: View {
                 .background(node.kind.topologyTint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
             VStack(alignment: .leading, spacing: 2) {
                 Text(node.name)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(.caption, weight: .bold))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 Text("\(node.kind.title) · \(node.namespace)")
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
@@ -82,18 +82,18 @@ struct TopologyNodeInspectorView: View {
             HStack(spacing: 7) {
                 CTXStatusDot(tint: node.health.topologyTint, isPulsing: node.health.isFailed)
                 Text(node.health.summaryTitle)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(node.health.topologyTint)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if case .failed(let reason, let details, let exitCode, let restarts) = node.health {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(reason).font(.system(size: 10, weight: .bold, design: .monospaced))
+                    Text(reason).font(.system(.caption2, design: .monospaced, weight: .bold))
                     if let exitCode { Text("Exit code \(exitCode)") }
                     if restarts > 0 { Text("\(restarts) restarts") }
                     Text(details)
                 }
-                .font(.system(size: 9))
+                .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -106,14 +106,14 @@ struct TopologyNodeInspectorView: View {
         VStack(alignment: .leading, spacing: 8) {
             TopologyInspectorSectionTitle(text: "GROUP")
             Text("\(group.hiddenCount) objects represented")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(.caption, weight: .semibold))
             if !group.sampleNames.isEmpty {
                 Text("Samples")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(group.sampleNames.prefix(5), id: \.self) {
                     Text($0)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -155,13 +155,13 @@ struct TopologyNodeInspectorView: View {
         Button { onSelect(neighbour.id) } label: {
             HStack(spacing: 6) {
                 Image(systemName: inbound ? "arrow.left" : "arrow.right")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(.caption2, weight: .bold))
                     .foregroundStyle(.secondary)
                 Image(systemName: neighbour.kind.systemImage)
                     .foregroundStyle(neighbour.kind.topologyTint)
                     .frame(width: 14)
                 Text(label)
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 2)

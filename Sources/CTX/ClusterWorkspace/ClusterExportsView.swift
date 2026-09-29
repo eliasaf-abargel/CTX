@@ -80,7 +80,7 @@ struct ClusterExportsView: View {
                         .fill(selectedSections.isEmpty ? Color.secondary : Color.blue)
                         .frame(width: 8, height: 8)
                     Text("\(selectedSections.count) / \(loadedSections.count) selected")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(.footnote, weight: .semibold))
                         .foregroundStyle(.primary)
                 }
 
@@ -115,13 +115,13 @@ struct ClusterExportsView: View {
     private var exportOptionsPopover: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Export Options")
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(.footnote, weight: .bold))
                 .foregroundStyle(.primary)
                 .padding(.bottom, 2)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Structure")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Picker("", selection: $exportStructure) {
                     Text("Separate Files").tag(ExportStructure.separate)
@@ -137,7 +137,7 @@ struct ClusterExportsView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Format")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Picker("", selection: $exportFormat) {
                     if exportStructure == .separate {
@@ -185,14 +185,14 @@ struct ClusterExportsView: View {
                 }
 
                 Image(systemName: section.systemImage)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
                     .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(section.rawValue)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(.footnote, weight: .semibold))
                     Text("\(list.rows.count) items · loaded \(list.loadedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -359,7 +359,7 @@ struct CTXCheckbox: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: checked ? "checkmark.square.fill" : "square")
-                .font(.system(size: 15))
+                .font(.callout)
                 .foregroundStyle(checked ? Color.blue : Color.secondary)
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())

@@ -3,10 +3,10 @@ import Foundation
 extension ProfileCommandService {
     internal func loginStrongDM(_ profile: CloudProfile, email: String?, onOutput: (@Sendable (String) -> Void)?) async -> CommandResult {
         let connected = await runLogin(["sdm", "connect", profile.name], onOutput: onOutput)
-        guard connected.exitCode != 0, !Task.isCancelled else { return connected }
+        guard connected.exitCode != 0 || Self.isStrongDMUnauthenticated(connected), !Task.isCancelled else { return connected }
         let status = await run(["sdm", "status"])
         // A working session plus a resource failure is not a reason to repeat SSO.
-        guard status.exitCode != 0 else { return connected }
+        guard status.exitCode != 0 || Self.isStrongDMUnauthenticated(status) else { return connected }
         if ["local_service_unavailable", "cli_missing"].contains(LocalDiagnostics.commandCategory(status)) {
             return status
         }
@@ -17,6 +17,14 @@ extension ProfileCommandService {
         guard authenticated.exitCode == 0, !Task.isCancelled else { return authenticated }
         // A printed SSO URL is presentation data, not completion of resource connection.
         return await runLogin(["sdm", "connect", profile.name], onOutput: onOutput)
+    }
+
+    public static func isStrongDMUnauthenticated(_ result: CommandResult) -> Bool {
+        let text = result.output.lowercased()
+        return text.contains("not authenticated")
+            || text.contains("please login")
+            || text.contains("unauthenticated")
+            || text.contains("user token missing")
     }
 
     internal func disconnectStrongDM(_ profile: CloudProfile) async -> CommandResult {

@@ -5,7 +5,7 @@ extension ProfileDetailView {
     var sessionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("SESSION")
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(sectionHeaderStyle)
                 .tracking(1.1)
                 .padding(.leading, 4)
@@ -61,7 +61,7 @@ extension ProfileDetailView {
                                 : (!profile.roleName.isEmpty ? profile.roleName : profile.name)
                             let initials = identityText.prefix(2).uppercased()
                             Text(store.isActive(profile) ? store.activeIdentityInitials : initials)
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(.caption2, weight: .bold))
                                 .foregroundColor(Color.accentColor)
                                 .frame(width: 18, height: 18)
                                 .background(Color.accentColor.opacity(0.15), in: Circle())

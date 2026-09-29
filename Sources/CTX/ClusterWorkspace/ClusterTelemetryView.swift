@@ -104,7 +104,7 @@ struct ClusterTelemetryView: View {
     /// the ambiguity of a "3 pods" that could have meant either.
     private var scopeNote: some View {
         Text("Nodes cluster-wide · Pods \(viewModel.telemetryScopeLabel)")
-            .font(.system(size: 10))
+            .font(.caption2)
             .foregroundStyle(.secondary)
             .fixedSize()
     }
@@ -144,7 +144,7 @@ struct ClusterTelemetryView: View {
                             .layoutPriority(1)
                         Spacer(minLength: 4)
                         Text(total ?? KubernetesGitOpsService.unknownValue)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
@@ -152,7 +152,7 @@ struct ClusterTelemetryView: View {
                     // An unreported metric shows the unknown marker rather than a
                     // zero, which would read as "idle cluster".
                     Text(value.map { String(format: "%.1f%%", $0) } ?? KubernetesGitOpsService.unknownValue)
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .font(.system(.title3, design: .rounded, weight: .bold))
                         .foregroundStyle(value == nil ? .secondary : .primary)
 
                     ProgressView(value: value ?? 0, total: 100)
@@ -181,10 +181,10 @@ struct ClusterTelemetryView: View {
     private func metric(_ label: String, _ value: String?, warn: Bool) -> some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 10))
+                .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value ?? KubernetesGitOpsService.unknownValue)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(.caption2, weight: .semibold))
                 .foregroundStyle(value == nil ? Color.secondary.opacity(0.6) : (warn ? Color.orange : Color.secondary))
         }
         .lineLimit(1)
@@ -215,9 +215,9 @@ struct ClusterTelemetryView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("Memory Limit Headroom")
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.system(.footnote, weight: .bold))
                             Text(viewModel.telemetryScopeLabel)
-                                .font(.system(size: 10))
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Text(atRisk == 1 ? "1 pod" : "\(atRisk) pods")

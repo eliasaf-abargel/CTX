@@ -191,7 +191,7 @@ private struct FolderIconSwatch: View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
         Image(systemName: icon.systemImage)
-            .font(.system(size: 22, weight: .semibold))
+            .font(.system(.title3, weight: .semibold))
             .frame(width: 64, height: 54)
             .foregroundStyle(isSelected ? Color.white : Color.primary)
             .background {

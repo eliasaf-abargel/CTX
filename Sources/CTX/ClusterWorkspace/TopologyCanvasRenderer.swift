@@ -66,19 +66,50 @@ struct TopologyCanvasRenderer {
                     .foregroundStyle(tint.opacity(alpha)),
                 at: CGPoint(x: chip.midX, y: chip.midY)
             )
+            // `context.draw(_:at:anchor:)` draws at the text's own natural width with
+            // no clipping — it doesn't take a `some View` with `.lineLimit`/
+            // `.truncationMode` either, only a literal `Text`. So the string itself is
+            // pre-truncated to what actually fits between the kind chip and the health
+            // badge; without this, any name longer than that (most generated pod names,
+            // once a hash suffix is added) painted straight through the node's border
+            // and into whatever was next to it on the canvas.
+            let labelStartX = chip.maxX + 7
+            let labelWidth = max(0, frame.maxX - 24 - labelStartX)
             context.draw(
-                Text(labels[node.id] ?? node.name)
+                Text(Self.truncatedForCanvas(labels[node.id] ?? node.name, maxWidth: labelWidth))
                     .font(.system(size: 11))
                     .foregroundStyle(Color.primary.opacity(alpha)),
-                at: CGPoint(x: chip.maxX + 7, y: frame.midY),
+                at: CGPoint(x: labelStartX, y: frame.midY),
                 anchor: .leading
             )
 
-            if !node.health.isHealthy {
+            if node.issueCount > 0 {
+                let badge = CGRect(x: frame.maxX - 20, y: frame.midY - 7, width: 14, height: 14)
+                context.fill(Path(ellipseIn: badge), with: .color(Color.orange.opacity(0.95 * alpha)))
+                context.draw(
+                    Text("\(node.issueCount)")
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(alpha)),
+                    at: CGPoint(x: badge.midX, y: badge.midY)
+                )
+            } else if !node.health.isHealthy {
                 let dot = CGRect(x: frame.maxX - 14, y: frame.midY - 3, width: 6, height: 6)
                 context.fill(Path(ellipseIn: dot), with: .color(node.health.topologyTint.opacity(alpha)))
             }
         }
+    }
+
+    /// A character-count estimate rather than real glyph measurement — this runs
+    /// once per node on every canvas redraw, including during pan/zoom, so
+    /// measuring actual text width there would cost far more than the few
+    /// points of slack this estimate can be off by.
+    private static func truncatedForCanvas(_ text: String, maxWidth: CGFloat, fontSize: CGFloat = 11) -> String {
+        guard maxWidth > 0 else { return "" }
+        let averageGlyphWidth = fontSize * 0.56
+        let budget = max(1, Int(maxWidth / averageGlyphWidth))
+        guard text.count > budget else { return text }
+        guard budget > 1 else { return "…" }
+        return String(text.prefix(budget - 1)) + "…"
     }
 
     private func curve(from start: CGPoint, to end: CGPoint) -> Path {
@@ -95,6 +126,7 @@ struct TopologyCanvasRenderer {
 
     private func border(_ node: TopologyGraphNode, isAnchor: Bool, isHovered: Bool) -> Color {
         if isAnchor { return .accentColor }
+        if node.issueCount > 0 { return Color.orange.opacity(0.7) }
         if node.health.needsAttention { return node.health.topologyTint.opacity(0.7) }
         return .primary.opacity(isHovered ? 0.3 : 0.13)
     }

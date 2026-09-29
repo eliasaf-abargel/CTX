@@ -16,7 +16,7 @@ public struct CTXEnvironmentVariablesInspector: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("ENVIRONMENT VARIABLES (\(items.count))")
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(.secondary)
             if items.count > displayedItems.count {
                 Text("Showing the first \(displayedItems.count) of \(items.count).")
@@ -38,11 +38,11 @@ public struct CTXEnvironmentVariablesInspector: View {
                     ForEach(displayedItems) { (item: EnvVarItem) in
                         HStack {
                             Text(item.name)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced, weight: .semibold))
                                 .foregroundStyle(.primary)
                             Spacer()
                             Text(displayValue(for: item))
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(.caption2, design: .monospaced))
                                 .foregroundStyle(item.isSecret ? Color.orange : (item.value.isEmpty ? Color.secondary : Color.blue))
                                 .lineLimit(1)
                                 .truncationMode(.middle)

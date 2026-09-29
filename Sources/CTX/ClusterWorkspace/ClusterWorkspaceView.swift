@@ -21,6 +21,11 @@ struct ClusterWorkspaceScene: View {
             ClusterWorkspaceView(store: store, context: context, onStatusCheckFailed: { contextName, reason in
                 store.markKubernetesContextNeedsLogin(contextName: contextName, reason: reason)
             })
+            .onChange(of: profile == nil) { _, isDeleted in
+                if isDeleted {
+                    dismissWindow()
+                }
+            }
             .onChange(of: profile?.status) { _, newStatus in
                 if newStatus == .needsLogin || newStatus == .disconnecting || newStatus == .unknown {
                     dismissWindow()
@@ -69,6 +74,7 @@ struct ClusterWorkspaceView: View {
 
     @AppStorage(AppAppearance.storageKey) private var appAppearanceRaw: String = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openWindow) private var openWindow
 
     private var currentAppearance: AppAppearance {
         AppAppearance(rawValue: appAppearanceRaw) ?? .dark
@@ -108,6 +114,19 @@ struct ClusterWorkspaceView: View {
             .environment(\.workspaceContentWidth, proxy.size.width)
             }
         }
+        .toolbar {
+            // `.navigation` placement is the same slot Mail and Notes put their own
+            // back/forward controls in — it sits right beside the traffic lights
+            // this window already reserves space for via `NavigationSplitView`, so
+            // this needs no manual positioning to avoid overlapping them.
+            ToolbarItem(placement: .navigation) {
+                Button(action: backToCTX) {
+                    Label("Back to CTX", systemImage: "chevron.backward")
+                }
+                .help("Back to CTX")
+                .accessibilityLabel("Back to CTX")
+            }
+        }
         .background(VisualEffectBackground(material: .hudWindow, blendingMode: .behindWindow))
         .ctxChromelessWindow()
         .preferredColorScheme(currentAppearance.colorScheme)
@@ -125,28 +144,95 @@ struct ClusterWorkspaceView: View {
             viewModel.cancelRefresh()
         }
         .sheet(isPresented: $isSearchPresented) {
-            ClusterQuickSearchModal(viewModel: viewModel)
+            ClusterCommandPaletteModal(viewModel: viewModel)
+        }
+        .overlay {
+            if viewModel.isQuickLookActive, let row = viewModel.quickLookResource, let section = viewModel.quickLookSection {
+                CTXQuickLookOverlay(viewModel: viewModel, row: row, section: section)
+            }
         }
         .background {
             HStack {
+                // Command Palette (Spotlight-style ⌘K)
                 Button("") { isSearchPresented = true }
                     .keyboardShortcut("k", modifiers: .command)
+
+                // Spacebar Quick Look — disabled while the YAML editor is open so a
+                // literal space typed into a manifest is never eaten by this instead.
+                Button("") { viewModel.toggleQuickLook() }
+                    .keyboardShortcut(.space, modifiers: [])
+                    .disabled(viewModel.isEditingYAML)
+
+                // Bypass Cache & Reload (⌘R)
                 Button("") { viewModel.loadSelectedSection(bypassCache: true) }
                     .keyboardShortcut("r", modifiers: .command)
+
+                // Section Navigation (⌘1 to ⌘8)
                 Button("") { viewModel.selectedSection = .overview }
                     .keyboardShortcut("1", modifiers: .command)
-                Button("") { viewModel.selectedSection = .pods }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("") { viewModel.selectedSection = .cronjobs }
-                    .keyboardShortcut("3", modifiers: .command)
-                Button("") { viewModel.selectedSection = .events }
-                    .keyboardShortcut("4", modifiers: .command)
                 Button("") { viewModel.selectedSection = .topology }
+                    .keyboardShortcut("2", modifiers: .command)
+                Button("") { viewModel.selectedSection = .workloads }
+                    .keyboardShortcut("3", modifiers: .command)
+                Button("") { viewModel.selectedSection = .pods }
+                    .keyboardShortcut("4", modifiers: .command)
+                Button("") { viewModel.selectedSection = .services }
                     .keyboardShortcut("5", modifiers: .command)
+                Button("") { viewModel.selectedSection = .logs }
+                    .keyboardShortcut("6", modifiers: .command)
+                Button("") { viewModel.selectedSection = .portForward }
+                    .keyboardShortcut("7", modifiers: .command)
+                Button("") { viewModel.selectedSection = .issues }
+                    .keyboardShortcut("8", modifiers: .command)
+
+                // Direct Resource Shortcuts (⌘L for Logs, ⌘Y for YAML)
+                Button("") {
+                    if let row = viewModel.activeSelectedResource {
+                        viewModel.openInspector(for: row, in: viewModel.selectedSection, tab: .logs)
+                    }
+                }
+                .keyboardShortcut("l", modifiers: .command)
+
+                Button("") {
+                    if let row = viewModel.activeSelectedResource {
+                        viewModel.openInspector(for: row, in: viewModel.selectedSection, tab: .yaml)
+                    }
+                }
+                .keyboardShortcut("y", modifiers: .command)
+
+                Button("") {
+                    if let row = viewModel.activeSelectedResource, row.cells["Ports"] != nil || row.cells["Port(s)"] != nil {
+                        viewModel.selectedSection = .portForward
+                    }
+                }
+                .keyboardShortcut("p", modifiers: .command)
+
+                // Dismiss QuickLook / Inspector
+                Button("") {
+                    if viewModel.isQuickLookActive {
+                        viewModel.dismissQuickLook()
+                    } else if viewModel.presentation != nil {
+                        viewModel.dismissPresentation()
+                    }
+                }
+                .keyboardShortcut(.escape, modifiers: [])
             }
             .opacity(0)
             .allowsHitTesting(false)
         }
+    }
+
+    /// Raises the main window rather than opening a second instance of it —
+    /// `Window` (unlike `WindowGroup`) is a singleton scene, so `openWindow`
+    /// already does the right thing if it's still open; this only has to
+    /// handle the case the main window was closed while this one stayed open.
+    private func backToCTX() {
+        if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" || $0.title == "CTX" }) {
+            existing.makeKeyAndOrderFront(nil)
+        } else {
+            openWindow(id: "main")
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -162,7 +248,7 @@ struct ClusterWorkspaceHeader: View {
 
     private var clusterIcon: some View {
         Image(systemName: "shippingbox.circle.fill")
-            .font(.system(size: 32, weight: .semibold))
+            .font(.system(.title, weight: .semibold))
             .foregroundStyle(.indigo)
             .frame(width: 46, height: 46)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -187,7 +273,7 @@ struct ClusterWorkspaceHeader: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 9) {
                 Text(viewModel.title)
-                    .font(.system(size: 21, weight: .bold))
+                    .font(.system(.title2, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(viewModel.title)
@@ -197,7 +283,7 @@ struct ClusterWorkspaceHeader: View {
             }
 
             Text(viewModel.clusterName)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .font(.system(.footnote, design: .monospaced, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -216,6 +302,10 @@ struct ClusterWorkspaceHeader: View {
         ClusterNamespaceSelector(viewModel: viewModel)
         CTXStatusBadge(title: viewModel.displayUserName, systemImage: "person.crop.circle", tint: .secondary)
             .help(viewModel.userName)
+        if store.activeKubeContext == viewModel.context.contextName {
+            CTXStatusBadge(title: "CLI Default", systemImage: "terminal.fill", tint: .blue)
+                .help("This cluster is currently active in ~/.kube/config for terminal commands")
+        }
         if let expiry = AWSSessionExpirationService().sessionExpiry(for: KubernetesProfileAdapter.cloudProfile(from: viewModel.context)) {
             let remaining = expiry.timeIntervalSinceNow
             if remaining > 0 {
@@ -230,6 +320,18 @@ struct ClusterWorkspaceHeader: View {
     private var statusBlock: some View {
         VStack(alignment: .trailing, spacing: 10) {
             HStack(spacing: 8) {
+                if store.activeKubeContext != viewModel.context.contextName,
+                   let prof = store.profiles.first(where: { $0.provider == .kubernetes && $0.name == viewModel.context.contextName }) {
+                    Button {
+                        store.setActive(prof, from: .mainWindow)
+                    } label: {
+                        Label("Set as CLI Default", systemImage: "terminal")
+                            .font(.system(.caption, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Set this cluster as current-context in ~/.kube/config for external terminals")
+                }
                 ClusterWorkspaceHealthMenu(viewModel: viewModel, store: store)
                 refreshButton
             }
@@ -246,7 +348,7 @@ struct ClusterWorkspaceHeader: View {
                     .controlSize(.small)
             } else {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(.caption, weight: .semibold))
             }
         }
         .buttonStyle(.borderless)

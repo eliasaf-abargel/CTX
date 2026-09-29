@@ -81,7 +81,7 @@ struct SelectProviderView: View {
                 .background(provider.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
 
                 Text(name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(.footnote, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -90,7 +90,7 @@ struct SelectProviderView: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(.caption2, weight: .bold))
                     .foregroundStyle(.secondary.opacity(0.4))
             }
             .padding(.horizontal, 10)

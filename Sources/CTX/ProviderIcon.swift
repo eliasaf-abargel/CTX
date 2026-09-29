@@ -8,9 +8,15 @@ import SwiftUI
 ///   aws.svg · gcp.svg · azure.svg · kubernetes.svg
 struct ProviderIcon: View {
     let provider: CloudProvider
-    var size: CGFloat = 18
     /// Tint used only for the SF Symbol fallback (logos keep their own colors).
     var fallbackTint: Color? = nil
+    @ScaledMetric private var size: CGFloat
+
+    init(provider: CloudProvider, size: CGFloat = 18, fallbackTint: Color? = nil) {
+        self.provider = provider
+        self.fallbackTint = fallbackTint
+        self._size = ScaledMetric(wrappedValue: size)
+    }
 
     private var assetName: String {
         switch provider {

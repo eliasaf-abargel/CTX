@@ -28,13 +28,13 @@ struct MissingCLIToolSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Image(systemName: phase == .installed ? "checkmark.circle.fill" : "shippingbox")
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(.headline, weight: .medium))
                     .foregroundStyle(phase == .installed ? Color.green : Color.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(phase == .installed ? "\(tool.displayName) installed" : "\(tool.displayName) is required")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -43,7 +43,7 @@ struct MissingCLIToolSheet: View {
             if let command = tool.installCommand {
                 HStack(spacing: 8) {
                     Text(command)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced))
                         .textSelection(.enabled)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -60,7 +60,7 @@ struct MissingCLIToolSheet: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(progressLine.isEmpty ? "Installing…" : progressLine)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.head)
@@ -68,7 +68,7 @@ struct MissingCLIToolSheet: View {
             }
             if case .failed(let message) = phase {
                 Text(message)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.red)
                     .lineLimit(3)
             }
@@ -88,6 +88,11 @@ struct MissingCLIToolSheet: View {
                     }
                     .buttonStyle(CTXPrimaryButton())
                 } else if canBrewInstall {
+                    Button("Download Page") {
+                        NSWorkspace.shared.open(tool.downloadPage)
+                    }
+                    .buttonStyle(CTXSecondaryButton())
+
                     Button("Install with Homebrew") { install() }
                         .buttonStyle(CTXPrimaryButton())
                         .disabled(phase == .installing)

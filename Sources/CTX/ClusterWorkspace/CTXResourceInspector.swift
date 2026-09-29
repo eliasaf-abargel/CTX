@@ -1,41 +1,58 @@
 import CTXCore
 import SwiftUI
 
-/// The single resource inspector — one sheet, one presentation, tabs switch what's
-/// shown inside it (Overview / YAML / Logs-for-Pods). Replaced an earlier two-sheet
-/// design (a detail sheet that handed off to a separate YAML sheet) where presenting
-/// the second sheet forced the first to auto-dismiss, and that dismiss incorrectly
-/// tore down the very state the second sheet needed — "YAML opens then instantly
-/// closes." With everything as tabs inside one sheet, there is nothing to hand off:
-/// switching tabs mutates `ClusterWorkspaceViewModel.presentation.tab` in place.
+/// Unified detail inspector for all Kubernetes resource rows. Renders as a single
+/// native macOS sheet over the workspace, preserving the previous selection when
+/// closed, and offering deep inspectability:
+/// - Header: icon, kind, title, namespace, status chip, copy-name button, dismiss.
+/// - Tab switcher: Overview (structured key-value metrics), YAML (live get -o yaml),
+///   Logs (for Pods, Services, and Workloads), Diagnostics (misconfiguration checks).
+/// - Content area: scrollable, styled with the CTX translucent dark glass language.
 struct CTXResourceInspector: View {
     @ObservedObject var viewModel: ClusterWorkspaceViewModel
     let selection: ClusterWorkspaceResourceSelection
-    let activeTab: CTXInspectorTab
 
     private var detail: KubernetesResourceDetail {
         KubernetesResourceDetail(kind: selection.kind, row: selection.row)
+    }
+
+    private var activeTab: CTXInspectorTab {
+        viewModel.presentation?.tab ?? .overview
     }
 
     private var visibleTabs: [CTXInspectorTab] {
         CTXInspectorTab.visibleTabs(for: selection.kind)
     }
 
+    private var issuesCount: Int {
+        viewModel.diagnostics(for: selection.row.id).count
+    }
+
     private var widthRange: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
-        (800, 920, 1400)
+        switch activeTab {
+        case .overview: (640, 720, 840)
+        case .yaml: (680, 780, 920)
+        case .logs: (740, 860, 1040)
+        case .diagnostics: (680, 760, 880)
+        }
     }
 
     private var heightRange: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
-        (540, 680, 1000)
+        switch activeTab {
+        case .overview: (480, 560, 680)
+        case .yaml: (520, 620, 800)
+        case .logs: (520, 620, 820)
+        case .diagnostics: (480, 580, 750)
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            CTXResourceInspectorHeader(detail: detail, dismiss: { viewModel.dismissPresentation() })
+            CTXResourceInspectorHeader(detail: detail, issuesCount: issuesCount, dismiss: { viewModel.dismissPresentation() })
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
 
-            CTXInspectorTabBar(tabs: visibleTabs, activeTab: activeTab) { tab in
+            CTXInspectorTabBar(tabs: visibleTabs, activeTab: activeTab, issuesCount: issuesCount) { tab in
                 viewModel.selectInspectorTab(tab)
             }
             .padding(.horizontal, 16)
@@ -62,6 +79,9 @@ struct CTXResourceInspector: View {
                 case .logs:
                     CTXInspectorLogsTab(viewModel: viewModel, selection: selection)
                         .padding(16)
+                case .diagnostics:
+                    CTXInspectorDiagnosticsTab(viewModel: viewModel, selection: selection)
+                        .padding(16)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -83,35 +103,48 @@ struct CTXResourceInspector: View {
 /// resource is being inspected.
 struct CTXResourceInspectorHeader: View {
     let detail: KubernetesResourceDetail
+    var issuesCount: Int = 0
     let dismiss: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: detail.warning ? "exclamationmark.triangle.fill" : "info.circle")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(.callout, weight: .semibold))
                 .foregroundStyle(detail.warning ? .orange : .blue)
                 .frame(width: 28, height: 28)
                 .background((detail.warning ? Color.orange : Color.blue).opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(detail.title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(detail.title)
                     CTXCopyIconButton(value: detail.title)
                 }
                 Text(detail.subtitle)
-                    .font(.system(size: 11))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(detail.subtitle)
             }
             Spacer(minLength: 8)
+            if issuesCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("\(issuesCount) \(issuesCount == 1 ? "issue" : "issues")")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(Color.orange)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.orange.opacity(0.12), in: Capsule())
+            }
             if detail.status != "-" {
                 Text(detail.status)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(detail.warning ? .orange : .secondary)
                     .lineLimit(1)
                     .padding(.horizontal, 7)
@@ -129,6 +162,7 @@ struct CTXResourceInspectorHeader: View {
 struct CTXInspectorTabBar: View {
     let tabs: [CTXInspectorTab]
     let activeTab: CTXInspectorTab
+    var issuesCount: Int = 0
     let onSelect: (CTXInspectorTab) -> Void
 
     var body: some View {
@@ -137,6 +171,7 @@ struct CTXInspectorTabBar: View {
                 CTXInspectorTabButton(
                     tab: tab,
                     isSelected: tab == activeTab,
+                    issuesCount: issuesCount,
                     action: { onSelect(tab) }
                 )
             }
@@ -159,7 +194,7 @@ private struct CTXInspectorDoneButton: View {
     var body: some View {
         Button(action: action) {
             Text("Done")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(.caption, weight: .semibold))
                 .foregroundStyle(isHovered ? Color.primary : Color.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, 12)
@@ -187,6 +222,7 @@ private struct CTXInspectorDoneButton: View {
 private struct CTXInspectorTabButton: View {
     let tab: CTXInspectorTab
     let isSelected: Bool
+    var issuesCount: Int = 0
     let action: () -> Void
     @State private var isHovered = false
 
@@ -194,10 +230,18 @@ private struct CTXInspectorTabButton: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: tab.systemImage)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                 Text(tab.title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(.caption, weight: .semibold))
                     .lineLimit(1)
+                if tab == .diagnostics && issuesCount > 0 {
+                    Text("\(issuesCount)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.orange, in: Capsule())
+                }
             }
             .foregroundStyle(foreground)
             .padding(.horizontal, 12)

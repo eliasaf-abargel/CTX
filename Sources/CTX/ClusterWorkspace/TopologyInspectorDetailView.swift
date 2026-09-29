@@ -66,11 +66,11 @@ struct TopologyInspectorDetailView: View {
                 ForEach(rows, id: \.0) { title, value in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(title)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(.caption2, weight: .semibold))
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 8)
                         Text(value)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced))
                             .lineLimit(2)
                             .truncationMode(.head)
                             .multilineTextAlignment(.trailing)
@@ -87,7 +87,7 @@ struct TopologyInspectorSectionTitle: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 9, weight: .bold))
+            .font(.system(.caption2, weight: .bold))
             .foregroundStyle(.secondary)
             .tracking(0.5)
     }

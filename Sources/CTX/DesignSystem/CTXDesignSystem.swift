@@ -124,7 +124,7 @@ struct CTXCopyIconButton: View {
             }
         } label: {
             Image(systemName: justCopied ? "checkmark.circle.fill" : "doc.on.doc")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
                 .foregroundStyle(justCopied ? .green : .secondary)
                 .frame(width: 20, height: 20)
         }
@@ -165,7 +165,7 @@ struct CTXIconActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(.footnote, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 28)
                 .background(fill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -188,7 +188,7 @@ struct CTXIconActionButton: View {
         .overlay(alignment: .topTrailing) {
             if isHovering {
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -229,7 +229,7 @@ struct CTXSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold))
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(.secondary)
             if !subtitle.isEmpty {
                 Text(subtitle)
@@ -248,7 +248,7 @@ struct CTXStatusBadge: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(tint)
             .lineLimit(1)
             .truncationMode(.middle)
@@ -299,7 +299,7 @@ struct CTXReloadIconButton: View {
             }
         } label: {
             Image(systemName: justReloaded ? "checkmark.circle.fill" : "arrow.clockwise")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
                 .foregroundStyle(justReloaded ? .green : .secondary)
                 .rotationEffect(.degrees(isLoading ? rotation : 0))
                 .frame(width: 20, height: 20)
@@ -414,7 +414,7 @@ struct CTXSearchField: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
                 .foregroundStyle(.secondary)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
@@ -427,9 +427,11 @@ struct CTXSearchField: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityLabel("Clear search")
             }
         }
-        .font(.system(size: 12))
+        .font(.caption)
         .padding(.horizontal, 10)
         .frame(height: 30)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -453,18 +455,18 @@ struct CTXResourceCard: View {
         CTXGlassPanel(padding: 13) {
             HStack(alignment: .top, spacing: 11) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(.body, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 32, height: 32)
                     .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .fixedSize()
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Text(value)
-                        .font(.system(size: 21, weight: .bold))
+                        .font(.title2.weight(.bold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .truncationMode(.tail)
@@ -513,7 +515,7 @@ struct CTXPrimaryButton: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11, weight: .bold))
+            .font(.caption2.weight(.bold))
             .foregroundStyle(.white)
             .lineLimit(1)
             .padding(.horizontal, 14)
@@ -546,7 +548,7 @@ struct CTXSecondaryButton: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11, weight: .bold))
+            .font(.caption2.weight(.bold))
             .foregroundStyle(.primary)
             .lineLimit(1)
             .padding(.horizontal, 14)
@@ -578,7 +580,7 @@ struct CTXSecondaryButton: ButtonStyle {
 struct CTXInlineActionButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(.caption.weight(.medium))
             .foregroundStyle(Color.accentColor)
             .opacity(configuration.isPressed ? 0.6 : 1)
             .focusEffectDisabled()
@@ -606,7 +608,7 @@ struct CTXDiagnosticCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: systemImage)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(.headline, weight: .semibold))
                         .foregroundStyle(tint)
                         .frame(width: 32, height: 32)
                         .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -632,7 +634,7 @@ struct CTXDiagnosticCard: View {
 
                     if showDetails {
                         Text(diagnosticSummary)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(5)
                             .textSelection(.enabled)
@@ -729,7 +731,7 @@ struct CTXStateView: View {
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: systemImage)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.system(.title, weight: .semibold))
                 .foregroundStyle(tint)
             Text(title)
                 .font(.headline)

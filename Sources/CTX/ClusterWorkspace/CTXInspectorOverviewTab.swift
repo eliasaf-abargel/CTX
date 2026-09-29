@@ -49,7 +49,7 @@ struct CTXInspectorOverviewTab: View {
                 Divider().opacity(0.3)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("GITOPS APPLICATION")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 2)
                     // Every value here is whatever the controller reported, falling
@@ -147,10 +147,10 @@ struct CTXInspectorOverviewTab: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
                         Image(systemName: container.isInitContainer ? "arrow.down.circle" : "shippingbox")
-                            .font(.system(size: 10))
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                         Text(container.isInitContainer ? "INIT CONTAINER · \(container.name)" : "CONTAINER · \(container.name)")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(.caption2, weight: .bold))
                             .foregroundStyle(.secondary)
                     }
                     CTXInspectorFieldRow(label: "Image", value: container.image, monospaced: true)
@@ -223,10 +223,10 @@ struct CTXInspectorOverviewTab: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                     Text(advice.title)
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(.caption, weight: .bold))
                     Spacer()
                     Text(advice.category)
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -240,7 +240,7 @@ struct CTXInspectorOverviewTab: View {
                 if let cmd = advice.kubectlCommand {
                     HStack {
                         Text(cmd)
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
@@ -262,7 +262,7 @@ struct CTXInspectorOverviewTab: View {
         return AnyView(
             VStack(alignment: .leading, spacing: 6) {
                 Text("CONTAINER IMAGE & VERSION TAG")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(.caption2, weight: .bold))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 2)
                 
@@ -307,7 +307,7 @@ struct CTXInspectorSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title.uppercased())
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(.secondary)
                 .padding(.top, 2)
             ForEach(fields) { field in
@@ -336,11 +336,11 @@ struct CTXInspectorFieldRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
-                .font(.system(size: 11))
+                .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .leading)
             Text(value)
-                .font(.system(size: 12, weight: .medium, design: monospaced ? .monospaced : .default))
+                .font(.system(.caption, design: monospaced ? .monospaced : .default, weight: .medium))
                 .lineLimit(label == "Message" ? 3 : 1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)

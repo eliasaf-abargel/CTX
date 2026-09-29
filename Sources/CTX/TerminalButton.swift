@@ -10,8 +10,15 @@ import SwiftUI
 struct TerminalButton: View {
     let profile: CloudProfile
     let isVisible: Bool
-    let size: CGFloat
     let action: () -> Void
+    @ScaledMetric private var size: CGFloat
+
+    init(profile: CloudProfile, isVisible: Bool, size: CGFloat, action: @escaping () -> Void) {
+        self.profile = profile
+        self.isVisible = isVisible
+        self.action = action
+        self._size = ScaledMetric(wrappedValue: size)
+    }
 
     var body: some View {
         if isVisible, TerminalLauncher.canOpenTerminal(for: profile) {

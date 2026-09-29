@@ -63,7 +63,7 @@ struct CTXInspectorLogsTab: View {
             selectedRelatedPodID = nil
         } label: {
             Label("Related Pods", systemImage: "chevron.left")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
         }
         .buttonStyle(CTXInlineActionButton())
         .controlSize(.small)
@@ -94,7 +94,7 @@ struct CTXInspectorLogsTab: View {
             } else {
                 CTXGlassPanel(padding: 14) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Related Pods").font(.system(size: 12, weight: .semibold))
+                        Text("Related Pods").font(.system(.caption, weight: .semibold))
                         ForEach(PodLogSelection.sortedForPicker(matches)) { row in
                             Button {
                                 selectedRelatedPodID = row.id
@@ -114,7 +114,7 @@ struct CTXInspectorLogsTab: View {
         HStack(spacing: 10) {
             Circle().fill(statusTint(row)).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.name).font(.system(size: 12, weight: .semibold))
+                Text(row.name).font(.system(.caption, weight: .semibold))
                 Text([row.cells["Status"], row.cells["Ready"].map { "\($0) ready" }, row.cells["Restarts"].map { "\($0) restarts" }, row.cells["Age"]].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption2)
                     .foregroundStyle(.secondary)

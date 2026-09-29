@@ -20,7 +20,7 @@ struct ConfigPathRow: View {
         LabeledContent(title) {
             HStack(spacing: 8) {
                 Text(abbreviate(path.isEmpty ? defaultPath : path))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(path.isEmpty ? .secondary : .primary)
                     .lineLimit(1)
                     .truncationMode(.head)

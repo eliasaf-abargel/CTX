@@ -11,7 +11,7 @@ struct FolderDetailView: View {
             VStack(alignment: .leading, spacing: 28) {
                 HStack(alignment: .center, spacing: 16) {
                     Image(systemName: folder.icon.systemImage)
-                        .font(.system(size: 32))
+                        .font(.title)
                         .foregroundStyle(Color.accentColor)
                         .padding(12)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -29,7 +29,7 @@ struct FolderDetailView: View {
                                 store.presentFolderEditor(.edit(folder), from: .mainWindow)
                             } label: {
                                 Image(systemName: "pencil")
-                                    .font(.system(size: 13))
+                                    .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
                             .buttonStyle(.plain)
@@ -100,7 +100,7 @@ struct FolderProfileRow: View {
                     
                     if store.isActive(profile) {
                         Text("Active")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(.caption2, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1.5)
@@ -121,9 +121,9 @@ struct FolderProfileRow: View {
                         } else {
                             HStack(spacing: 3) {
                                 Image(systemName: "timer")
-                                    .font(.system(size: 7, weight: .bold))
+                                    .font(.system(.caption2, weight: .bold))
                                 Text("Connected")
-                                    .font(.system(size: 9, weight: .bold))
+                                    .font(.system(.caption2, weight: .bold))
                             }
                             .foregroundStyle(.green)
                             .padding(.horizontal, 6)
@@ -141,7 +141,7 @@ struct FolderProfileRow: View {
                                 .scaleEffect(0.5)
                                 .frame(width: 8, height: 8)
                             Text(profile.status.rawValue)
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(.caption2, weight: .bold))
                         }
                         .foregroundStyle(profile.status.color)
                         .padding(.horizontal, 6)
@@ -208,7 +208,7 @@ struct FolderProfileRow: View {
                     )
                 } label: {
                     Image(systemName: "pencil")
-                        .font(.system(size: 11))
+                        .font(.caption2)
                 }
                 .buttonStyle(CTXSecondaryButton())
                 .help("Edit Profile")

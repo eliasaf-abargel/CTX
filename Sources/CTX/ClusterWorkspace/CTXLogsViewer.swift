@@ -62,6 +62,8 @@ struct CTXLogsViewer: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .help("Clear search")
+                        .accessibilityLabel("Clear search")
                     }
                 }
                 .padding(.horizontal, 8)
@@ -99,7 +101,7 @@ struct CTXLogsViewer: View {
                     .buttonStyle(.plain)
 
                     Text("\(Int(fontSize))pt")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced, weight: .bold))
                         .foregroundStyle(.secondary)
 
                     Button {

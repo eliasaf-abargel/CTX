@@ -5,7 +5,7 @@ extension ProfileDetailView {
     var accountSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("ACCOUNT")
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(.caption2, weight: .bold))
                 .foregroundStyle(sectionHeaderStyle)
                 .tracking(1.1)
                 .padding(.leading, 4)

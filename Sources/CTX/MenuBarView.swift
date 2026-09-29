@@ -35,9 +35,9 @@ struct MenuBarView: View {
             if store.showExpirationWarning {
                 HStack(spacing: 8) {
                     Image(systemName: "timer")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                     Text(store.expirationWarningMessage)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(.caption2, weight: .medium))
                         .lineLimit(1)
                 }
                 .foregroundStyle(.white)
@@ -58,15 +58,15 @@ struct MenuBarView: View {
                                 .scaleEffect(0.6)
                                 .frame(width: 11, height: 11)
                             Text("Installing Update...")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(.caption2, weight: .semibold))
                         } else {
                             Image(systemName: "arrow.down.circle.fill")
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(.caption2, weight: .bold))
                             Text("Update Available: \(store.latestVersionString)")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(.caption2, weight: .semibold))
                             Spacer()
                             Image(systemName: "arrow.down.to.line.compact")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(.caption2, weight: .bold))
                                 .opacity(0.8)
                         }
                     }
@@ -83,22 +83,24 @@ struct MenuBarView: View {
             // Search Bar
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 TextField("Search...", text: $searchQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.caption2)
 
                 if !searchQuery.isEmpty {
                     Button {
                         searchQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 10))
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help("Clear search")
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 8)
@@ -127,7 +129,7 @@ struct MenuBarView: View {
                             HStack(spacing: 6) {
                                 ProviderIcon(provider: pGroup.provider, size: 12, fallbackTint: .primary)
                                 Text(pGroup.provider.sectionHeaderTitle)
-                                    .font(.system(size: 11, weight: .bold))
+                                    .font(.system(.caption2, weight: .bold))
                                     .foregroundStyle(.primary)
 
                                 if pGroup.folderGroups.contains(where: { g in g.profiles.contains { $0.status == .connected } }) {
@@ -140,7 +142,7 @@ struct MenuBarView: View {
 
                                 let totalCount = pGroup.folderGroups.reduce(0) { $0 + $1.profiles.count }
                                 Text("\(totalCount)")
-                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .font(.system(.caption2, weight: .semibold))
                                     .foregroundStyle(.secondary)
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 1)
@@ -195,7 +197,6 @@ struct MenuBarView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: store.showExpirationWarning)
         .onAppear {
             expandedGroups = []
-            store.verifyAllProfiles()
             store.checkForUpdates()
         }
         .onChange(of: store.presentation?.id) { _, _ in
@@ -226,7 +227,7 @@ struct MenuBarView: View {
                     openSettings()
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 15))
+                        .font(.callout)
                         .foregroundColor(.secondary)
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
@@ -236,7 +237,7 @@ struct MenuBarView: View {
                 .accessibilityLabel("Open Settings")
 
                 Text(store.activeIdentityInitials)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(.caption2, weight: .bold))
                     .foregroundStyle(Color.accentColor)
                     .frame(width: 32, height: 32)
                     .background(.ultraThinMaterial, in: Circle())
@@ -288,19 +289,19 @@ private struct ActiveContextPill: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text("\(profile.provider.compactName) \(profile.name)")
-                        .font(.system(size: 11.5, weight: .bold))
+                        .font(.system(.caption2, weight: .bold))
                         .lineLimit(1)
                     
                     if profile.status != .connected {
                         Text("(\(profile.status.rawValue))")
-                            .font(.system(size: 9.5, weight: .medium))
+                            .font(.system(.caption2, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 if !profile.contextSubtitle.isEmpty {
                     Text(profile.contextSubtitle)
-                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -347,7 +348,7 @@ private struct MenuBarFolderSection: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: group.folder.icon.systemImage)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 14)
 
@@ -365,7 +366,7 @@ private struct MenuBarFolderSection: View {
                 Spacer()
 
                 Text("\(group.profiles.count)")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
@@ -394,7 +395,7 @@ private struct MenuBarProfileRow: View {
             .frame(width: 14)
 
             Text(profile.name)
-                .font(.system(size: 11.5, weight: isActive ? .bold : .medium))
+                .font(.system(.caption2, weight: isActive ? .bold : .medium))
                 .foregroundStyle(isActive ? .primary : .secondary)
                 .lineLimit(1)
 

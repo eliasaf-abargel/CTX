@@ -191,7 +191,6 @@ public final class ProfileStore: ObservableObject {
 
         if startsBackgroundServices {
             refresh()
-            verifyAllProfiles()
 
             self.expirationTimer = Timer.publish(every: 10, on: .main, in: .common)
                 .autoconnect()

@@ -100,7 +100,7 @@ public struct InAppAuthWebModalView: View {
                         webView?.goBack()
                     } label: {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(.caption, weight: .bold))
                     }
                     .disabled(!canGoBack)
                     .ctxHeaderButton()
@@ -109,7 +109,7 @@ public struct InAppAuthWebModalView: View {
                         webView?.goForward()
                     } label: {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(.caption, weight: .bold))
                     }
                     .disabled(!canGoForward)
                     .ctxHeaderButton()
@@ -118,7 +118,7 @@ public struct InAppAuthWebModalView: View {
                         webView?.reload()
                     } label: {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(.caption2, weight: .bold))
                     }
                     .ctxHeaderButton()
                 }
@@ -128,10 +128,10 @@ public struct InAppAuthWebModalView: View {
                     CTXAppLogoView(size: 24)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("CTX Auth")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(.caption, weight: .bold))
                             .foregroundStyle(.primary)
                         Text(userEmail?.isEmpty == false ? (userEmail ?? "Identity & SSO") : "Identity & SSO")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(.caption2, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -141,11 +141,11 @@ public struct InAppAuthWebModalView: View {
                 // URL SSL Capsule
                 HStack(spacing: 6) {
                     Image(systemName: isSecureSSL ? "lock.fill" : "globe")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(.caption2, weight: .semibold))
                         .foregroundStyle(isSecureSSL ? Color.green : Color.secondary)
 
                     Text(activeHost)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced, weight: .medium))
                         .lineLimit(1)
                         .foregroundStyle(.primary.opacity(0.9))
 
@@ -161,7 +161,7 @@ public struct InAppAuthWebModalView: View {
                         }
                     } label: {
                         Image(systemName: copiedURL ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(.caption2, weight: .bold))
                             .foregroundStyle(copiedURL ? Color.green : Color.secondary)
                     }
                     .buttonStyle(.plain)
@@ -174,7 +174,7 @@ public struct InAppAuthWebModalView: View {
                         #endif
                     } label: {
                         Image(systemName: "safari")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(.caption2, weight: .bold))
                             .foregroundStyle(Color.secondary)
                     }
                     .buttonStyle(.plain)
@@ -200,9 +200,9 @@ public struct InAppAuthWebModalView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text("Close")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(.caption, weight: .semibold))
                         Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(.caption2, weight: .bold))
                     }
                 }
                 .ctxHeaderButton()

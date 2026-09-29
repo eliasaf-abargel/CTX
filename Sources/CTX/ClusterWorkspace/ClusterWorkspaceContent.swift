@@ -72,7 +72,7 @@ struct ClusterWorkspaceContent: View {
             }
         }
         .sheet(item: $viewModel.presentation) { presentation in
-            CTXResourceInspector(viewModel: viewModel, selection: presentation.selection, activeTab: presentation.tab)
+            CTXResourceInspector(viewModel: viewModel, selection: presentation.selection)
         }
     }
 

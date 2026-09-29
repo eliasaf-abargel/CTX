@@ -28,12 +28,12 @@ struct ClusterQuickSearchModal: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16))
+                    .font(.callout)
                     .foregroundStyle(.blue)
 
                 TextField("Search all cluster resources (⌘K)...", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .onChange(of: query) { _, _ in
                         selectedIndex = 0
                     }
@@ -54,7 +54,7 @@ struct ClusterQuickSearchModal: View {
             if matchingResults.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: query.isEmpty ? "command" : "magnifyingglass")
-                        .font(.system(size: 24))
+                        .font(.title2)
                         .foregroundStyle(.secondary)
                     Text(query.isEmpty ? "Type to search across all resources" : "No matching resources found")
                         .font(.caption)
@@ -63,7 +63,7 @@ struct ClusterQuickSearchModal: View {
                     if query.isEmpty {
                         VStack(spacing: 8) {
                             Text("QUICK FAVORITE FILTERS")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(.caption2, weight: .bold))
                                 .foregroundStyle(.secondary)
 
                             HStack(spacing: 8) {
@@ -103,7 +103,7 @@ struct ClusterQuickSearchModal: View {
 
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(item.row.name)
-                                                .font(.system(size: 12, weight: .semibold))
+                                                .font(.system(.caption, weight: .semibold))
                                                 .foregroundStyle(.primary)
                                             if let ns = item.row.namespace {
                                                 Text(ns).font(.caption2).foregroundStyle(.secondary)

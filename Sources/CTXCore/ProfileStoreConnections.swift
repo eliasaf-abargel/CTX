@@ -71,9 +71,18 @@ extension ProfileStore {
         }
 
         let startedAt = Date()
-        let email = profile.roleName.contains("@")
-            ? profile.roleName
-            : (profile.accountID.contains("@") ? profile.accountID : (activeIdentityLabel.contains("@") ? activeIdentityLabel : nil))
+        let email: String? = {
+            if profile.provider == .kubernetes && profile.usesStrongDM {
+                // NEVER send foreign cloud emails (from active GCP / AWS sessions) to StrongDM.
+                // StrongDM strictly enforces corporate domain authentication.
+                if profile.roleName.contains("@") { return profile.roleName }
+                if profile.accountID.contains("@") { return profile.accountID }
+                return nil
+            }
+            return profile.roleName.contains("@")
+                ? profile.roleName
+                : (profile.accountID.contains("@") ? profile.accountID : (activeIdentityLabel.contains("@") ? activeIdentityLabel : nil))
+        }()
 
         switch profile.provider {
         case .aws:
@@ -191,9 +200,7 @@ extension ProfileStore {
                     return
                 }
                 self.lastMessage = "GCP credentials refreshed"
-                // Not `.connected` — that would claim more than an ADC refresh
-                // proves. The real kubectl check below settles the true status.
-                self.verifyAllProfiles()
+                _ = await self.verify(anchorProfile, isManualAttempt: true, operationID: operationID)
             }
         case .awsSSOExpired:
             if anchorProfile.usesStrongDM || anchorProfile.usesTeleport {

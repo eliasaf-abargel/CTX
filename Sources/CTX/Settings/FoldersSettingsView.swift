@@ -10,7 +10,7 @@ struct FoldersSettingsView: View {
                 ForEach(store.groupedProfiles.map(\.folder)) { folder in
                     HStack(spacing: 8) {
                         Image(systemName: folder.icon.systemImage)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(.footnote, weight: .medium))
                             .foregroundStyle(Color.accentColor)
                             .frame(width: 18)
 

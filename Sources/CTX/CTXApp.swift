@@ -8,6 +8,13 @@ struct CTXApp: App {
     @StateObject private var store = ProfileStore(shellSelectionURL: ShellIntegration.selectionURL)
     @Environment(\.openWindow) private var openWindow
 
+    init() {
+        if CommandLine.arguments.contains("--mcp") || CommandLine.arguments.contains("mcp") {
+            CTXMCPServer.runStdio()
+            exit(0)
+        }
+    }
+
     var body: some Scene {
         Window("CTX", id: "main") {
             ContentView(store: store)
@@ -103,6 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         if Bundle.main.bundleURL.pathExtension == "app" {
             UNUserNotificationCenter.current().delegate = self
+            AppNotificationService.shared.requestAuthorizationIfAvailable()
+            AppNotificationService.shared.registerNotificationCategories()
         }
     }
 
@@ -141,6 +150,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
+        } else if userInfo["type"] as? String == "cluster_anomaly" {
+            if let contextID = userInfo["context_id"] as? String, !contextID.isEmpty {
+                DispatchQueue.main.async {
+                    self.openWindow?(id: "cluster-workspace", value: contextID)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
         }
         completionHandler()

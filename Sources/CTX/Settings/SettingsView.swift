@@ -18,6 +18,14 @@ struct SettingsView: View {
             AboutSettingsView(store: store)
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(2)
+
+            MCPSettingsView()
+                .tabItem { Label("MCP Server", systemImage: "cpu") }
+                .tag(3)
+
+            NotificationsSettingsView(store: store)
+                .tabItem { Label("Notifications", systemImage: "bell.badge") }
+                .tag(4)
         }
         .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .dark).colorScheme)
         .frame(width: 620, height: 460)

@@ -32,14 +32,14 @@ struct ResourceFocusChip: View {
             Image(systemName: "line.3.horizontal.decrease.circle.fill")
                 .foregroundStyle(.orange)
             Text(focus.title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(.caption, weight: .semibold))
             Text(matchCount == 1 ? "1 match" : "\(matchCount) matches")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             Button(action: clear) {
                 Label("Show all", systemImage: "xmark.circle.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.accentColor)

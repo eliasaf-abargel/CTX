@@ -42,11 +42,11 @@ extension ProfileDetailView {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                         Text("Connection Issue")
-                            .font(.system(size: 13, weight: .bold))
+                            .font(.system(.footnote, weight: .bold))
                             .foregroundStyle(.primary)
                     }
                     Text(errorMessage)
-                        .font(.system(size: 12))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(6)
                         .multilineTextAlignment(.leading)

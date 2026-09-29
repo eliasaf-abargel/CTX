@@ -48,7 +48,7 @@ struct ClusterWorkspaceSidebar: View {
                                         .lineLimit(1)
                                     Spacer()
                                     Text("Future")
-                                        .font(.system(size: 9, weight: .bold))
+                                        .font(.system(.caption2, weight: .bold))
                                         .foregroundStyle(.tertiary)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 2)
@@ -86,14 +86,14 @@ private struct ClusterWorkspaceSidebarFooter: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: "person.crop.circle")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(.body, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 26, height: 26)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(viewModel.displayUserName)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(.caption2, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(viewModel.userName)

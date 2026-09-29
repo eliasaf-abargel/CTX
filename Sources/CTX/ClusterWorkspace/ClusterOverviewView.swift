@@ -113,7 +113,7 @@ struct ClusterOverviewView: View {
         return CTXGlassPanel(padding: 14) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("API health").font(.system(size: 12, weight: .semibold))
+                    Text("API health").font(.system(.caption, weight: .semibold))
                     Spacer()
                     if let diagnostic {
                         CTXDiagnosticsButton(summary: diagnostic.safeSummary)
@@ -124,7 +124,7 @@ struct ClusterOverviewView: View {
                     .foregroundStyle(.secondary)
                 if let diagnostic {
                     Text(diagnostic.safeSummary)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -135,7 +135,7 @@ struct ClusterOverviewView: View {
     private var rbacDetailPanel: some View {
         CTXGlassPanel(padding: 14) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Read permissions").font(.system(size: 12, weight: .semibold))
+                Text("Read permissions").font(.system(.caption, weight: .semibold))
                 ForEach(viewModel.overviewSummary.rbac, id: \.resource) { permission in
                     HStack(spacing: 8) {
                         Circle()
@@ -172,14 +172,14 @@ struct ClusterOverviewView: View {
                         .frame(width: 44, height: 44)
                         .rotationEffect(.degrees(-90))
                     Text("\(score)%")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.system(.caption2, design: .monospaced, weight: .bold))
                         .foregroundStyle(color)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text("Pod Hygiene Score")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(.caption, weight: .semibold))
                         CTXStatusBadge(title: score >= 85 ? "Optimal" : "Attention Recommended", systemImage: "shield.checkered", tint: color)
                     }
                     Text(pods.isEmpty

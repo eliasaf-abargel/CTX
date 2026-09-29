@@ -24,12 +24,12 @@ extension ProfileDetailView {
             return store.needsDisconnectRetry(profile) ? "Disconnect not confirmed" : "Disconnected"
         }
         if profile.provider == .kubernetes {
-            if store.isActive(profile) {
-                return currentProfile.status == .connected
-                    ? "Connected"
-                    : currentProfile.status.rawValue
+            if currentProfile.status == .connected {
+                return store.isActive(profile) ? "Connected (Active Context)" : "Connected"
             }
-            return "Inactive"
+            return currentProfile.status == .unknown
+                ? "Not Checked"
+                : currentProfile.status.rawValue
         }
         return currentProfile.status == .unknown
             ? "Not Checked"
@@ -37,9 +37,7 @@ extension ProfileDetailView {
     }
 
     var connectionIsActive: Bool {
-        profile.provider == .kubernetes
-            ? store.isActive(profile) && currentProfile.status == .connected
-            : currentProfile.status == .connected
+        currentProfile.status == .connected
     }
 
     var canDisconnect: Bool {
@@ -47,9 +45,7 @@ extension ProfileDetailView {
     }
 
     var canOpenWorkspace: Bool {
-        profile.provider == .kubernetes
-            && store.isActive(profile)
-            && currentProfile.status == .connected
+        profile.provider == .kubernetes && currentProfile.status != .missingCli
     }
 
     var kubernetesContext: KubernetesContextProfile? {
@@ -73,7 +69,7 @@ extension ProfileDetailView {
         } label: {
             Image(systemName: copiedField == fieldName ? "checkmark.circle.fill" : "doc.on.doc")
                 .foregroundStyle(copiedField == fieldName ? .green : .secondary)
-                .font(.system(size: 12))
+                .font(.caption)
                 .frame(width: 28, height: 28)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))

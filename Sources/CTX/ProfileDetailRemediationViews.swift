@@ -17,6 +17,12 @@ struct KubeAuthRemediationCardView: View {
             || (errorMessage?.lowercased().contains("sso") ?? false)
     }
 
+    private var isSDMAppInstalled: Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return FileManager.default.fileExists(atPath: "/Applications/SDM.app")
+            || FileManager.default.fileExists(atPath: "\(home)/Applications/SDM.app")
+    }
+
     private var authTitle: String {
         if isSDM { return "StrongDM Authentication Required" }
         if isTeleport { return "Teleport (tsh) Login Required" }
@@ -26,7 +32,7 @@ struct KubeAuthRemediationCardView: View {
 
     private var authExplanation: String {
         if isSDM {
-            return "Connect uses your existing StrongDM client, completes sign-in, and verifies access to this cluster."
+            return "This cluster connects via StrongDM on localhost. Open the StrongDM desktop app to activate your cluster tunnel, or click Connect."
         }
         if isTeleport {
             return "This cluster is managed via Teleport. Run tsh login to renew your access certificate."
@@ -53,20 +59,20 @@ struct KubeAuthRemediationCardView: View {
                         : (isTeleport ? "lock.shield.fill" : "key.fill")
                 )
                 .foregroundStyle(.orange)
-                .font(.system(size: 15))
+                .font(.callout)
                 Text(authTitle)
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(.footnote, weight: .bold))
                     .foregroundStyle(.primary)
             }
 
             Text(authExplanation)
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Text(commandSnippet)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.primary)
                 Spacer()
                 CTXCopyIconButton(value: commandSnippet)
@@ -80,6 +86,35 @@ struct KubeAuthRemediationCardView: View {
                 }
                 .buttonStyle(CTXPrimaryButton())
                 .disabled(isVerifying)
+
+                if isSDM {
+                    if isSDMAppInstalled {
+                        Button {
+                            let home = FileManager.default.homeDirectoryForCurrentUser.path
+                            let path = FileManager.default.fileExists(atPath: "/Applications/SDM.app")
+                                ? "/Applications/SDM.app"
+                                : "\(home)/Applications/SDM.app"
+                            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                        } label: {
+                            Label("Open StrongDM App", systemImage: "arrow.up.forward.app")
+                        }
+                        .buttonStyle(CTXSecondaryButton())
+                    } else {
+                        Button {
+                            NSWorkspace.shared.open(CLITool.sdm.downloadPage)
+                        } label: {
+                            Label("Install StrongDM", systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(CTXSecondaryButton())
+                    }
+                } else if isTeleport && CLIToolPaths.resolve("tsh") == nil {
+                    Button {
+                        NSWorkspace.shared.open(CLITool.tsh.downloadPage)
+                    } label: {
+                        Label("Install Teleport (tsh)", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(CTXSecondaryButton())
+                }
 
                 Button {
                     onRunTerminal(commandSnippet)
@@ -115,16 +150,16 @@ struct AWSSSOLoginCardView: View {
                 Image(systemName: "key.fill")
                     .foregroundStyle(.orange)
                 Text("AWS SSO Authentication Required")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(.footnote, weight: .bold))
                     .foregroundStyle(.primary)
             }
             Text("Your AWS SSO token for profile '\(profileName)' has expired or is missing. Run SSO login to authenticate.")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack {
                 Text(loginCmd)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.primary)
                 Spacer()
                 CTXCopyIconButton(value: loginCmd)

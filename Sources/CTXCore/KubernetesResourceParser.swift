@@ -1,11 +1,44 @@
 import Foundation
 
-enum KubernetesResourceParser {
-    static func parse(kind: KubernetesResourceKind, stdout: String) -> KubernetesResourceList? {
+public enum KubernetesResourceParser {
+    public static func parse(kind: KubernetesResourceKind, stdout: String) -> KubernetesResourceList? {
         if kind == .secretMetadata {
             return parseSecretTable(stdout)
         }
         guard let items = jsonItems(stdout) else { return nil }
+        return parse(kind: kind, items: items)
+    }
+
+    public static func parseBatch(stdout: String, requestedKinds: [KubernetesResourceKind]) -> [KubernetesResourceKind: KubernetesResourceList]? {
+        guard let allItems = jsonItems(stdout) else { return nil }
+        var result: [KubernetesResourceKind: KubernetesResourceList] = [:]
+        for kind in requestedKinds {
+            guard kind != .secretMetadata else { continue }
+            let matching = allItems.filter { item in
+                let itemKind = string(item["kind"])
+                switch kind {
+                case .services: return itemKind == "Service"
+                case .workloads: return itemKind == "Deployment" || itemKind == "StatefulSet" || itemKind == "DaemonSet"
+                case .pods: return itemKind == "Pod"
+                case .ingress: return itemKind == "Ingress"
+                case .cronJobs: return itemKind == "CronJob"
+                case .configMaps: return itemKind == "ConfigMap"
+                case .events: return itemKind == "Event"
+                case .hpa: return itemKind == "HorizontalPodAutoscaler"
+                case .pvc: return itemKind == "PersistentVolumeClaim"
+                case .nodes: return itemKind == "Node"
+                case .namespaces: return itemKind == "Namespace"
+                case .secretMetadata: return false
+                }
+            }
+            if let parsed = parse(kind: kind, items: matching) {
+                result[kind] = parsed
+            }
+        }
+        return result
+    }
+
+    private static func parse(kind: KubernetesResourceKind, items: [[String: Any]]) -> KubernetesResourceList? {
         switch kind {
         case .namespaces: return list(kind, ["Name", "Status", "Age", "Labels"], items.map(namespaceRow))
         case .nodes: return list(kind, ["Name", "Ready", "Roles", "Version", "Age", "IP"], items.map(nodeRow))
@@ -107,7 +140,13 @@ enum KubernetesResourceParser {
             "Available": String(int(status["availableReplicas"], defaultValue: int(status["currentNumberScheduled"], defaultValue: 0))),
             "Age": age(metadata),
             "Image": image,
-            "Selector": selector
+            "Selector": selector,
+            "PVCs": claimNames(templateSpec),
+            "ConfigMaps": configMapNames(templateSpec),
+            "Secrets": secretNames(templateSpec),
+            "Security": securityFlags(templateSpec),
+            "Probes": probeFlags(templateSpec),
+            "HasLimits": hasResourceLimits(templateSpec) ? "true" : "false"
         ], warning: ready < desired)
     }
 
@@ -157,6 +196,12 @@ enum KubernetesResourceParser {
             // for volumes this pod actually mounts.
             "PVCs": claimNames(spec),
             "Labels": encodedLabels(dict(metadata["labels"])),
+            // Diagnostic metadata for misconfiguration / security / reliability
+            "ConfigMaps": configMapNames(spec),
+            "Secrets": secretNames(spec),
+            "Security": securityFlags(spec),
+            "Probes": probeFlags(spec),
+            "HasLimits": hasResourceLimits(spec) ? "true" : "false",
             // Not shown as columns — read by the telemetry panel.
             "Memory Limit": memoryLimit(spec),
             "CPU Request Cores": cpuRequestCores.map { String($0) } ?? "",
@@ -219,6 +264,98 @@ enum KubernetesResourceParser {
             let name = string(dict(volume["persistentVolumeClaim"])["claimName"])
             return name.isEmpty ? nil : name
         }.joined(separator: ",")
+    }
+
+    private static func configMapNames(_ spec: [String: Any]) -> String {
+        let volumes = spec["volumes"] as? [[String: Any]] ?? []
+        var names = Set<String>()
+        for v in volumes {
+            let cm = string(dict(v["configMap"])["name"])
+            if !cm.isEmpty { names.insert(cm) }
+        }
+        let containers = spec["containers"] as? [[String: Any]] ?? []
+        for c in containers {
+            let envFrom = c["envFrom"] as? [[String: Any]] ?? []
+            for ef in envFrom {
+                let cm = string(dict(ef["configMapRef"])["name"])
+                if !cm.isEmpty { names.insert(cm) }
+            }
+            let env = c["env"] as? [[String: Any]] ?? []
+            for e in env {
+                let cm = string(dict(dict(e["valueFrom"])["configMapKeyRef"])["name"])
+                if !cm.isEmpty { names.insert(cm) }
+            }
+        }
+        return names.sorted().joined(separator: ",")
+    }
+
+    private static func secretNames(_ spec: [String: Any]) -> String {
+        let volumes = spec["volumes"] as? [[String: Any]] ?? []
+        var names = Set<String>()
+        for v in volumes {
+            let sec = string(dict(v["secret"])["secretName"])
+            if !sec.isEmpty { names.insert(sec) }
+        }
+        let containers = spec["containers"] as? [[String: Any]] ?? []
+        for c in containers {
+            let envFrom = c["envFrom"] as? [[String: Any]] ?? []
+            for ef in envFrom {
+                let sec = string(dict(ef["secretRef"])["name"])
+                if !sec.isEmpty { names.insert(sec) }
+            }
+            let env = c["env"] as? [[String: Any]] ?? []
+            for e in env {
+                let sec = string(dict(dict(e["valueFrom"])["secretKeyRef"])["name"])
+                if !sec.isEmpty { names.insert(sec) }
+            }
+        }
+        return names.sorted().joined(separator: ",")
+    }
+
+    private static func securityFlags(_ spec: [String: Any]) -> String {
+        var flags = [String]()
+        let podSec = dict(spec["securityContext"])
+        if (spec["hostNetwork"] as? Bool) == true { flags.append("hostNetwork") }
+        if (spec["hostPID"] as? Bool) == true { flags.append("hostPID") }
+        let podNonRoot = podSec["runAsNonRoot"] as? Bool
+
+        let containers = spec["containers"] as? [[String: Any]] ?? []
+        for c in containers {
+            let sec = dict(c["securityContext"])
+            if (sec["privileged"] as? Bool) == true {
+                flags.append("privileged")
+            }
+            let cNonRoot = sec["runAsNonRoot"] as? Bool ?? podNonRoot
+            let runAsUser = int(sec["runAsUser"], defaultValue: int(podSec["runAsUser"], defaultValue: -1))
+            if runAsUser == 0 || cNonRoot == false {
+                flags.append("runAsRoot")
+            }
+        }
+        return Array(Set(flags)).sorted().joined(separator: ",")
+    }
+
+    private static func probeFlags(_ spec: [String: Any]) -> String {
+        let containers = spec["containers"] as? [[String: Any]] ?? []
+        guard !containers.isEmpty else { return "" }
+        var hasLiveness = true
+        var hasReadiness = true
+        for c in containers {
+            if dict(c["livenessProbe"]).isEmpty { hasLiveness = false }
+            if dict(c["readinessProbe"]).isEmpty { hasReadiness = false }
+        }
+        var res = [String]()
+        if hasLiveness { res.append("liveness") }
+        if hasReadiness { res.append("readiness") }
+        return res.joined(separator: ",")
+    }
+
+    private static func hasResourceLimits(_ spec: [String: Any]) -> Bool {
+        let containers = spec["containers"] as? [[String: Any]] ?? []
+        guard !containers.isEmpty else { return false }
+        return containers.allSatisfy { c in
+            let limits = dict(dict(c["resources"])["limits"])
+            return limits["memory"] != nil
+        }
     }
 
     private static func workloadLabel(_ metadata: [String: Any]) -> String {
@@ -289,14 +426,10 @@ enum KubernetesResourceParser {
 
     private static func configMapRow(_ item: [String: Any]) -> KubernetesResourceRow {
         let metadata = dict(item["metadata"])
-        let dataKeys = dict(item["data"]).keys.sorted().joined(separator: ", ")
-        return row(key(metadata), [
-            "Namespace": namespace(metadata),
-            "Name": string(metadata["name"]),
-            "Keys": String(dict(item["data"]).count),
-            "Data Keys": dataKeys.isEmpty ? "-" : dataKeys,
-            "Age": age(metadata)
-        ])
+        let data = dict(item["data"])
+        let binaryData = dict(item["binaryData"])
+        let keys = Array(data.keys) + Array(binaryData.keys)
+        return row(key(metadata), ["Namespace": namespace(metadata), "Name": string(metadata["name"]), "Keys": String(keys.count), "Age": age(metadata)])
     }
 
     private static func cronJobRow(_ item: [String: Any]) -> KubernetesResourceRow {

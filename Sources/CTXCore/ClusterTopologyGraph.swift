@@ -91,6 +91,7 @@ public struct TopologyGraphNode: Identifiable, Equatable, Sendable {
     public let subtitle: String
     public let health: TopologyNodeHealthState
     public let row: KubernetesResourceRow
+    public let issueCount: Int
 
     public init(
         id: String,
@@ -99,7 +100,8 @@ public struct TopologyGraphNode: Identifiable, Equatable, Sendable {
         namespace: String,
         subtitle: String,
         health: TopologyNodeHealthState,
-        row: KubernetesResourceRow
+        row: KubernetesResourceRow,
+        issueCount: Int = 0
     ) {
         self.id = id
         self.kind = kind
@@ -108,10 +110,11 @@ public struct TopologyGraphNode: Identifiable, Equatable, Sendable {
         self.subtitle = subtitle
         self.health = health
         self.row = row
+        self.issueCount = issueCount
     }
 
     public static func == (lhs: TopologyGraphNode, rhs: TopologyGraphNode) -> Bool {
-        lhs.id == rhs.id && lhs.health == rhs.health
+        lhs.id == rhs.id && lhs.health == rhs.health && lhs.issueCount == rhs.issueCount
     }
 
     public static func id(kind: TopologyGraphNodeKind, rowID: String) -> String {
@@ -198,7 +201,7 @@ public struct ClusterTopologyGraph: Sendable {
 
         self.nodes = uniqueNodes
         self.edges = uniqueEdges
-        self.nodesByID = Dictionary(uniqueKeysWithValues: uniqueNodes.map { ($0.id, $0) })
+        self.nodesByID = Dictionary(uniqueKeysWithValues: uniqueNodes.map { ($0.id, $0) } )
         self.outgoing = Dictionary(grouping: uniqueEdges, by: \.source)
         self.incoming = Dictionary(grouping: uniqueEdges, by: \.target)
     }

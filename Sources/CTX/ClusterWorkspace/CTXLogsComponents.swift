@@ -58,10 +58,10 @@ struct CTXPodPicker: View {
                     .fill(statusTint(for: selectedRow))
                     .frame(width: 7, height: 7)
                 Text(selectedRow.map(title) ?? "Select a pod")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(.caption, weight: .medium))
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(.caption2, weight: .bold))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10)
@@ -79,22 +79,24 @@ struct CTXPodPicker: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 TextField("Search pods...", text: $filterQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.caption2)
 
                 if !filterQuery.isEmpty {
                     Button {
                         filterQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 10))
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help("Clear search")
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 10)
@@ -113,6 +115,7 @@ struct CTXPodPicker: View {
                                 isPresented = false
                                 filterQuery = ""
                             }
+                            .accessibilityAddTraits(.isButton)
                     }
                 }
                 .padding(6)
@@ -129,7 +132,7 @@ struct CTXPodPicker: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title(row))
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                         .lineLimit(1)
                     if let workload = row.cells["Workload"], !workload.isEmpty {
                         Text(workload)
@@ -199,7 +202,7 @@ struct CTXLogsTailSelector: View {
             }
         } label: {
             Label("Last \(selection)", systemImage: "line.3.horizontal.decrease.circle")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(.caption2, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
                 .lineLimit(1)
                 .padding(.horizontal, 10)

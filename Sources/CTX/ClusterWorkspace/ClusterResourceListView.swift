@@ -290,12 +290,12 @@ struct ResourceSummaryPanel: View {
         CTXGlassPanel(padding: 14) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -345,12 +345,12 @@ private struct EventSummaryPanel: View {
         CTXGlassPanel(padding: 14) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: warningCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.callout, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
