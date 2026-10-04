@@ -38,7 +38,7 @@ if [[ "$MODE" == "release" || "$MODE" == "preview" ]]; then
   swift run CTXCoreTests
 fi
 
-swift build -c "$BUILD_CONFIG"
+swift build -c "$BUILD_CONFIG" --product "$APP_NAME"
 BUILD_DIR="$(swift build -c "$BUILD_CONFIG" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$APP_NAME"
 
