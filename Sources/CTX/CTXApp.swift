@@ -152,10 +152,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
         } else if userInfo["type"] as? String == "cluster_anomaly" {
-            if let contextID = userInfo["context_id"] as? String, !contextID.isEmpty {
-                DispatchQueue.main.async {
+            let contextID = userInfo["context_id"] as? String ?? ""
+            let resourceKind = userInfo["resource_kind"] as? String ?? ""
+            let resourceName = userInfo["resource_name"] as? String ?? ""
+            let namespace = userInfo["namespace"] as? String
+
+            let target = ResourceDeepLinkTarget(
+                contextID: contextID,
+                resourceKind: resourceKind,
+                resourceName: resourceName,
+                namespace: namespace,
+                tab: "diagnostics"
+            )
+
+            DispatchQueue.main.async {
+                if let store = self.store, !contextID.isEmpty {
+                    store.pendingClusterDeepLink[contextID] = target
+                }
+                if !contextID.isEmpty {
                     self.openWindow?(id: "cluster-workspace", value: contextID)
-                    NSApp.activate(ignoringOtherApps: true)
+                }
+                NSApp.activate(ignoringOtherApps: true)
+
+                NotificationCenter.default.post(
+                    name: .ctxDeepLinkToResource,
+                    object: nil,
+                    userInfo: userInfo
+                )
+            }
+        } else if userInfo["type"] as? String == "cloud_session" {
+            let profileId = userInfo["profile_id"] as? String ?? ""
+            let profileName = userInfo["profile_name"] as? String ?? ""
+            DispatchQueue.main.async {
+                self.openWindow?(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                if let store = self.store {
+                    let targetProfile = store.profiles.first(where: { $0.id == profileId })
+                        ?? store.profiles.first(where: { $0.name == profileName })
+                    if let targetProfile {
+                        store.selectProfile(targetProfile)
+                        store.pendingProfileDeepLinkID = targetProfile.id
+                        store.login(targetProfile, from: .mainWindow)
+                    }
                 }
             }
         }

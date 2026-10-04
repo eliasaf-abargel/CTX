@@ -67,22 +67,46 @@ struct ClusterQuickSearchModal: View {
                                 .foregroundStyle(.secondary)
 
                             HStack(spacing: 8) {
-                                Button("🛑 CrashLoopBackOff") { query = "crash" }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                Button {
+                                    query = "crash"
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "exclamationmark.octagon.fill")
+                                            .foregroundStyle(.red)
+                                        Text("CrashLoopBackOff")
+                                    }
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
                                     .background(Color.red.opacity(0.12), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
 
-                                Button("⚠️ Warning Events") { query = "warning" }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                Button {
+                                    query = "warning"
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundStyle(.orange)
+                                        Text("Warning Events")
+                                    }
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
                                     .background(Color.orange.opacity(0.12), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
 
-                                Button("⚡ High CPU") { query = "cpu" }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                Button {
+                                    query = "cpu"
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "bolt.fill")
+                                            .foregroundStyle(.cyan)
+                                        Text("High CPU")
+                                    }
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
                                     .background(Color.cyan.opacity(0.12), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .font(.caption.weight(.medium))
+                            .font(.system(size: 11.5, weight: .medium))
                         }
                         .padding(.top, 4)
                     }

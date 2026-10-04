@@ -139,7 +139,7 @@ struct CTXLogsViewer: View {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             }
-            .frame(minHeight: 450, maxHeight: .infinity, alignment: .top)
+            .frame(minHeight: 180, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 

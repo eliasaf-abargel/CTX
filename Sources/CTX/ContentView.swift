@@ -56,19 +56,37 @@ struct DetailPane: View {
             if store.showExpirationWarning || store.updateAvailable {
                 VStack(spacing: 8) {
                     if store.showExpirationWarning {
-                        HStack(spacing: 8) {
-                            Image(systemName: "timer")
-                                .font(.system(.footnote, weight: .bold))
-                                .foregroundStyle(.white)
-                            Text(store.expirationWarningMessage)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                            Spacer()
+                        Button {
+                            if let id = store.expirationWarningProfileID,
+                               let profile = store.profiles.first(where: { $0.id == id }) {
+                                store.selectProfile(profile)
+                                store.login(profile, from: .mainWindow)
+                            } else if let profile = store.selectedProfile {
+                                store.login(profile, from: .mainWindow)
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "timer")
+                                    .font(.system(.footnote, weight: .bold))
+                                    .foregroundStyle(.white)
+                                Text(store.expirationWarningMessage)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                HStack(spacing: 4) {
+                                    Text("Re-authenticate")
+                                        .font(.system(size: 11.5, weight: .bold))
+                                    Image(systemName: "arrow.right.circle.fill")
+                                        .font(.system(size: 12))
+                                }
+                                .foregroundStyle(.white.opacity(0.95))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.orange, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.orange, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .buttonStyle(.plain)
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
 

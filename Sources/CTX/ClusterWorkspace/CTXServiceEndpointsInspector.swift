@@ -1,7 +1,6 @@
 import CTXCore
 import SwiftUI
 
-
 public struct CTXServiceEndpointsInspector: View {
     let targets: [EndpointTarget]
 
@@ -10,37 +9,70 @@ public struct CTXServiceEndpointsInspector: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("SERVICE TARGET ENDPOINTS (\(targets.count))")
-                    .font(.system(.caption2, weight: .bold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                    Text("SERVICE TARGET ENDPOINTS (\(targets.count))")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
-                let healthyCount = targets.filter(\.isHealthy).count
-                Text("\(healthyCount)/\(targets.count) Healthy")
-                    .font(.system(.caption2, weight: .bold))
+
+                if !targets.isEmpty {
+                    let healthyCount = targets.filter(\.isHealthy).count
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(healthyCount == targets.count ? Color.green : Color.orange)
+                            .frame(width: 6, height: 6)
+                        Text("\(healthyCount)/\(targets.count) Healthy")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
                     .foregroundStyle(healthyCount == targets.count ? Color.green : Color.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background((healthyCount == targets.count ? Color.green : Color.orange).opacity(0.12), in: Capsule())
+                }
             }
 
             if targets.isEmpty {
-                Text("This Service has no ready backends. Nothing will answer traffic sent to it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Image(systemName: "network.badge.shield.half.filled")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No active backend endpoints")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.primary)
+
+                        Text("Ensure backend pods match the service selector and pass readiness probes, or verify if this is an external/headless service.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                VStack(spacing: 4) {
+                VStack(spacing: 6) {
                     ForEach(targets) { target in
-                        HStack(spacing: 8) {
+                        HStack(spacing: 10) {
                             Circle()
                                 .fill(target.isHealthy ? Color.green : Color.red)
-                                .frame(width: 6, height: 6)
+                                .frame(width: 7, height: 7)
 
                             Text(target.name)
-                                .font(.system(.caption2, weight: .semibold))
+                                .font(.system(size: 12.5, weight: .semibold))
                                 .lineLimit(1)
 
                             if !target.address.isEmpty {
                                 Text(target.address)
-                                    .font(.system(.caption2, design: .monospaced))
+                                    .font(.system(size: 12, design: .monospaced))
                                     .foregroundStyle(.secondary)
                             }
 
@@ -48,17 +80,20 @@ public struct CTXServiceEndpointsInspector: View {
 
                             if !target.isHealthy {
                                 Text("not ready")
-                                    .font(.system(.caption2, weight: .bold))
+                                    .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(.orange)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.orange.opacity(0.12), in: Capsule())
                             }
 
                             Text("→ :\(target.targetPort)")
-                                .font(.system(.caption2, design: .monospaced, weight: .bold))
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.accentColor)
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
             }

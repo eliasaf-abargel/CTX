@@ -18,7 +18,7 @@ extension ProfileDetailView {
                 profile: currentProfile,
                 errorMessage: errorMessage,
                 onConnect: {
-                    store.login(profile, from: .mainWindow)
+                    store.login(currentProfile, from: .mainWindow)
                 },
                 onRunTerminal: { command in
                     triggerTerminalCommand(command)

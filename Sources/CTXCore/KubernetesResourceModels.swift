@@ -86,9 +86,9 @@ public enum KubernetesResourceKind: String, CaseIterable, Codable, Sendable {
 
     public var supportsInspectionYAML: Bool {
         switch self {
-        case .namespaces, .nodes, .pods, .cronJobs, .services, .ingress, .events, .hpa, .pvc:
+        case .namespaces, .nodes, .pods, .cronJobs, .services, .ingress, .events, .hpa, .pvc, .workloads, .configMaps:
             true
-        case .workloads, .configMaps, .secretMetadata:
+        case .secretMetadata:
             false
         }
     }
@@ -244,54 +244,55 @@ public struct KubernetesResourceRow: Identifiable, Codable, Equatable, Sendable 
     }
 
     /// Whether this row matches a search term.
-    ///
-    /// Scans the fields directly and stops at the first hit. The previous version
-    /// materialised the row before searching it: one interpolated string per cell,
-    /// an array around them, and a `joined` copy of the whole thing — about a dozen
-    /// allocations per row — then ran a locale-aware search over the result. Every
-    /// keystroke in the search field re-did that for every row, which measured at
-    /// roughly 9 ms over 3,000 pods.
-    ///
-    /// Prefer `filtered(_:matching:)` for a whole list: it trims the needle once
-    /// instead of once per row.
     public func matchesFilter(_ filter: String) -> Bool {
-        let needle = Self.preparedNeedle(from: filter)
-        guard !needle.isEmpty else { return true }
-        return matches(preparedNeedle: needle)
+        let trimmed = filter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return true }
+        return searchHaystack.contains(trimmed)
     }
 
     /// Substring search over the raw UTF-8 bytes.
-    ///
-    /// `String.contains(_:)` on two `String`s bridges into Foundation's
-    /// `range(of:)`, which dominated the measurement even against a pre-built
-    /// lowercased haystack. Both sides are already lowercased here, so comparing
-    /// bytes directly is equivalent and allocates nothing.
     func matches(preparedNeedle needle: ContiguousArray<UInt8>) -> Bool {
         guard !needle.isEmpty else { return true }
-        let haystack = searchHaystack.utf8
-        guard haystack.count >= needle.count else { return false }
-
-        var start = haystack.startIndex
-        let last = haystack.index(haystack.startIndex, offsetBy: haystack.count - needle.count)
-        while true {
-            var cursor = start
-            var matched = 0
-            while matched < needle.count, haystack[cursor] == needle[matched] {
-                cursor = haystack.index(after: cursor)
-                matched += 1
-            }
-            if matched == needle.count { return true }
-            if start == last { return false }
-            start = haystack.index(after: start)
-        }
+        guard let s = String(bytes: needle, encoding: .utf8) else { return false }
+        return searchHaystack.contains(s)
     }
 
-    /// Filters a list against one search term, preparing the needle once rather
-    /// than once per row.
+    /// Filters a list against search terms. Supports multi-token searches (space separated)
+    /// where all positive terms must match the row, and terms prefixed with `-` act as
+    /// exclusion filters.
     public static func filtered(_ rows: [KubernetesResourceRow], matching filter: String) -> [KubernetesResourceRow] {
-        let needle = preparedNeedle(from: filter)
-        guard !needle.isEmpty else { return rows }
-        return rows.filter { $0.matches(preparedNeedle: needle) }
+        let trimmed = filter.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return rows }
+
+        let rawTokens = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !rawTokens.isEmpty else { return rows }
+
+        var positiveTokens: [String] = []
+        var negativeTokens: [String] = []
+
+        for token in rawTokens {
+            let lower = token.lowercased()
+            if lower.hasPrefix("-") && lower.count > 1 {
+                negativeTokens.append(String(lower.dropFirst()))
+            } else {
+                positiveTokens.append(lower)
+            }
+        }
+
+        return rows.filter { row in
+            let haystack = row.searchHaystack
+            for neg in negativeTokens {
+                if haystack.contains(neg) {
+                    return false
+                }
+            }
+            for pos in positiveTokens {
+                if !haystack.contains(pos) {
+                    return false
+                }
+            }
+            return true
+        }
     }
 
     static func preparedNeedle(from filter: String) -> ContiguousArray<UInt8> {
@@ -395,10 +396,6 @@ public struct KubernetesResourceDetail: Equatable, Sendable {
         switch kind {
         case .secretMetadata:
             "Metadata only. Secret values are never requested or displayed."
-        case .configMaps:
-            "Metadata only. ConfigMap values are not shown in this view."
-        case .workloads:
-            "YAML is disabled here until workload templates are safely redacted."
         default:
             nil
         }

@@ -42,6 +42,16 @@ final class ClusterWorkspaceViewModel: ObservableObject {
                 }
             }
         }
+        if let gitOpsList {
+            for row in gitOpsList.rows {
+                if let ns = row.cells["Namespace"], !ns.isEmpty, ns != "-" {
+                    set.insert(ns)
+                }
+                if let dest = row.cells["Destination"], !dest.isEmpty, dest != "-" {
+                    set.insert(dest)
+                }
+            }
+        }
         set.insert("default")
         let sorted = Array(set).sorted()
         if availableNamespaces != sorted {
@@ -60,6 +70,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var isLoadingYAML = false
     @Published var isEditingYAML = false
     @Published var editedYAML = ""
+    @Published var isDryRunningYAML = false
     @Published var isApplyingYAML = false
     @Published var applyResult: KubernetesApplyResult?
     @Published var previousBaselineYAML: String?
@@ -68,6 +79,16 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     /// edit after a dry-run must be re-validated before it can go live.
     @Published var dryRunValidatedYAML: String?
     let yamlApplier: any KubernetesYAMLApplying
+    @Published var isPerformingLifecycleAction = false
+    @Published var lifecycleActionResult: KubernetesLifecycleActionResult?
+    /// The desired replica count a Deployment/StatefulSet had right before
+    /// "Stop" scaled it to zero, keyed by the row's id — what "Start" scales
+    /// back to. Lost on dismiss/selection change by design: it describes one
+    /// specific stop, not a durable setting to restore across sessions.
+    @Published var stoppedReplicaCounts: [String: Int] = [:]
+    @Published var lifecyclePreflight: WorkloadLifecyclePreflight?
+    let lifecycleService: any KubernetesWorkloadLifecycleManaging
+    var rolloutWatchTask: Task<Void, Never>?
     @Published var diffResults: [String: ResourceDiffResult] = [:]
     @Published var diffingKinds: Set<KubernetesResourceKind> = []
     @Published var selectedLogPodID: String?
@@ -103,7 +124,9 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     @Published var topologySelectorText = ""
     @Published var showIssuesOnly = false
     @Published var gitOpsResult: GitOpsReadResult?
-    @Published var gitOpsList: KubernetesResourceList?
+    @Published var gitOpsList: KubernetesResourceList? {
+        didSet { updateAvailableNamespaces() }
+    }
     @Published var isLoadingGitOps = false
     @Published var helmResult: HelmReadResult?
     @Published var helmList: KubernetesResourceList?
@@ -174,12 +197,14 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         gitOpsReader: any KubernetesGitOpsReading = KubernetesGitOpsReader(),
         helmReader: any KubernetesHelmReading = KubernetesHelmReader(),
         specReader: any KubernetesWorkloadSpecReading = KubernetesWorkloadSpecReader(),
-        metricsReader: any KubernetesMetricsReading = KubernetesMetricsReader()
+        metricsReader: any KubernetesMetricsReading = KubernetesMetricsReader(),
+        lifecycleService: any KubernetesWorkloadLifecycleManaging = KubernetesWorkloadLifecycleService()
     ) {
         self.gitOpsReader = gitOpsReader
         self.helmReader = helmReader
         self.specReader = specReader
         self.metricsReader = metricsReader
+        self.lifecycleService = lifecycleService
         self.context = context
         self.healthService = healthService
         self.resourceReader = resourceReader
@@ -217,6 +242,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         yamlTask?.cancel()
         diffTasks.values.forEach { $0.cancel() }
         logsTask?.cancel()
+        rolloutWatchTask?.cancel()
         Task { [portForwardService] in
             await portForwardService.stopAll()
         }
@@ -326,6 +352,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         yamlTask?.cancel()
         diffTasks.values.forEach { $0.cancel() }
         logsTask?.cancel()
+        rolloutWatchTask?.cancel()
         isRefreshingOverview = false
         loadingResourceKinds.removeAll()
         isLoadingYAML = false
@@ -419,7 +446,31 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     /// actually says — nothing on these screens is synthesised from other rows.
     func resourceList(for section: ClusterWorkspaceSection) -> KubernetesResourceList? {
         switch section {
-        case .gitops: return gitOpsList
+        case .gitops:
+            guard let list = gitOpsList else { return nil }
+            guard selectedNamespace != .allNamespaces else { return list }
+            let targetNS = selectedNamespace.displayName.lowercased()
+            let filteredRows = list.rows.filter { row in
+                let ns = (row.cells["Namespace"] ?? "").lowercased()
+                let dest = (row.cells["Destination"] ?? "").lowercased()
+                let ctrl = (row.cells["Controller NS"] ?? "").lowercased()
+                let name = row.name.lowercased()
+                if ns == targetNS || dest == targetNS || ctrl == targetNS || name == targetNS {
+                    return true
+                }
+                if targetNS.count >= 4 && (name.contains(targetNS) || targetNS.contains(name)) {
+                    return true
+                }
+                return false
+            }
+            return KubernetesResourceList(
+                kind: list.kind,
+                columns: list.columns,
+                rows: filteredRows,
+                status: list.status,
+                diagnostic: list.diagnostic,
+                loadedAt: list.loadedAt
+            )
         case .helm: return helmList
         case .pods:
             guard var list = resourceLists[resourceKey(kind: .pods)] else { return nil }
@@ -509,6 +560,11 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         // edited — carrying it over to a newly selected row would let
         // "Rollback" apply that other resource's manifest here instead.
         previousBaselineYAML = nil
+        // Same reasoning for a lifecycle result banner: "Restart triggered"
+        // must not still be showing once a different row is selected.
+        lifecycleActionResult = nil
+        lifecyclePreflight = nil
+        rolloutWatchTask?.cancel()
         presentation = ClusterWorkspacePresentation(
             selection: ClusterWorkspaceResourceSelection(section: section, kind: kind, row: row),
             tab: .overview
@@ -540,9 +596,14 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         isLoadingYAML = false
         isEditingYAML = false
         applyResult = nil
+        isDryRunningYAML = false
         isApplyingYAML = false
         dryRunValidatedYAML = nil
         previousBaselineYAML = nil
+        lifecycleActionResult = nil
+        lifecyclePreflight = nil
+        isPerformingLifecycleAction = false
+        rolloutWatchTask?.cancel()
         // The inspector's Logs tab shares this task with the standalone Logs
         // screen; closing the inspector must not leave a fetch running for a pod
         // that's no longer on screen anywhere.
@@ -556,6 +617,48 @@ final class ClusterWorkspaceViewModel: ObservableObject {
     func openInspector(for row: KubernetesResourceRow, in section: ClusterWorkspaceSection, tab: CTXInspectorTab = .overview) {
         selectResource(row, in: section)
         selectInspectorTab(tab)
+    }
+
+    /// Deep-links directly to a specific resource, switching namespace if necessary,
+    /// selecting the appropriate sidebar section, loading data, and opening the inspector on the given tab.
+    @MainActor
+    public func navigateToResource(
+        kind: KubernetesResourceKind,
+        name: String,
+        namespace: String?,
+        tab: CTXInspectorTab = .diagnostics
+    ) async {
+        if let namespace, !namespace.isEmpty, namespace != "-" {
+            if namespace == "default" {
+                selectedNamespace = .defaultNamespace
+            } else {
+                selectedNamespace = .namespace(namespace)
+            }
+        }
+
+        if let section = ClusterWorkspaceSection.section(for: kind) {
+            selectedSection = section
+        }
+
+        loadResource(kind: kind, bypassCache: false)
+
+        let key = resourceKey(kind: kind, namespace: scope(for: kind))
+        var row = resourceLists[key]?.rows.first(where: { $0.name == name })
+
+        if row == nil {
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                if let found = resourceLists[key]?.rows.first(where: { $0.name == name }) {
+                    row = found
+                    break
+                }
+            }
+        }
+
+        if let targetRow = row, let section = ClusterWorkspaceSection.section(for: kind) {
+            selectResource(targetRow, in: section)
+            selectInspectorTab(tab)
+        }
     }
 
     func toggleQuickLook(for row: KubernetesResourceRow? = nil, in section: ClusterWorkspaceSection? = nil) {
@@ -577,7 +680,7 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         guard let selection = presentation?.selection else { return }
         presentation?.tab = tab
         switch tab {
-        case .overview, .diagnostics:
+        case .overview, .spec, .diagnostics:
             break
         case .yaml:
             if yamlResult == nil { loadYAML(for: selection) }
@@ -825,6 +928,9 @@ final class ClusterWorkspaceViewModel: ObservableObject {
         helmLoadedAt = nil
         isLoadingHelm = false
         if selectedSection == .helm { loadHelm() }
+        if selectedSection == .gitops {
+            selectedResources.removeValue(forKey: ClusterWorkspaceSection.gitops.rawValue)
+        }
 
         // Cached data for the new namespace (if any) is already what `resourceList(for:)`
         // returns, since cache keys are namespace-scoped — no separate "render cached

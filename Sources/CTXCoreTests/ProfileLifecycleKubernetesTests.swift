@@ -410,3 +410,14 @@ func testBrokerPollingStopsWhenLifecycleOperationIsCancelled() async throws {
     )
     assert(store.profiles.first?.status == .needsLogin)
 }
+
+@MainActor
+func runProfileLifecycleKubernetesTests() async throws {
+    try await testKubeActivationIgnoresStaleDiscoveryAndConfirmsSuccess()
+    try await testKubeActivationFailureAndSupersessionClearPendingState()
+    try await testDisconnectCancelsOwnedPendingKubeActivation()
+    try await testMissingKubeProfileCancelsAndRevertsOwnedActivation()
+    try await testLocalKubeDisconnectSurvivesRefreshAndVerification()
+    try await testMultiFileActivationConfirmsAgainstTargetedKubeconfig()
+    try await testBrokerPollingStopsWhenLifecycleOperationIsCancelled()
+}

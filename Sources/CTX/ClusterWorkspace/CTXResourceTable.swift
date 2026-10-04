@@ -159,7 +159,7 @@ struct CTXResourceTable: View {
                                     displayLimit = rows.count
                                 } label: {
                                     Text("Show all \(rows.count) items")
-                                        .font(.system(.caption2, weight: .semibold))
+                                        .font(.system(size: 12.5, weight: .semibold))
                                         .foregroundStyle(Color.accentColor)
                                 }
                                 .buttonStyle(.plain)
@@ -196,10 +196,10 @@ struct CTXResourceTable: View {
             displayLimit = Self.initialWindow
             resolvedColumns = Self.resolve(allColumns, availableWidth: availableWidth, isCompact: isCompact)
         }
-        .onChange(of: rows.count) { _, newCount in
+        .onChange(of: rows) { _, newRows in
             // A filter that narrows the list must not leave the window wider than
             // the list itself, and a fresh fetch starts from the top again.
-            displayLimit = min(max(displayLimit, Self.initialWindow), max(newCount, Self.initialWindow))
+            displayLimit = min(max(displayLimit, Self.initialWindow), max(newRows.count, Self.initialWindow))
         }
         .onChange(of: showsNamespaceColumn) { _, _ in
             resolvedColumns = Self.resolve(allColumns, availableWidth: availableWidth, isCompact: isCompact)
@@ -213,7 +213,7 @@ struct CTXResourceTable: View {
         HStack(spacing: columnSpacing) {
             ForEach(resolved) { resolvedColumn in
                 Text(resolvedColumn.column.title)
-                    .font(.system(.caption2, weight: .semibold))
+                    .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(width: resolvedColumn.width, alignment: resolvedColumn.column.alignment == .trailing ? .trailing : .leading)
@@ -357,7 +357,7 @@ private struct ResourceRowView: View, Equatable {
                 TechBrandIconView(name: value)
             } else {
                 Text(value)
-                    .font(.system(.caption, design: column.monospaced ? .monospaced : .default))
+                    .font(.system(size: 12.5, design: column.monospaced ? .monospaced : .default))
                     .foregroundStyle(row.warning && column.key == "Status" ? .orange : .primary)
                     .lineLimit(column.key == "Message" ? 2 : 1)
                     .truncationMode(.middle)
@@ -371,6 +371,20 @@ private struct ResourceRowView: View, Equatable {
             // Built only while the row is hovered. Keeping it always-present at
             // zero opacity meant a stateful Button, with its own hover tracking,
             // existed for every copyable cell of every visible row.
+            if (column.key == "Repo URL" || column.key == "Repository") && value != "-" && isHovered {
+                if let url = GitRepositoryURLHelper.webURL(from: value, revision: row.cells["Target"]) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open repository in browser (\(url.absoluteString))")
+                }
+            }
+
             if column.copyable && value != "-" && isHovered {
                 CTXCopyIconButton(value: value)
             }
@@ -386,7 +400,7 @@ private struct ResourceRowView: View, Equatable {
         return HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
             Text(text)
-                .font(.system(.caption2, weight: .bold))
+                .font(.system(size: 11.5, weight: .bold))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .truncationMode(.tail)

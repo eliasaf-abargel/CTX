@@ -87,3 +87,10 @@ func testSelectionIsOnlyEverWrittenWhereItIsToldTo() {
     assert(try! String(contentsOf: destination, encoding: .utf8).isEmpty)
 }
 
+
+func runShellIntegrationTests() {
+    testInstallingTheSnippetTwiceLeavesOneCopy()
+    testUninstallingLeavesTheRestOfTheFileIntact()
+    testSelectionFileRefusesValuesThatCouldForgeAnAssignment()
+    testSelectionIsOnlyEverWrittenWhereItIsToldTo()
+}

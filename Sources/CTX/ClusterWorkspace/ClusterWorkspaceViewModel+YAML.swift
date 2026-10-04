@@ -40,8 +40,8 @@ extension ClusterWorkspaceViewModel {
     }
 
     func dryRunEditedYAML(for selection: ClusterWorkspaceResourceSelection) {
-        guard !isApplyingYAML else { return }
-        isApplyingYAML = true
+        guard !isDryRunningYAML, !isApplyingYAML else { return }
+        isDryRunningYAML = true
         applyResult = nil
         let snapshot = editedYAML
 
@@ -53,7 +53,7 @@ extension ClusterWorkspaceViewModel {
                 namespace: selection.row.namespace
             )
             await MainActor.run {
-                self.isApplyingYAML = false
+                self.isDryRunningYAML = false
                 self.applyResult = result
                 self.dryRunValidatedYAML = result.success ? snapshot : nil
                 try? self.auditLog.record(AuditEvent(
@@ -69,7 +69,7 @@ extension ClusterWorkspaceViewModel {
     /// edit has succeeded (`dryRunValidatedYAML == editedYAML`); this guard is
     /// defense-in-depth against calling it any other way.
     func applyEditedYAML(for selection: ClusterWorkspaceResourceSelection) {
-        guard !isApplyingYAML, dryRunValidatedYAML == editedYAML else { return }
+        guard !isApplyingYAML, !isDryRunningYAML, dryRunValidatedYAML == editedYAML else { return }
         isApplyingYAML = true
 
         Task { [weak self] in

@@ -153,3 +153,10 @@ func testManualDisconnectSurvivesProfileRename() async throws {
     assert(!verified, "profile rename discarded the persisted CTX disconnect")
     assert(restartedStore.profiles.first?.status == .needsLogin)
 }
+
+@MainActor
+func runProfileLifecycleAuthorityTests() async throws {
+    try await testVerificationDoesNotSelectProfileWithoutCTXIntent()
+    try await testManualDisconnectRemainsAuthoritativeAfterRestart()
+    try await testManualDisconnectSurvivesProfileRename()
+}

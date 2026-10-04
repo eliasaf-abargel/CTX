@@ -2,7 +2,14 @@ import Foundation
 
 public protocol KubernetesWorkloadSpecReading: Sendable {
     func podSpec(context: KubernetesContextProfile, namespace: String, name: String) async -> PodSpecInsight
+    func workloadSpec(context: KubernetesContextProfile, resourceKind: String, namespace: String, name: String) async -> PodSpecInsight
     func serviceEndpoints(context: KubernetesContextProfile, namespace: String, name: String) async -> ServiceEndpointsInsight
+}
+
+extension KubernetesWorkloadSpecReading {
+    public func workloadSpec(context: KubernetesContextProfile, resourceKind: String, namespace: String, name: String) async -> PodSpecInsight {
+        await podSpec(context: context, namespace: namespace, name: name)
+    }
 }
 
 /// Fetches the one object the inspector is showing, on demand.
@@ -26,6 +33,22 @@ public final class KubernetesWorkloadSpecReader: KubernetesWorkloadSpecReading {
 
     public func podSpec(context: KubernetesContextProfile, namespace: String, name: String) async -> PodSpecInsight {
         let outcome = await read(kind: "pod", context: context, namespace: namespace, name: name)
+        switch outcome {
+        case .failure(let diagnostic):
+            return PodSpecInsight(
+                status: KubernetesDiagnosticClassifier.status(from: diagnostic.category),
+                diagnostic: diagnostic
+            )
+        case .success(let stdout):
+            guard let insight = KubernetesWorkloadSpecParser.podSpec(fromPodJSON: stdout) else {
+                return PodSpecInsight(status: .unknownError, diagnostic: nil)
+            }
+            return insight
+        }
+    }
+
+    public func workloadSpec(context: KubernetesContextProfile, resourceKind: String, namespace: String, name: String) async -> PodSpecInsight {
+        let outcome = await read(kind: resourceKind, context: context, namespace: namespace, name: name)
         switch outcome {
         case .failure(let diagnostic):
             return PodSpecInsight(

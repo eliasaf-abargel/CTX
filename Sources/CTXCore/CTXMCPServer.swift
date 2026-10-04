@@ -8,19 +8,22 @@ public final class CTXMCPServer: @unchecked Sendable {
     private let validator: KubernetesConfigurationValidator
     private let applier: KubernetesYAMLApplier
     private let auditLog: any AuditLogging
+    private let logsReader: KubernetesLogsReading
 
     public init(
         discoveryService: KubeConfigDiscoveryService = KubeConfigDiscoveryService(),
         reader: KubernetesResourceReader = KubernetesResourceReader(),
         validator: KubernetesConfigurationValidator = KubernetesConfigurationValidator(),
         applier: KubernetesYAMLApplier = KubernetesYAMLApplier(),
-        auditLog: any AuditLogging = LocalAuditLogService()
+        auditLog: any AuditLogging = LocalAuditLogService(),
+        logsReader: KubernetesLogsReading = KubernetesLogsReader()
     ) {
         self.discoveryService = discoveryService
         self.reader = reader
         self.validator = validator
         self.applier = applier
         self.auditLog = auditLog
+        self.logsReader = logsReader
     }
 
     public static func runStdio() {
@@ -94,6 +97,36 @@ public final class CTXMCPServer: @unchecked Sendable {
                                 ]
                             ],
                             "required": ["kind"]
+                        ]
+                    ],
+                    [
+                        "name": "ctx_get_logs",
+                        "description": "Retrieves recent live logs for a pod or specific container for real-time troubleshooting.",
+                        "inputSchema": [
+                            "type": "object",
+                            "properties": [
+                                "pod": [
+                                    "type": "string",
+                                    "description": "Name of the pod."
+                                ],
+                                "container": [
+                                    "type": "string",
+                                    "description": "Optional container name within the pod."
+                                ],
+                                "namespace": [
+                                    "type": "string",
+                                    "description": "Optional namespace (defaults to the context default namespace)."
+                                ],
+                                "context": [
+                                    "type": "string",
+                                    "description": "Optional cluster context name."
+                                ],
+                                "tailLines": [
+                                    "type": "integer",
+                                    "description": "Number of log lines to retrieve (default 100, max 2000)."
+                                ]
+                            ],
+                            "required": ["pod"]
                         ]
                     ],
                     [
@@ -217,6 +250,37 @@ public final class CTXMCPServer: @unchecked Sendable {
                     ] as [String: Any]
                 }
                 self.sendToolResult(id: id, content: self.jsonString(rowData))
+
+            case "ctx_get_logs":
+                guard let pod = arguments["pod"] as? String else {
+                    self.sendToolError(id: id, message: "Missing required pod argument")
+                    return
+                }
+
+                guard let context = self.resolveContext(named: arguments["context"] as? String) else {
+                    self.sendToolError(id: id, message: "No active or specified Kubernetes context found")
+                    return
+                }
+
+                let ns = (arguments["namespace"] as? String) ?? (context.namespace.isEmpty ? "default" : context.namespace)
+                let container = arguments["container"] as? String
+                let tail = min(arguments["tailLines"] as? Int ?? 100, 2000)
+
+                let logResult = await self.logsReader.logs(
+                    namespace: ns,
+                    pod: pod,
+                    container: container,
+                    tailLines: tail,
+                    context: context
+                )
+
+                if let logText = logResult.text {
+                    self.sendToolResult(id: id, content: logText)
+                } else if let diag = logResult.diagnostic {
+                    self.sendToolError(id: id, message: diag.stderrSummary)
+                } else {
+                    self.sendToolError(id: id, message: "Failed to read logs for pod \(pod)")
+                }
 
             case "ctx_validate_diagnostics":
                 guard let context = self.resolveContext(named: arguments["context"] as? String) else {

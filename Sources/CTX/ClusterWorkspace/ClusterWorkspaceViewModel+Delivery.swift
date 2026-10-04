@@ -62,10 +62,16 @@ extension ClusterWorkspaceViewModel {
             if item.additionalSourceCount > 0 {
                 source += " +\(item.additionalSourceCount)"
             }
+            let displayNamespace = (!item.destinationNamespace.isEmpty && item.destinationNamespace != KubernetesGitOpsService.unknownValue)
+                ? item.destinationNamespace
+                : item.namespace
+
             return KubernetesResourceRow(
                 id: item.id,
                 cells: [
-                    "Namespace": item.namespace,
+                    "Namespace": displayNamespace,
+                    "Destination": item.destinationNamespace,
+                    "Controller NS": item.namespace,
                     "Name": item.name,
                     "Provider": item.provider,
                     "Source": source,
@@ -108,12 +114,33 @@ extension ClusterWorkspaceViewModel {
         return "This list may be incomplete — \(diagnostic.commandKind) could not be read: \(diagnostic.stderrSummary)"
     }
 
+    func matchingGitOpsApplication(for appName: String?) -> GitOpsApplicationItem? {
+        guard let raw = appName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        guard let items = gitOpsResult?.items else { return nil }
+        let clean = raw
+            .replacingOccurrences(of: "^(argocd|flux)_", with: "", options: .regularExpression)
+            .lowercased()
+
+        return items.first { item in
+            let itemLower = item.name.lowercased()
+            let destLower = item.destinationNamespace.lowercased()
+            return itemLower == raw.lowercased()
+                || itemLower == clean
+                || itemLower.contains(clean)
+                || clean.contains(itemLower)
+                || (!destLower.isEmpty && (destLower == clean || clean.contains(destLower)))
+        }
+    }
+
     var gitOpsEmptyMessage: String {
         guard let result = gitOpsResult else { return "Loading GitOps applications." }
         if result.installedControllers.isEmpty {
             return "Neither ArgoCD nor Flux CD is installed on this cluster. CTX looks for ArgoCD Applications and Flux Kustomizations and HelmReleases."
         }
         let controllers = result.installedControllers.joined(separator: " and ")
+        if selectedNamespace != .allNamespaces {
+            return "\(controllers) is installed, but reports no applications targeting '\(selectedNamespace.displayName)'."
+        }
         return "\(controllers) is installed, but reports no applications anywhere on this cluster."
     }
 
@@ -154,14 +181,9 @@ extension ClusterWorkspaceViewModel {
             cpuCores: podRows.compactMap { Double($0.cells["CPU Request Cores"] ?? "") }.reduce(0, +),
             memoryBytes: podRows.compactMap { Double($0.cells["Memory Request Bytes"] ?? "") }.reduce(0, +)
         )
-        // Pods per node, so the peak-density figure is a real "fullest node" rather
-        // than an average that hides an unschedulable one.
-        var podsByNode: [String: Int] = [:]
-        for row in podRows {
-            let node = row.cells["Node"] ?? ""
-            guard !node.isEmpty, node != KubernetesGitOpsService.unknownValue else { continue }
-            podsByNode[node, default: 0] += 1
-        }
+        let podsByNode = Dictionary(grouping: podRows) { $0.cells["Node"] ?? "" }
+            .filter { !$0.key.isEmpty }
+            .mapValues { $0.count }
         let scope = selectedNamespace
         let podCount = podRows.isEmpty ? nil : podRows.count
 

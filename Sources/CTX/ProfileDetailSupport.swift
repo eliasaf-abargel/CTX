@@ -90,7 +90,10 @@ extension ProfileDetailView {
     }
 
     func extractAWSProfileName(from _: String, profile: CloudProfile) -> String {
-        profile.name
+        if let linked = profile.kubernetesLinkedProfile, !linked.isEmpty {
+            return linked
+        }
+        return profile.name
     }
 
     /// Runs only strict, validated remediation commands. Unsafe values are copied

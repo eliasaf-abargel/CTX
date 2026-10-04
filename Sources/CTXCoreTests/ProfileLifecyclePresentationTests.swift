@@ -351,3 +351,19 @@ func testAsyncLifecycleFailureRetainsOrigin() async throws {
     }
     assert(store.presentation(for: .mainWindow) == nil)
 }
+
+@MainActor
+func runProfileLifecyclePresentationTests() async throws {
+    try await testMissingCLIRetryPublicationIsGenerationGated()
+    try testPresentationRoutesAreOriginFilteredAndReportIsTyped()
+    try await testPresentationConsumptionUsesExactRouteID()
+    try await testAuthDismissPreservesNewerOperationError()
+    try await testAuthCancellationStopsTheOwningConnectOperation()
+    try await testProviderSelectionSwapsEditorInsideTheOpenSheet()
+    try await testAWSExportRequiresExactActiveConnectedProfile()
+    try testMenuPresentationFallsBackToMainWindow()
+    try await testMenuProviderSignOutConfirmsOnHostAndRetainsOrigin()
+    try testLifecycleSanitizerRedactsAWSAndAuthorizationSecrets()
+    try await testFolderEditorDeleteSequenceDoesNotClobberNewerRoute()
+    try await testAsyncLifecycleFailureRetainsOrigin()
+}

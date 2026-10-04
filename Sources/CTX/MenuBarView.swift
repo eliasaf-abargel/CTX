@@ -33,17 +33,31 @@ struct MenuBarView: View {
             }
 
             if store.showExpirationWarning {
-                HStack(spacing: 8) {
-                    Image(systemName: "timer")
-                        .font(.system(.caption2, weight: .bold))
-                    Text(store.expirationWarningMessage)
-                        .font(.system(.caption2, weight: .medium))
-                        .lineLimit(1)
+                Button {
+                    if let id = store.expirationWarningProfileID,
+                       let profile = store.profiles.first(where: { $0.id == id }) {
+                        store.selectProfile(profile)
+                        store.login(profile, from: .menuBar)
+                    } else if let profile = store.selectedProfile {
+                        store.login(profile, from: .menuBar)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "timer")
+                            .font(.system(.caption2, weight: .bold))
+                        Text(store.expirationWarningMessage)
+                            .font(.system(.caption2, weight: .medium))
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.system(.caption2))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .buttonStyle(.plain)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 

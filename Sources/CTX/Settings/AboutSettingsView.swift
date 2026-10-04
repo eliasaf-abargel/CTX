@@ -84,6 +84,13 @@ struct AboutSettingsView: View {
                 if let diagnosticsError { Text(diagnosticsError).foregroundStyle(.red) }
             }
 
+            Section("Help & Onboarding") {
+                Button("Replay Welcome Tour") {
+                    UserDefaults.standard.set(false, forKey: "hasCompletedOnboardingTour")
+                }
+                .buttonStyle(CTXSecondaryButton())
+            }
+
             Section("Creator") {
                 LabeledContent("Name", value: Self.creatorName)
                 LabeledContent("Email") {

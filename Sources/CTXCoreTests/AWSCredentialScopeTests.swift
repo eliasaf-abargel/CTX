@@ -41,3 +41,7 @@ func testExportingCredentialsNeverWritesADefaultProfile() {
     assert(!config.contains("[default]"))
     assert(!credentials.contains("[default]"))
 }
+
+func runAWSCredentialScopeTests() {
+    testExportingCredentialsNeverWritesADefaultProfile()
+}

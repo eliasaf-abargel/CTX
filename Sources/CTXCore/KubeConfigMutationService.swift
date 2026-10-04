@@ -137,8 +137,15 @@ public final class KubeConfigMutationService: Sendable {
 
     public func deleteContext(_ name: String, kubeconfigPath: String? = nil) async throws {
         snapshotKubeconfig(kubeconfigPath)
+        let currentResult = await run(["config", "current-context"], kubeconfigPath: kubeconfigPath)
+        let wasCurrent = currentResult.exitCode == 0 && currentResult.output.trimmingCharacters(in: .whitespacesAndNewlines) == name
+
         let result = await run(["config", "delete-context", name], kubeconfigPath: kubeconfigPath)
         try requireSuccess(result, "Failed to delete context")
+
+        if wasCurrent {
+            _ = await run(["config", "unset", "current-context"], kubeconfigPath: kubeconfigPath)
+        }
     }
 
     public func resolveServer(for clusterName: String, kubeconfigPath: String? = nil) async -> String {

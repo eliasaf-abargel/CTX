@@ -7,6 +7,7 @@ struct NotificationsSettingsView: View {
 
     @AppStorage("enableClusterNotifications") private var enableClusterNotifications = true
     @AppStorage("clusterNotificationsCriticalOnly") private var clusterNotificationsCriticalOnly = true
+    @AppStorage("enableCloudSessionNotifications") private var enableCloudSessionNotifications = true
     @AppStorage("enableAWSNotifications") private var enableAWSNotifications = true
 
     @State private var testSent = false
@@ -67,17 +68,17 @@ struct NotificationsSettingsView: View {
                 .padding(14)
                 .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                // Cloud Credentials Section
+                // Cloud & Cluster Sessions Section
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("CLOUD SESSIONS")
+                    Text("CLOUD & CLUSTER SESSIONS")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
 
-                    Toggle(isOn: $enableAWSNotifications) {
+                    Toggle(isOn: $enableCloudSessionNotifications) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("AWS SSO Session Expiration Warnings")
+                            Text("Universal Session Expiration & Auth Alerts")
                                 .font(.system(.subheadline, weight: .medium))
-                            Text("Sends a banner notification 2 minutes before your active AWS SSO session expires.")
+                            Text("Sends instant macOS alerts when AWS SSO sessions, Google Cloud auth, Azure logins, or Kubernetes tokens expire. Clicking an alert navigates directly to re-authenticate.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

@@ -108,9 +108,7 @@ struct CTXInspectorYAMLTab: View {
 
     private var unavailableReason: String {
         switch selection.kind {
-        case .secretMetadata: "Secret values are never requested or displayed, so there's no safe YAML to show."
-        case .configMaps: "ConfigMap values aren't shown until a redaction model exists."
-        case .workloads: "Workload YAML is disabled until template redaction rules are designed (env vars and volumes can reference secrets)."
+        case .secretMetadata: "Secret values are protected for security and not displayed in plaintext."
         default: "This resource kind doesn't support inspection YAML in CTX."
         }
     }
@@ -207,7 +205,7 @@ struct CTXInspectorYAMLTab: View {
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .frame(minHeight: 340, maxHeight: .infinity, alignment: .top)
+                .frame(minHeight: 200, maxHeight: .infinity, alignment: .top)
             }
         }
     }
@@ -293,7 +291,7 @@ struct CTXInspectorYAMLTab: View {
                         viewModel.dryRunEditedYAML(for: selection)
                     } label: {
                         HStack(spacing: 4) {
-                            if viewModel.isApplyingYAML && viewModel.applyResult == nil {
+                            if viewModel.isDryRunningYAML {
                                 ProgressView()
                                     .scaleEffect(0.6)
                                     .frame(width: 12, height: 12)
@@ -310,7 +308,7 @@ struct CTXInspectorYAMLTab: View {
                         .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isApplyingYAML || !diffSummary.hasChanges)
+                    .disabled(viewModel.isDryRunningYAML || viewModel.isApplyingYAML || !diffSummary.hasChanges)
                     .help("Simulate server-side apply without modifying the cluster")
 
                     // Stage 2: Apply to Cluster
@@ -335,7 +333,7 @@ struct CTXInspectorYAMLTab: View {
                         .background(canApply ? Color.accentColor : Color.secondary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isApplyingYAML || !canApply)
+                    .disabled(viewModel.isApplyingYAML || viewModel.isDryRunningYAML || !canApply)
                     .help(canApply ? "Apply modified YAML to the live cluster" : "Run Dry-Run against this edit first")
                 }
                 .padding(.horizontal, 14)
@@ -373,37 +371,7 @@ struct CTXInspectorYAMLTab: View {
     // MARK: - Banner
 
     private func applyBanner(_ result: KubernetesApplyResult) -> some View {
-        let isSuccess = result.success
-        let bgTint: Color = isSuccess ? .green : .red
-        let icon: String = isSuccess ? "checkmark.circle.fill" : "exclamationmark.octagon.fill"
-
-        return HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(bgTint)
-                .padding(.top, 1)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(result.message)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                if let err = result.errorDetails, !err.isEmpty {
-                    Text(err)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                } else if !result.stdout.isEmpty {
-                    Text(result.stdout)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(bgTint.opacity(0.10))
+        CTXOutcomeBanner(result: result)
     }
 
     // MARK: - Diff View
@@ -443,7 +411,7 @@ struct CTXInspectorYAMLTab: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(minHeight: 340, maxHeight: .infinity, alignment: .top)
+        .frame(minHeight: 200, maxHeight: .infinity, alignment: .top)
     }
 
     private func lineIndicator(for line: YAMLDiffLine) -> String {
@@ -487,9 +455,9 @@ struct CTXInspectorYAMLTab: View {
                 .font(.system(.caption2, design: .monospaced))
                 .lineSpacing(3)
                 .padding(14)
-                .frame(minWidth: 640, minHeight: 400, alignment: .topLeading)
+                .frame(minWidth: 640, minHeight: 200, alignment: .topLeading)
         }
-        .frame(minHeight: 340, maxHeight: .infinity, alignment: .top)
+        .frame(minHeight: 200, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Diagnostic Issue

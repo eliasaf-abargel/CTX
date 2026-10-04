@@ -30,19 +30,21 @@ struct CTXResourceInspector: View {
 
     private var widthRange: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
         switch activeTab {
-        case .overview: (640, 720, 840)
-        case .yaml: (680, 780, 920)
-        case .logs: (740, 860, 1040)
-        case .diagnostics: (680, 760, 880)
+        case .overview: (760, 840, 980)
+        case .spec: (780, 880, 1020)
+        case .yaml: (780, 880, 1040)
+        case .logs: (800, 900, 1100)
+        case .diagnostics: (760, 840, 980)
         }
     }
 
     private var heightRange: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
         switch activeTab {
-        case .overview: (480, 560, 680)
-        case .yaml: (520, 620, 800)
-        case .logs: (520, 620, 820)
-        case .diagnostics: (480, 580, 750)
+        case .overview: (480, 560, 720)
+        case .spec: (500, 600, 780)
+        case .yaml: (500, 620, 800)
+        case .logs: (500, 620, 820)
+        case .diagnostics: (480, 560, 750)
         }
     }
 
@@ -51,14 +53,17 @@ struct CTXResourceInspector: View {
             CTXResourceInspectorHeader(detail: detail, issuesCount: issuesCount, dismiss: { viewModel.dismissPresentation() })
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
+                .layoutPriority(2)
 
             CTXInspectorTabBar(tabs: visibleTabs, activeTab: activeTab, issuesCount: issuesCount) { tab in
                 viewModel.selectInspectorTab(tab)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
+            .layoutPriority(2)
 
             Divider().padding(.top, 10)
+                .layoutPriority(2)
 
             // Each tab owns its own scroll layer so that wheel events are
             // always delivered to the innermost ScrollView instead of being
@@ -71,6 +76,11 @@ struct CTXResourceInspector: View {
                 case .overview:
                     ScrollView(.vertical) {
                         CTXInspectorOverviewTab(viewModel: viewModel, selection: selection, detail: detail)
+                            .padding(16)
+                    }
+                case .spec:
+                    ScrollView(.vertical) {
+                        CTXInspectorSpecTab(viewModel: viewModel, selection: selection, detail: detail)
                             .padding(16)
                     }
                 case .yaml:
@@ -194,11 +204,11 @@ private struct CTXInspectorDoneButton: View {
     var body: some View {
         Button(action: action) {
             Text("Done")
-                .font(.system(.caption, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(isHovered ? Color.primary : Color.secondary)
                 .lineLimit(1)
-                .padding(.horizontal, 12)
-                .frame(height: 28)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
                 .background(
                     Color.secondary.opacity(isHovered ? 0.16 : 0.10),
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -228,23 +238,24 @@ private struct CTXInspectorTabButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: tab.systemImage)
-                    .font(.system(.caption2, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                 Text(tab.title)
-                    .font(.system(.caption, weight: .semibold))
+                    .font(.system(size: 12.5, weight: .semibold))
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 if tab == .diagnostics && issuesCount > 0 {
                     Text("\(issuesCount)")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, 1.5)
                         .background(Color.orange, in: Capsule())
                 }
             }
             .foregroundStyle(foreground)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
             .frame(height: 28)
             .frame(maxWidth: .infinity)
             .background(background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))

@@ -123,6 +123,42 @@ extension ProfileStore {
                 lastMessage = "Connecting to StrongDM for \(profile.name)..."
             } else if profile.usesTeleport {
                 lastMessage = "Connecting to Teleport for \(profile.name)..."
+            } else if let linkedAWSName = profile.kubernetesLinkedProfile ?? (kubernetesContexts.first(where: { $0.contextName == profile.name })?.linkedAWSProfile),
+                      let awsProfile = profiles.first(where: { $0.provider == .aws && $0.name == linkedAWSName }) {
+                let tokenState = awsSessionExpirations.ssoTokenState(for: awsProfile)
+                let needsLogin: Bool
+                if case .valid = tokenState {
+                    needsLogin = false
+                } else {
+                    needsLogin = true
+                }
+                if needsLogin {
+                    lastMessage = "Refreshing AWS SSO (\(linkedAWSName)) for \(profile.name)..."
+                    let ssoEmail = email ?? (awsProfile.roleName.contains("@") ? awsProfile.roleName : nil)
+                    let loginResult = await profileCommands.login(
+                        awsProfile,
+                        email: ssoEmail,
+                        onOutput: { [weak self] output in
+                            Task { @MainActor [weak self] in
+                                guard let self, self.isCurrentOperation(profileID: profile.id, operationID: operationID) else { return }
+                                self.openAuthURLIfPresent(
+                                    output,
+                                    email: ssoEmail,
+                                    operationID: operationID,
+                                    profileID: profile.id,
+                                    origin: origin
+                                )
+                            }
+                        }
+                    )
+                    if loginResult.exitCode != 0 {
+                        reportLoginFailure(loginResult, for: profile, operationID: operationID, origin: origin)
+                        updateStatus(profile, status: .needsLogin, operationID: operationID)
+                        return
+                    }
+                } else {
+                    lastMessage = "Kubernetes context \(profile.name) selected"
+                }
             } else {
                 lastMessage = "Kubernetes context \(profile.name) selected"
             }

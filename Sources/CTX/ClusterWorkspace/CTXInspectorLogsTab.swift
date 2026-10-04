@@ -32,12 +32,9 @@ struct CTXInspectorLogsTab: View {
     var body: some View {
         Group {
             if selection.kind == .pods {
-                podLogs
+                podLogs(for: selection.row)
             } else if let podRow = relatedPodRow {
-                VStack(alignment: .leading, spacing: 8) {
-                    backToRelatedPodsButton
-                    podLogs(for: podRow)
-                }
+                podLogs(for: podRow)
             } else {
                 relatedPodsPicker
             }
@@ -47,8 +44,8 @@ struct CTXInspectorLogsTab: View {
                 if viewModel.selectedLogPodID != selection.row.id {
                     viewModel.selectLogPod(selection.row)
                 }
-            } else if podsList == nil, !encodedSelector.isEmpty {
-                viewModel.loadPodsForLogs()
+            } else if !encodedSelector.isEmpty {
+                viewModel.loadPodsForLogs(bypassCache: true)
             }
         }
     }
@@ -62,11 +59,19 @@ struct CTXInspectorLogsTab: View {
         Button {
             selectedRelatedPodID = nil
         } label: {
-            Label("Related Pods", systemImage: "chevron.left")
-                .font(.system(.caption2, weight: .medium))
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 9, weight: .bold))
+                Text("Related Pods")
+                    .font(.system(size: 11.5, weight: .medium))
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .buttonStyle(CTXInlineActionButton())
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .help("Back to related pods list")
     }
 
     @ViewBuilder
@@ -94,7 +99,20 @@ struct CTXInspectorLogsTab: View {
             } else {
                 CTXGlassPanel(padding: 14) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Related Pods").font(.system(.caption, weight: .semibold))
+                        HStack {
+                            Text("Related Pods").font(.system(.caption, weight: .semibold))
+                            Spacer()
+                            Button {
+                                viewModel.loadResource(kind: .pods, bypassCache: true)
+                                viewModel.loadPodsForLogs(bypassCache: true)
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Refresh related pods from cluster")
+                        }
                         ForEach(PodLogSelection.sortedForPicker(matches)) { row in
                             Button {
                                 selectedRelatedPodID = row.id
@@ -137,13 +155,14 @@ struct CTXInspectorLogsTab: View {
         }
     }
 
-    private var podLogs: some View {
-        podLogs(for: selection.row)
-    }
-
     private func podLogs(for row: KubernetesResourceRow) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            CTXLogsControls(
+            HStack(spacing: 8) {
+                if selection.kind != .pods {
+                    backToRelatedPodsButton
+                    Divider().frame(height: 14)
+                }
+                CTXLogsControls(
                 pods: podsList?.rows ?? [row],
                 selectedPodID: viewModel.selectedLogPodID,
                 containers: viewModel.logContainers,
@@ -155,7 +174,8 @@ struct CTXInspectorLogsTab: View {
                 onSelectContainer: { viewModel.selectLogContainer($0) },
                 onSelectTail: { viewModel.setLogTailLines($0) },
                 onReload: { viewModel.reloadLogs() }
-            )
+                )
+            }
             content
         }
     }

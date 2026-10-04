@@ -20,14 +20,14 @@ if [[ "$(uname)" != "Darwin" ]]; then
 fi
 
 # Resolve the download URL
-# If CTX_DOWNLOAD_URL is supplied (e.g. from a custom registry), use it.
+# If CTX_DOWNLOAD_URL is supplied (e.g. an internal mirror), use it.
 # Otherwise, fall back to GitHub Releases.
 if [[ -n "${CTX_DOWNLOAD_URL:-}" ]]; then
   DOWNLOAD_URL="$CTX_DOWNLOAD_URL"
   echo "Using custom download URL: $DOWNLOAD_URL"
 else
   echo "Fetching latest version metadata from GitHub..."
-  LATEST_RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/eliasaf-abargel/CTX/releases/latest")
+  LATEST_RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/opsbit-io/ctx/releases/latest")
   DOWNLOAD_URL=$(echo "$LATEST_RELEASE_JSON" | grep -o '"browser_download_url": "[^"]*' | head -n 1 | cut -d'"' -f4)
   
   if [[ -z "$DOWNLOAD_URL" ]]; then
@@ -39,7 +39,7 @@ fi
 ZIP_PATH="$TMP_DIR/CTX.zip"
 
 echo "Downloading CTX..."
-# Pass credentials if supplied (for private Artifactory/Fly registries)
+# Pass credentials if supplied (for a private mirror)
 if [[ -n "${CTX_REPO_CREDS:-}" ]]; then
   curl -fsSL -u "$CTX_REPO_CREDS" "$DOWNLOAD_URL" -o "$ZIP_PATH"
 else

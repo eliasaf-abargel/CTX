@@ -16,7 +16,7 @@ public struct CTXEnvironmentVariablesInspector: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("ENVIRONMENT VARIABLES (\(items.count))")
-                .font(.system(.caption2, weight: .bold))
+                .font(.system(size: 11.5, weight: .bold))
                 .foregroundStyle(.secondary)
             if items.count > displayedItems.count {
                 Text("Showing the first \(displayedItems.count) of \(items.count).")
@@ -38,19 +38,19 @@ public struct CTXEnvironmentVariablesInspector: View {
                     ForEach(displayedItems) { (item: EnvVarItem) in
                         HStack {
                             Text(item.name)
-                                .font(.system(.caption2, design: .monospaced, weight: .semibold))
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(.primary)
                             Spacer()
                             Text(displayValue(for: item))
-                                .font(.system(.caption2, design: .monospaced))
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
                                 .foregroundStyle(item.isSecret ? Color.orange : (item.value.isEmpty ? Color.secondary : Color.blue))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .help(displayValue(for: item))
                         }
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .padding(.vertical, 6)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
             }

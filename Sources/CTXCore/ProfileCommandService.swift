@@ -18,6 +18,9 @@ public final class ProfileCommandService: Sendable {
     }
 
     public func linkedAWSProfile(for context: KubernetesContextProfile) async -> String? {
+        if let explicit = context.linkedAWSProfile, !explicit.isEmpty {
+            return explicit
+        }
         do {
             var command = try kubectl.inspectionCommand(
                 context: context.contextName,

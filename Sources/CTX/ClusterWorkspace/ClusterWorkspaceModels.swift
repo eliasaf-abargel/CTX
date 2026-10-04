@@ -1,6 +1,17 @@
 import CTXCore
 import SwiftUI
 
+enum ClusterWorkspaceCategory: String, CaseIterable, Identifiable {
+    case workspace = "Workspace"
+    case workloads = "Workloads"
+    case networkAndConfig = "Network & Config"
+    case cluster = "Cluster"
+    case observability = "Observability"
+    case delivery = "Delivery"
+
+    var id: String { rawValue }
+}
+
 enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case overview = "Overview"
     case namespaces = "Namespaces"
@@ -25,6 +36,75 @@ enum ClusterWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case portForward = "Port Forward"
 
     var id: String { rawValue }
+
+    var category: ClusterWorkspaceCategory {
+        switch self {
+        case .overview, .topology:
+            return .workspace
+        case .workloads, .pods, .cronjobs:
+            return .workloads
+        case .services, .ingress, .configMaps, .secrets, .portForward:
+            return .networkAndConfig
+        case .nodes, .namespaces, .storage, .hpa:
+            return .cluster
+        case .issues, .events, .logs:
+            return .observability
+        case .gitops, .helm, .diff, .exports:
+            return .delivery
+        }
+    }
+
+    var badgeColor: Color {
+        switch self {
+        case .overview: return .blue
+        case .topology: return .indigo
+        case .workloads: return .purple
+        case .pods: return .cyan
+        case .cronjobs: return .orange
+        case .services: return .teal
+        case .ingress: return .blue
+        case .configMaps: return Color(nsColor: .systemGray)
+        case .secrets: return .red
+        case .portForward: return .green
+        case .nodes: return .mint
+        case .namespaces: return .indigo
+        case .storage: return .orange
+        case .hpa: return .teal
+        case .issues: return .yellow
+        case .events: return .pink
+        case .logs: return Color(nsColor: .darkGray)
+        case .gitops: return .purple
+        case .helm: return .blue
+        case .diff: return .indigo
+        case .exports: return .secondary
+        }
+    }
+
+    var badgeIcon: String {
+        switch self {
+        case .overview: return "rectangle.3.group.fill"
+        case .topology: return "point.topleft.down.to.point.bottomright.curvepath"
+        case .workloads: return "shippingbox.fill"
+        case .pods: return "circle.grid.3x3.fill"
+        case .cronjobs: return "clock.arrow.2.circlepath"
+        case .services: return "point.3.connected.trianglepath.dotted"
+        case .ingress: return "arrow.triangle.branch"
+        case .configMaps: return "doc.text.fill"
+        case .secrets: return "lock.fill"
+        case .portForward: return "arrowshape.turn.up.right.fill"
+        case .nodes: return "server.rack"
+        case .namespaces: return "square.stack.3d.up.fill"
+        case .storage: return "cylinder.split.1x2.fill"
+        case .hpa: return "arrow.up.and.down.square.fill"
+        case .issues: return "exclamationmark.triangle.fill"
+        case .events: return "waveform.path.ecg"
+        case .logs: return "text.alignleft"
+        case .gitops: return "arrow.triangle.pull"
+        case .helm: return "shippingbox.circle.fill"
+        case .diff: return "arrow.left.arrow.right"
+        case .exports: return "square.and.arrow.down.fill"
+        }
+    }
 
     var systemImage: String {
         switch self {
@@ -108,33 +188,37 @@ struct ClusterWorkspaceResourceSelection: Equatable {
 /// in the tab bar; Logs only appears for kinds where `visibleTabs(for:)` includes it.
 enum CTXInspectorTab: CaseIterable, Equatable, Hashable {
     case overview
+    case spec
+    case diagnostics
     case yaml
     case logs
-    case diagnostics
 
     var title: String {
         switch self {
         case .overview: "Overview"
+        case .spec: "Spec & Config"
+        case .diagnostics: "Diagnostics"
         case .yaml: "YAML"
         case .logs: "Logs"
-        case .diagnostics: "Diagnostics"
         }
     }
 
     var systemImage: String {
         switch self {
         case .overview: "info.circle"
+        case .spec: "slider.horizontal.3"
+        case .diagnostics: "stethoscope"
         case .yaml: "curlybraces"
         case .logs: "text.alignleft"
-        case .diagnostics: "stethoscope"
         }
     }
 
     /// Tabs actually shown for this resource kind.
     static func visibleTabs(for kind: KubernetesResourceKind) -> [CTXInspectorTab] {
         switch kind {
-        case .pods, .workloads, .services: [.overview, .yaml, .logs, .diagnostics]
-        default: [.overview, .yaml, .diagnostics]
+        case .pods, .workloads, .services: [.overview, .spec, .diagnostics, .yaml, .logs]
+        case .configMaps, .secretMetadata: [.overview, .spec, .diagnostics, .yaml]
+        default: [.overview, .diagnostics, .yaml]
         }
     }
 }

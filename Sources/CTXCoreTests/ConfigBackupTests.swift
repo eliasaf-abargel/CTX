@@ -187,3 +187,13 @@ func testFirstWriteLeavesNoBackupBehind() {
     assert(backups(in: directory, of: "config_fresh").isEmpty)
     assert(backups(in: directory, of: "fresh.json").isEmpty)
 }
+
+func runConfigBackupTests() {
+    testSnapshotCopiesTheFileAndNamesItAfterTheOriginal()
+    testSnapshotSkipsMissingFilesAndNeverCollides()
+    testGCPWriterKeepsSettingsItHasNoFieldFor()
+    testGCPWriterLeavesAnExistingRegionAloneWhenNoneIsGiven()
+    testGCPWriterPreservesOnRenameAndDelete()
+    testAzureWriterPreservesOnRewriteAndDelete()
+    testFirstWriteLeavesNoBackupBehind()
+}

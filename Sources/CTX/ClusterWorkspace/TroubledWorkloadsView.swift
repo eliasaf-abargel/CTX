@@ -316,13 +316,18 @@ struct TroubledWorkloadsView: View {
                     }
 
                     Button {
-                        if let row = findRow(for: issue) {
-                            viewModel.inspectDiagnostics(for: row, kind: issue.resourceKind)
+                        Task {
+                            await viewModel.navigateToResource(
+                                kind: issue.resourceKind,
+                                name: issue.resourceName,
+                                namespace: issue.resourceNamespace,
+                                tab: .diagnostics
+                            )
                         }
                     } label: {
                         HStack(spacing: 4) {
                             Text("Inspect")
-                                .font(.system(.caption, weight: .semibold))
+                                .font(.system(size: 11.5, weight: .semibold))
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 9, weight: .bold))
                         }

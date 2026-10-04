@@ -69,6 +69,7 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
     public var credentialKind: KubernetesCredentialKind
     public var hasCredentials: Bool
     public var skipTLSVerification: Bool
+    public var linkedAWSProfile: String?
 
     public init(
         contextName: String,
@@ -82,7 +83,8 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         clusterMetadata: ClusterMetadata? = nil,
         credentialKind: KubernetesCredentialKind = .none,
         hasCredentials: Bool = false,
-        skipTLSVerification: Bool = false
+        skipTLSVerification: Bool = false,
+        linkedAWSProfile: String? = nil
     ) {
         self.contextName = contextName
         self.clusterName = clusterName
@@ -97,6 +99,7 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         self.credentialKind = credentialKind
         self.hasCredentials = hasCredentials
         self.skipTLSVerification = skipTLSVerification
+        self.linkedAWSProfile = linkedAWSProfile
     }
 
     @available(*, deprecated, message: "Token values are discarded; use credentialKind and hasCredentials.")
@@ -141,6 +144,7 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         case credentialKind
         case hasCredentials
         case skipTLSVerification
+        case linkedAWSProfile
         case token
     }
 
@@ -164,6 +168,7 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
             ?? (legacyTokenWasPresent ? .bearerToken : .none)
         hasCredentials = try values.decodeIfPresent(Bool.self, forKey: .hasCredentials) ?? legacyTokenWasPresent
         skipTLSVerification = try values.decodeIfPresent(Bool.self, forKey: .skipTLSVerification) ?? false
+        linkedAWSProfile = try values.decodeIfPresent(String.self, forKey: .linkedAWSProfile)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -181,6 +186,7 @@ public struct KubernetesContextProfile: Identifiable, Codable, Equatable, Sendab
         try values.encode(credentialKind, forKey: .credentialKind)
         try values.encode(hasCredentials, forKey: .hasCredentials)
         try values.encode(skipTLSVerification, forKey: .skipTLSVerification)
+        try values.encodeIfPresent(linkedAWSProfile, forKey: .linkedAWSProfile)
     }
 }
 

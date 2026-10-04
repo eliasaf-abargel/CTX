@@ -9,7 +9,8 @@ public enum KubernetesProfileAdapter {
             roleName: context.userName,
             region: context.namespace,
             kubernetesCredentialKind: context.credentialKind,
-            hasKubernetesCredentials: context.hasCredentials
+            hasKubernetesCredentials: context.hasCredentials,
+            kubernetesLinkedProfile: context.linkedAWSProfile
         )
     }
 }

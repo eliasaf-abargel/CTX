@@ -85,3 +85,11 @@ func testDiscoveryRetainsContextsDuringFileReplacement() throws {
     store.refreshImmediately(runVerification: false)
     assert(store.kubernetesContexts.map(\.contextName) == ["other"])
 }
+
+@MainActor
+func runKubeIndentedDiscoveryTests() throws {
+    try testDiscoveryRetainsContextsDuringFileReplacement()
+    try testExplicitKubeAWSProfileDoesNotUseGlobalSelection()
+    try testLocalDiagnosticsAreBoundedAndExcludeIdentity()
+    try testIndentedKubeDiscoveryPreservesEntriesAndUsers()
+}

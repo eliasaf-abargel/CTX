@@ -18,7 +18,12 @@ public enum KubernetesWorkloadSpecParser {
     }
 
     public static func podSpec(fromPodObject root: [String: Any]) -> PodSpecInsight? {
-        guard let spec = root["spec"] as? [String: Any] else { return nil }
+        var spec = root["spec"] as? [String: Any]
+        if let template = spec?["template"] as? [String: Any],
+           let templateSpec = template["spec"] as? [String: Any] {
+            spec = templateSpec
+        }
+        guard let spec else { return nil }
         let podSecurity = spec["securityContext"] as? [String: Any] ?? [:]
 
         let regular = (spec["containers"] as? [[String: Any]] ?? []).map {

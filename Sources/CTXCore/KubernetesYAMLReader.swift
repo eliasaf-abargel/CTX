@@ -15,7 +15,7 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
 
     public func yaml(kind: KubernetesResourceKind, row: KubernetesResourceRow, context: KubernetesContextProfile) async -> KubernetesYAMLResult {
         let ref = row.reference(kind: kind, context: context)
-        guard kind.supportsInspectionYAML, let resource = resourceName(kind: ref.kind) else {
+        guard kind.supportsInspectionYAML, let resource = resourceName(kind: ref.kind, row: row) else {
             return KubernetesYAMLResult(
                 yaml: nil,
                 status: .permissionDenied,
@@ -78,18 +78,25 @@ public final class KubernetesYAMLReader: KubernetesYAMLReading {
         return args + ["--request-timeout=\(Int(timeout))s", "--output=yaml"]
     }
 
-    private func resourceName(kind: KubernetesResourceKind) -> String? {
+    private func resourceName(kind: KubernetesResourceKind, row: KubernetesResourceRow? = nil) -> String? {
         switch kind {
-        case .namespaces: "namespace"
-        case .nodes: "node"
-        case .pods: "pod"
-        case .cronJobs: "cronjob"
-        case .services: "service"
-        case .ingress: "ingress"
-        case .events: "event"
-        case .hpa: "hpa"
-        case .pvc: "pvc"
-        case .workloads, .configMaps, .secretMetadata: nil
+        case .namespaces: return "namespace"
+        case .nodes: return "node"
+        case .pods: return "pod"
+        case .cronJobs: return "cronjob"
+        case .services: return "service"
+        case .ingress: return "ingress"
+        case .events: return "event"
+        case .hpa: return "hpa"
+        case .pvc: return "pvc"
+        case .configMaps: return "configmap"
+        case .workloads:
+            if let row, let rawKind = row.cells["Kind"],
+               let controller = KubernetesWorkloadControllerKind(rowKind: rawKind) {
+                return controller.kubectlResource
+            }
+            return "deployment"
+        case .secretMetadata: return nil
         }
     }
 

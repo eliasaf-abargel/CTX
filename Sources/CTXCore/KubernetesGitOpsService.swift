@@ -19,7 +19,10 @@ public enum GitOpsSourceKind: String, Equatable, Sendable {
 
 public struct GitOpsApplicationItem: Identifiable, Equatable, Sendable {
     public var id: String { "\(provider)/\(namespace)/\(name)" }
+    /// The namespace where the controller's custom resource lives (e.g. "argocd" or "flux-system").
     public var namespace: String
+    /// The target / destination namespace where the application's workloads are deployed.
+    public var destinationNamespace: String
     public var name: String
     /// "ArgoCD" or "Flux CD".
     public var provider: String
@@ -47,6 +50,7 @@ public struct GitOpsApplicationItem: Identifiable, Equatable, Sendable {
 
     public init(
         namespace: String,
+        destinationNamespace: String = "",
         name: String,
         provider: String,
         kind: String,
@@ -63,6 +67,7 @@ public struct GitOpsApplicationItem: Identifiable, Equatable, Sendable {
         age: String
     ) {
         self.namespace = namespace
+        self.destinationNamespace = destinationNamespace
         self.name = name
         self.provider = provider
         self.kind = kind
@@ -110,10 +115,14 @@ public enum KubernetesGitOpsService {
             let path = (source["path"] as? String) ?? ""
             let sourceKind = argoSourceKind(repoURL: repoURL, chart: chart, source: source)
 
+            let destination = spec["destination"] as? [String: Any] ?? [:]
+            let destinationNamespace = (destination["namespace"] as? String) ?? ""
+
             let syncDict = status["sync"] as? [String: Any] ?? [:]
 
             return GitOpsApplicationItem(
                 namespace: (metadata["namespace"] as? String) ?? unknownValue,
+                destinationNamespace: destinationNamespace,
                 name: name,
                 provider: "ArgoCD",
                 kind: "Application",
@@ -237,9 +246,11 @@ public enum KubernetesGitOpsService {
             }
         }
 
+        let destinationNamespace = (spec["targetNamespace"] as? String) ?? (metadata["namespace"] as? String) ?? ""
         let resolved = source(spec, status)
         return GitOpsApplicationItem(
             namespace: (metadata["namespace"] as? String) ?? unknownValue,
+            destinationNamespace: destinationNamespace,
             name: name,
             provider: "Flux CD",
             kind: kind,

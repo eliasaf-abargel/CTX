@@ -19,6 +19,15 @@ public enum CloudProvider: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    public var displayName: String {
+        switch self {
+        case .aws: "AWS"
+        case .gcp: "Google Cloud"
+        case .azure: "Azure"
+        case .kubernetes: "Kubernetes"
+        }
+    }
+
     public var sectionHeaderTitle: String {
         switch self {
         case .aws: "AWS (Amazon Web Services)"
@@ -50,6 +59,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
     public var ssoRegion: String
     public var kubernetesCredentialKind: KubernetesCredentialKind
     public var hasKubernetesCredentials: Bool
+    public var kubernetesLinkedProfile: String?
     public var status: ProfileStatus
 
     public init(
@@ -62,6 +72,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         ssoRegion: String = "",
         kubernetesCredentialKind: KubernetesCredentialKind = .none,
         hasKubernetesCredentials: Bool = false,
+        kubernetesLinkedProfile: String? = nil,
         status: ProfileStatus = .unknown
     ) {
         self.provider = provider
@@ -73,6 +84,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         self.ssoRegion = ssoRegion
         self.kubernetesCredentialKind = kubernetesCredentialKind
         self.hasKubernetesCredentials = hasKubernetesCredentials
+        self.kubernetesLinkedProfile = kubernetesLinkedProfile
         self.status = status
     }
 
@@ -112,6 +124,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         case ssoRegion
         case kubernetesCredentialKind
         case hasKubernetesCredentials
+        case kubernetesLinkedProfile
         case status
         case token
     }
@@ -126,6 +139,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         ssoStartURL = try values.decodeIfPresent(String.self, forKey: .ssoStartURL) ?? ""
         ssoRegion = try values.decodeIfPresent(String.self, forKey: .ssoRegion) ?? ""
         status = try values.decodeIfPresent(ProfileStatus.self, forKey: .status) ?? .unknown
+        kubernetesLinkedProfile = try values.decodeIfPresent(String.self, forKey: .kubernetesLinkedProfile)
 
         let legacyTokenWasPresent = !(try values.decodeIfPresent(String.self, forKey: .token) ?? "").isEmpty
         kubernetesCredentialKind = try values.decodeIfPresent(KubernetesCredentialKind.self, forKey: .kubernetesCredentialKind)
@@ -145,6 +159,7 @@ public struct CloudProfile: Identifiable, Codable, Hashable, Sendable {
         try values.encode(ssoRegion, forKey: .ssoRegion)
         try values.encode(kubernetesCredentialKind, forKey: .kubernetesCredentialKind)
         try values.encode(hasKubernetesCredentials, forKey: .hasKubernetesCredentials)
+        try values.encodeIfPresent(kubernetesLinkedProfile, forKey: .kubernetesLinkedProfile)
         try values.encode(status, forKey: .status)
     }
 

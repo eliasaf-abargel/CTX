@@ -40,6 +40,9 @@ public final class ProfileStore: ObservableObject {
     @Published public var showExpirationWarning = false
     @Published public var verificationErrors: [String: String] = [:]
     @Published public var expirationWarningMessage = ""
+    @Published public var expirationWarningProfileID: String? = nil
+    @Published public var pendingClusterDeepLink: [String: ResourceDeepLinkTarget] = [:]
+    @Published public var pendingProfileDeepLinkID: String? = nil
     @Published public var updateAvailable = false
     @Published public var latestVersionString = ""
     @Published public var isUpdating = false
@@ -222,6 +225,14 @@ public final class ProfileStore: ObservableObject {
             return profiles.first { $0.id == profileID }
         }
         return nil
+    }
+
+    public func selectProfile(_ profile: CloudProfile?) {
+        if let profile {
+            selectedSelection = .profile(profile.id)
+        } else {
+            selectedSelection = nil
+        }
     }
 
     nonisolated static func configuredURL(

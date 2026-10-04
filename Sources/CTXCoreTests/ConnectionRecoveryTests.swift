@@ -126,3 +126,11 @@ func testStrongDMPostSSOFailureAndDiagnosticPrivacy() async throws {
     assert(!data.contains("private-sentinel"))
     assert(data.contains("authentication_required") && data.contains("exitCode"))
 }
+
+func runConnectionRecoveryTests() async throws {
+    try await testStrongDMPostSSOFailureAndDiagnosticPrivacy()
+    await testStrongDMSSOContinuesToResourceAndVerifiesAPI()
+    await testStrongDMAlreadyDisconnectedAndResourceFailure()
+    try testUpdateCheckDistinguishesCurrentReleaseFromServiceFailure()
+    try await testLocalIdentityDoesNotFollowProviderSelection()
+}

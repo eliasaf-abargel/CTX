@@ -81,6 +81,16 @@ extension ProfileStore {
             }
         }
 
+        if oldStatus == .connected && newStatus == .needsLogin && !isManuallyDisconnected {
+            triggerExpirationWarning(
+                provider: profile.provider,
+                profileId: profile.id,
+                profileName: profile.name,
+                expired: true,
+                reason: verificationErrors[profile.id]
+            )
+        }
+
         updateStatus(profile, status: newStatus, operationID: operationID)
         if isManualAttempt, operationID == nil, !isConnected, !result.output.isEmpty {
             report(result.output, title: "Verification Failed", from: origin)
@@ -208,21 +218,42 @@ extension ProfileStore {
         guard let profile = profiles.first(where: { $0.provider == .kubernetes && $0.name == contextName }) else { return }
         verificationErrors[profile.id] = reason
         updateStatus(profile, status: .needsLogin)
+        triggerExpirationWarning(
+            provider: .kubernetes,
+            profileId: profile.id,
+            profileName: contextName,
+            expired: true,
+            reason: reason
+        )
     }
 
-    internal func triggerExpirationWarning(profileName: String, expired: Bool) {
+    internal func triggerExpirationWarning(
+        provider: CloudProvider = .aws,
+        profileId: String? = nil,
+        profileName: String,
+        expired: Bool,
+        reason: String? = nil
+    ) {
         if expired {
             expirationWarningMessage = "\(profileName): Session Expired"
         } else {
             expirationWarningMessage = "\(profileName): Session Expiring"
         }
+        let resolvedProfileID = profileId ?? profiles.first(where: { $0.name == profileName && $0.provider == provider })?.id
+        expirationWarningProfileID = resolvedProfileID
         showExpirationWarning = true
-        notifications.sendAWSExpiration(profileName: profileName, expired: expired)
+        notifications.sendSessionExpiration(
+            provider: provider,
+            profileId: resolvedProfileID ?? profileName,
+            profileName: profileName,
+            expired: expired,
+            reason: reason
+        )
 
         expirationWarningTask?.cancel()
         expirationWarningTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: 5_000_000_000)
+                try await Task.sleep(nanoseconds: 7_000_000_000)
             } catch {
                 return
             }

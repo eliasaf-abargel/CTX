@@ -13,6 +13,8 @@ public enum AuditEventType: String, Codable, Sendable {
     case yamlApplyFailed
     case yamlRolledBack
     case mcpApplyBlocked
+    case workloadLifecycleAction
+    case workloadLifecycleActionFailed
 }
 
 public struct AuditEvent: Codable, Equatable, Sendable {

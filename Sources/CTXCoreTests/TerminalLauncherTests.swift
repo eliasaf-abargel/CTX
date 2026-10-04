@@ -106,3 +106,12 @@ func testTerminalChoiceFallsBackWhenTheChosenAppIsGone() {
     assert(TerminalApplication.resolved(preferredBundlePath: chosen.bundlePath) == chosen)
 }
 
+
+func runTerminalLauncherTests() {
+    testTerminalScopeIsOneEnvironmentVariablePerProvider()
+    testTerminalScopeKeepsConfiguredPathOverrides()
+    testAzureIsRefusedRatherThanFaked()
+    testLaunchScriptQuotesValuesAndHandsOverToTheLoginShell()
+    testScriptNameIsReadableAndCannotEscapeItsDirectory()
+    testTerminalChoiceFallsBackWhenTheChosenAppIsGone()
+}

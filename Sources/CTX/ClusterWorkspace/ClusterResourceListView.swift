@@ -125,7 +125,7 @@ struct ClusterResourceListView: View {
         .onChange(of: filter) { _, _ in recomputeRows() }
         .onChange(of: focus) { _, _ in recomputeRows() }
         .onChange(of: list?.loadedAt) { _, _ in recomputeRows() }
-        .onChange(of: list?.rows.count) { _, _ in recomputeRows() }
+        .onChange(of: list?.rows) { _, _ in recomputeRows() }
         .animation(.easeInOut(duration: 0.12), value: isLoading)
     }
 

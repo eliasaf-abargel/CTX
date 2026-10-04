@@ -67,6 +67,7 @@ struct MCPSettingsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         toolRow(name: "ctx_list_contexts", desc: "List discovered cluster contexts and active state")
                         toolRow(name: "ctx_get_resources", desc: "Query live pods, nodes, workloads, services, and ingress")
+                        toolRow(name: "ctx_get_logs", desc: "Stream or retrieve recent pod and container logs for diagnosis")
                         toolRow(name: "ctx_validate_diagnostics", desc: "Run cross-resource validation rules and security audits")
                         toolRow(name: "ctx_dry_run_yaml", desc: "Validate YAML changes using server dry-run without apply")
                         toolRow(name: "ctx_apply_yaml", desc: "Apply validated manifests with rollback baselining", disabled: !mcpApplyEnabled)

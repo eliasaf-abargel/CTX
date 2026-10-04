@@ -1,6 +1,33 @@
 import Foundation
 import UserNotifications
 
+public extension Notification.Name {
+    static let ctxDeepLinkToResource = Notification.Name("ctxDeepLinkToResource")
+    static let ctxDeepLinkToProfile = Notification.Name("ctxDeepLinkToProfile")
+}
+
+public struct ResourceDeepLinkTarget: Sendable {
+    public let contextID: String
+    public let resourceKind: String
+    public let resourceName: String
+    public let namespace: String?
+    public let tab: String
+
+    public init(
+        contextID: String,
+        resourceKind: String,
+        resourceName: String,
+        namespace: String? = nil,
+        tab: String = "diagnostics"
+    ) {
+        self.contextID = contextID
+        self.resourceKind = resourceKind
+        self.resourceName = resourceName
+        self.namespace = namespace
+        self.tab = tab
+    }
+}
+
 public struct ClusterAnomalyNotificationPayload: Sendable {
     public let contextID: String
     public let contextName: String
@@ -43,7 +70,9 @@ public final class AppNotificationService: @unchecked Sendable {
     private static let cooldownInterval: TimeInterval = 600 // 10 minutes debounce per unique anomaly
 
     public static let categoryClusterAnomaly = "CLUSTER_ANOMALY"
+    public static let categoryCloudSession = "CLOUD_SESSION"
     public static let actionOpenWorkspace = "ACTION_OPEN_WORKSPACE"
+    public static let actionReauthenticate = "ACTION_REAUTHENTICATE"
 
     public init() {}
 
@@ -72,7 +101,20 @@ public final class AppNotificationService: @unchecked Sendable {
             options: [.customDismissAction]
         )
 
-        UNUserNotificationCenter.current().setNotificationCategories([anomalyCategory])
+        let reauthAction = UNNotificationAction(
+            identifier: Self.actionReauthenticate,
+            title: "Re-authenticate",
+            options: [.foreground]
+        )
+
+        let cloudCategory = UNNotificationCategory(
+            identifier: Self.categoryCloudSession,
+            actions: [reauthAction],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+
+        UNUserNotificationCenter.current().setNotificationCategories([anomalyCategory, cloudCategory])
     }
 
     /// Sends a debounced native macOS notification for a critical cluster issue or anomaly.
@@ -102,7 +144,7 @@ public final class AppNotificationService: @unchecked Sendable {
         alertLock.unlock()
 
         let content = UNMutableNotificationContent()
-        content.title = "\(anomaly.isCritical ? "🚨 Critical" : "⚠️ Warning"): [\(anomaly.contextName)]"
+        content.title = "\(anomaly.isCritical ? "Critical" : "Warning"): [\(anomaly.contextName)]"
         let nsPart = anomaly.namespace != nil ? " (\(anomaly.namespace!))" : ""
         content.subtitle = "\(anomaly.resourceKind) \(anomaly.resourceName)\(nsPart)"
         content.body = "\(anomaly.title): \(anomaly.message)"
@@ -114,7 +156,8 @@ public final class AppNotificationService: @unchecked Sendable {
             "context_id": anomaly.contextID,
             "resource_kind": anomaly.resourceKind,
             "resource_name": anomaly.resourceName,
-            "namespace": anomaly.namespace ?? ""
+            "namespace": anomaly.namespace ?? "",
+            "rule_id": anomaly.ruleId
         ]
 
         let request = UNNotificationRequest(
@@ -126,12 +169,72 @@ public final class AppNotificationService: @unchecked Sendable {
         UNUserNotificationCenter.current().add(request) { _ in }
     }
 
+    /// Sends a debounced native macOS notification for any cloud provider (AWS, GCP, Azure, Kubernetes) session expiry or disconnect.
+    public func sendSessionExpiration(
+        provider: CloudProvider,
+        profileId: String,
+        profileName: String,
+        expired: Bool,
+        reason: String? = nil
+    ) {
+        guard Self.canUseNotifications else { return }
+
+        // Check user preferences
+        let userDefaults = UserDefaults.standard
+        let isEnabled = userDefaults.object(forKey: "enableCloudSessionNotifications") as? Bool
+            ?? userDefaults.object(forKey: "enableAWSNotifications") as? Bool
+            ?? true
+        guard isEnabled else { return }
+
+        // Smart debounce
+        let debounceKey = "session:\(provider.rawValue):\(profileId):\(expired)"
+        alertLock.lock()
+        let now = Date()
+        if let lastTime = lastAlertTimestamps[debounceKey], now.timeIntervalSince(lastTime) < Self.cooldownInterval {
+            alertLock.unlock()
+            return
+        }
+        lastAlertTimestamps[debounceKey] = now
+        alertLock.unlock()
+
+        let providerLabel = provider.displayName
+        let content = UNMutableNotificationContent()
+        content.title = expired ? "\(providerLabel) Session Expired" : "\(providerLabel) Session Expiring"
+        if let reason, !reason.isEmpty {
+            content.body = "Profile '\(profileName)': \(reason). Click to re-authenticate."
+        } else {
+            content.body = expired
+                ? "Your \(providerLabel) profile '\(profileName)' session has expired. Click to re-authenticate."
+                : "Your \(providerLabel) profile '\(profileName)' session expires in 2m."
+        }
+        content.sound = UNNotificationSound.default
+        content.categoryIdentifier = Self.categoryCloudSession
+        content.userInfo = [
+            "type": "cloud_session",
+            "provider": provider.rawValue,
+            "profile_id": profileId,
+            "profile_name": profileName
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: "\(provider.rawValue).session.expiration.\(profileId)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { _ in }
+    }
+
+    /// Backwards compatibility helper for existing callers
+    public func sendAWSExpiration(profileName: String, expired: Bool) {
+        sendSessionExpiration(provider: .aws, profileId: profileName, profileName: profileName, expired: expired)
+    }
+
     /// Sends an instant test notification so the user can verify their system settings
     public func sendTestNotification(clusterName: String = "production-cluster") {
         guard Self.canUseNotifications else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "🔔 CTX Notifications Active"
+        content.title = "CTX Notifications Active"
         content.subtitle = "Connected: [\(clusterName)]"
         content.body = "Native macOS alerts for cluster health, Pod crashes, and diagnostic anomalies are configured."
         content.sound = UNNotificationSound.default
@@ -147,24 +250,6 @@ public final class AppNotificationService: @unchecked Sendable {
             trigger: nil
         )
 
-        UNUserNotificationCenter.current().add(request) { _ in }
-    }
-
-    public func sendAWSExpiration(profileName: String, expired: Bool) {
-        guard Self.canUseNotifications else { return }
-
-        let content = UNMutableNotificationContent()
-        content.title = expired ? "Session Expired" : "Session Expiring"
-        content.body = expired
-            ? "AWS profile \(profileName) session has expired."
-            : "AWS profile \(profileName) session expires in 2m."
-        content.sound = UNNotificationSound.default
-
-        let request = UNNotificationRequest(
-            identifier: "aws.session.expiration.\(profileName)",
-            content: content,
-            trigger: nil
-        )
         UNUserNotificationCenter.current().add(request) { _ in }
     }
 

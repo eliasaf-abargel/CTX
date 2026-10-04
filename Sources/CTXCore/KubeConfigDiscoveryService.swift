@@ -125,6 +125,9 @@ public final class KubeConfigDiscoveryService: Sendable {
         var currentUserName = ""
         var currentCredentialKind: KubernetesCredentialKind = .none
         var currentUserHasCredentials = false
+        var currentAWSProfile: String?
+        var nextArgIsAWSProfile = false
+        var inAWSProfileEnv = false
 
         func commitContext() {
             guard !currentContextName.isEmpty else { return }
@@ -155,11 +158,15 @@ public final class KubeConfigDiscoveryService: Sendable {
             guard !currentUserName.isEmpty else { return }
             users[currentUserName] = KubeCredentialMetadata(
                 kind: currentCredentialKind,
-                isPresent: currentUserHasCredentials
+                isPresent: currentUserHasCredentials,
+                awsProfile: currentAWSProfile
             )
             currentUserName = ""
             currentCredentialKind = .none
             currentUserHasCredentials = false
+            currentAWSProfile = nil
+            nextArgIsAWSProfile = false
+            inAWSProfileEnv = false
         }
 
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
@@ -178,7 +185,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                     section = ""
                     continue
                 }
-                if trimmed == "contexts:" {
+                if trimmed.hasPrefix("contexts:") {
                     commitContext()
                     commitCluster()
                     commitUser()
@@ -186,7 +193,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                     itemIndent = nil
                     continue
                 }
-                if trimmed == "clusters:" {
+                if trimmed.hasPrefix("clusters:") {
                     commitContext()
                     commitCluster()
                     commitUser()
@@ -194,7 +201,7 @@ public final class KubeConfigDiscoveryService: Sendable {
                     itemIndent = nil
                     continue
                 }
-                if trimmed == "users:" {
+                if trimmed.hasPrefix("users:") {
                     commitContext()
                     commitCluster()
                     commitUser()
@@ -207,31 +214,31 @@ public final class KubeConfigDiscoveryService: Sendable {
                     commitCluster()
                     commitUser()
                     section = ""
+                    itemIndent = nil
                     continue
                 }
             }
 
-            // List indentation is chosen by the writer. Nested exec args/env
-            // are not new context, cluster, or user entries.
-            if trimmed.hasPrefix("- "), !section.isEmpty {
-                if itemIndent == nil { itemIndent = indent }
-                if indent == itemIndent {
-                    switch section {
-                    case "contexts": commitContext()
-                    case "clusters": commitCluster()
-                    case "users": commitUser()
-                    default: break
-                    }
+            if let itemIndent, indent <= itemIndent && trimmed.hasPrefix("-") {
+                if section == "contexts" {
+                    commitContext()
+                } else if section == "clusters" {
+                    commitCluster()
+                } else if section == "users" {
+                    commitUser()
                 }
             }
-            let isItemName = indent == itemIndent && trimmed.hasPrefix("- name:")
-            let isSiblingName = itemIndent.map { indent == $0 + 2 } == true && trimmed.hasPrefix("name:")
+
+            if itemIndent == nil && trimmed.hasPrefix("-") {
+                itemIndent = indent
+            }
 
             switch section {
             case "contexts":
-                if isItemName {
+                if trimmed.hasPrefix("- name:") {
+                    commitContext()
                     currentContextName = value(after: "- name:", in: trimmed)
-                } else if isSiblingName {
+                } else if trimmed.hasPrefix("name:") {
                     currentContextName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("cluster:") {
                     currentCluster = value(after: "cluster:", in: trimmed)
@@ -241,22 +248,21 @@ public final class KubeConfigDiscoveryService: Sendable {
                     currentNamespace = value(after: "namespace:", in: trimmed)
                 }
             case "clusters":
-                if isItemName {
+                if trimmed.hasPrefix("- name:") {
+                    commitCluster()
                     currentClusterName = value(after: "- name:", in: trimmed)
-                } else if isSiblingName {
+                } else if trimmed.hasPrefix("name:") {
                     currentClusterName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("server:") {
                     currentServer = value(after: "server:", in: trimmed)
                 } else if trimmed.hasPrefix("insecure-skip-tls-verify:") {
-                    currentSkipTLSVerification = value(
-                        after: "insecure-skip-tls-verify:",
-                        in: trimmed
-                    ).lowercased() == "true"
+                    currentSkipTLSVerification = value(after: "insecure-skip-tls-verify:", in: trimmed).lowercased() == "true"
                 }
             case "users":
-                if isItemName {
+                if trimmed.hasPrefix("- name:") {
+                    commitUser()
                     currentUserName = value(after: "- name:", in: trimmed)
-                } else if isSiblingName {
+                } else if trimmed.hasPrefix("name:") {
                     currentUserName = value(after: "name:", in: trimmed)
                 } else if trimmed.hasPrefix("token:") {
                     currentCredentialKind = .bearerToken
@@ -277,6 +283,30 @@ public final class KubeConfigDiscoveryService: Sendable {
                 } else if trimmed.hasPrefix("auth-provider:") {
                     currentCredentialKind = .authProvider
                     currentUserHasCredentials = true
+                }
+
+                if nextArgIsAWSProfile {
+                    nextArgIsAWSProfile = false
+                    let candidate = trimmed.hasPrefix("- ") ? String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces) : trimmed
+                    if !candidate.hasPrefix("-") && !candidate.isEmpty {
+                        currentAWSProfile = value(after: "", in: candidate)
+                    }
+                } else if inAWSProfileEnv && trimmed.hasPrefix("value:") {
+                    let candidate = value(after: "value:", in: trimmed)
+                    if !candidate.isEmpty {
+                        currentAWSProfile = candidate
+                    }
+                    inAWSProfileEnv = false
+                } else if trimmed == "- --profile" || trimmed == "--profile" {
+                    nextArgIsAWSProfile = true
+                } else if trimmed.hasPrefix("- --profile=") || trimmed.hasPrefix("--profile=") {
+                    let prefix = trimmed.hasPrefix("- --profile=") ? "- --profile=" : "--profile="
+                    let candidate = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                    if !candidate.isEmpty {
+                        currentAWSProfile = value(after: "", in: candidate)
+                    }
+                } else if trimmed.contains("AWS_PROFILE") {
+                    inAWSProfileEnv = true
                 }
             default:
                 continue
@@ -309,7 +339,8 @@ public final class KubeConfigDiscoveryService: Sendable {
                 clusterMetadata: ClusterMetadata(id: record.cluster.isEmpty ? record.name : record.cluster, name: record.cluster, serverURL: server),
                 credentialKind: credential.kind,
                 hasCredentials: credential.isPresent,
-                skipTLSVerification: cluster.skipTLSVerification
+                skipTLSVerification: cluster.skipTLSVerification,
+                linkedAWSProfile: credential.awsProfile
             )
         }
 
@@ -352,6 +383,7 @@ private struct KubeContextRecord {
 private struct KubeCredentialMetadata {
     var kind: KubernetesCredentialKind = .none
     var isPresent = false
+    var awsProfile: String? = nil
 }
 
 private struct KubeClusterRecord {

@@ -128,3 +128,9 @@ func testAnExpiredSignInIsReportedForAProfileThatOnlyNamesASession() {
     assert(reported!.timeIntervalSinceNow < 0, "and it must be reported as already past")
 }
 
+
+func runSessionScopeTests() {
+    testAccessFromThisMachineIsTheCredentialClockNotTheTokenClock()
+    testProfilesOnOnePortalShareOneSignIn()
+    testAnExpiredSignInIsReportedForAProfileThatOnlyNamesASession()
+}

@@ -134,6 +134,33 @@ struct ClusterWorkspaceView: View {
         .task {
             await viewModel.refreshOverviewIfNeeded()
             viewModel.prefetchWorkspaceResources()
+
+            let ctxID = viewModel.context.id
+            let ctxName = viewModel.context.contextName
+            if let target = store.pendingClusterDeepLink[ctxID] ?? store.pendingClusterDeepLink[ctxName] {
+                store.pendingClusterDeepLink.removeValue(forKey: ctxID)
+                store.pendingClusterDeepLink.removeValue(forKey: ctxName)
+                let kind = KubernetesResourceKind(rawValue: target.resourceKind)
+                    ?? KubernetesResourceKind.allCases.first(where: { $0.title.lowercased() == target.resourceKind.lowercased() })
+                    ?? .pods
+                await viewModel.navigateToResource(
+                    kind: kind,
+                    name: target.resourceName,
+                    namespace: target.namespace,
+                    tab: .diagnostics
+                )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .ctxDeepLinkToResource)) { notif in
+            guard let ctxID = notif.userInfo?["context_id"] as? String,
+                  ctxID == viewModel.context.id || ctxID == viewModel.context.contextName else { return }
+            guard let kindStr = notif.userInfo?["resource_kind"] as? String,
+                  let kind = KubernetesResourceKind(rawValue: kindStr) ?? KubernetesResourceKind.allCases.first(where: { $0.title.lowercased() == kindStr.lowercased() }),
+                  let name = notif.userInfo?["resource_name"] as? String else { return }
+            let ns = notif.userInfo?["namespace"] as? String
+            Task {
+                await viewModel.navigateToResource(kind: kind, name: name, namespace: ns, tab: .diagnostics)
+            }
         }
         .onChange(of: viewModel.selectedSection) { _, newValue in
             if newValue == .overview {

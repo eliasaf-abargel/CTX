@@ -34,7 +34,7 @@ backend, account, or telemetry.
 ## Install
 
 ```bash
-brew install --cask eliasaf-abargel/tap/ctx
+brew install --cask opsbit-io/tap/ctx
 ```
 
 Later releases arrive with `brew upgrade --cask ctx`. If `CTX.app` is already in
@@ -44,11 +44,11 @@ Homebrew adopts it.
 Without Homebrew, the same release installs with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eliasaf-abargel/CTX/main/script/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/opsbit-io/ctx/main/script/install.sh | bash
 ```
 
 Or download `CTX.app.zip` from
-[Releases](https://github.com/eliasaf-abargel/CTX/releases), extract it, move
+[Releases](https://github.com/opsbit-io/ctx/releases), extract it, move
 `CTX.app` to `/Applications`, and clear the quarantine flag macOS puts on it:
 
 ```bash

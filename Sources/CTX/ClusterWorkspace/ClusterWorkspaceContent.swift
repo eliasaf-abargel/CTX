@@ -93,7 +93,7 @@ struct ClusterWorkspaceContent: View {
             refresh: { viewModel.loadSelectedSection(bypassCache: true) },
             selectRow: { viewModel.selectResource($0, in: viewModel.selectedSection) }
         )
-        .id(viewModel.selectedSection.id)
+        .id("\(viewModel.selectedSection.id)-\(viewModel.selectedNamespace.storageValue)")
     }
 
     private var sectionNotice: String? {
@@ -116,9 +116,9 @@ struct ClusterWorkspaceContent: View {
     }
 
     private var scopeTitle: String {
-        // GitOps is cluster-wide by nature: the controller's resources live in its
-        // own namespace while the workloads land elsewhere.
-        if viewModel.selectedSection == .gitops { return "Cluster scoped" }
+        if viewModel.selectedSection == .gitops {
+            return viewModel.selectedNamespace == .allNamespaces ? "Cluster scoped" : viewModel.selectedNamespace.scopeTitle
+        }
         if viewModel.selectedSection == .helm { return viewModel.selectedNamespace.scopeTitle }
         guard let kind = viewModel.selectedSection.resourceKind else { return "Workspace" }
         return kind.isClusterScoped ? "Cluster scoped" : viewModel.scope(for: kind).scopeTitle

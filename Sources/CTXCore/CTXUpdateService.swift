@@ -93,10 +93,10 @@ public final class CTXUpdateService: Sendable {
         try launchInstaller(sourcePath: tempDirURL.appendingPathComponent("CTX.app").path, targetPath: targetBundlePath, in: tempDirURL)
     }
 
-    public static let latestReleaseURL = URL(string: "https://api.github.com/repos/eliasaf-abargel/CTX/releases/latest")!
+    public static let latestReleaseURL = URL(string: "https://api.github.com/repos/opsbit-io/ctx/releases/latest")!
 
     public static func downloadURL(for tagName: String) -> URL? {
-        URL(string: "https://github.com/eliasaf-abargel/CTX/releases/download/\(tagName)/CTX.app.zip")
+        URL(string: "https://github.com/opsbit-io/ctx/releases/download/\(tagName)/CTX.app.zip")
     }
 
     public static func releaseTag(from data: Data) -> String? {

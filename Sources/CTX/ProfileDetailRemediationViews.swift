@@ -14,7 +14,20 @@ struct KubeAuthRemediationCardView: View {
     private var isAWSSSO: Bool {
         profile.name.lowercased().contains("aws")
             || profile.roleName.lowercased().contains("aws")
+            || profile.kubernetesLinkedProfile != nil
             || (errorMessage?.lowercased().contains("sso") ?? false)
+    }
+
+    private var awsProfileName: String {
+        if let linked = profile.kubernetesLinkedProfile, !linked.isEmpty {
+            return linked
+        }
+        return profile.name
+    }
+
+    private var isAWSRBACDenied: Bool {
+        guard let error = errorMessage?.lowercased() else { return false }
+        return error.contains("unauthorized") || error.contains("must be logged in")
     }
 
     private var isSDMAppInstalled: Bool {
@@ -38,7 +51,10 @@ struct KubeAuthRemediationCardView: View {
             return "This cluster is managed via Teleport. Run tsh login to renew your access certificate."
         }
         if isAWSSSO {
-            return "EKS cluster access requires an active AWS SSO session. Re-authenticate to access cluster resources."
+            if isAWSRBACDenied {
+                return "AWS IAM credentials were authenticated, but this EKS cluster's Access Entries or aws-auth ConfigMap did not recognize the identity. Verify cluster RBAC permissions or check if this cluster requires StrongDM access."
+            }
+            return "EKS cluster access requires an active AWS SSO session for '\(awsProfileName)'. Re-authenticate to access cluster resources."
         }
         return "Kubernetes credential plugin requires Single Sign-On (Okta / SAML) authentication to generate an access token."
     }
@@ -46,7 +62,7 @@ struct KubeAuthRemediationCardView: View {
     private var commandSnippet: String {
         if isSDM { return "sdm connect \(profile.name)" }
         if isTeleport { return "tsh kube login \(profile.name)" }
-        if isAWSSSO { return "aws sso login --profile \(profile.name)" }
+        if isAWSSSO { return "aws sso login --profile \(awsProfileName)" }
         return "kubectl get --raw=/version --context \(profile.name)"
     }
 
